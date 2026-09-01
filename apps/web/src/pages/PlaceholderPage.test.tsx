@@ -1,0 +1,2 @@
+import { render, screen } from '@testing-library/react'; import { Building2 } from 'lucide-react'; import { describe, expect, it } from 'vitest'; import { PlaceholderPage } from './PlaceholderPage';
+describe('PlaceholderPage', () => { it('explains deferred scope', () => { render(<PlaceholderPage title="Stations" description="Configure stations" icon={Building2} milestone="Milestone 1"/>); expect(screen.getByRole('heading', { name: 'Stations' })).toBeInTheDocument(); expect(screen.getByText('Milestone 1')).toBeInTheDocument(); }); });

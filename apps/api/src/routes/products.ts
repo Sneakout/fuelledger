@@ -1,0 +1,11 @@
+import { Router } from 'express';
+import { categoryInputSchema, productInputSchema, taxCategoryInputSchema } from '@fuelledger/shared';
+import { AppError } from '../lib/errors.js';
+import { authenticate } from '../middleware/authenticate.js';
+import { createCategory, createProduct, createTaxCategory, listCatalog, updateProduct } from '../modules/products/service.js';
+export const productsRouter = Router(); productsRouter.use(authenticate);
+productsRouter.get('/', async (req,res) => res.json(await listCatalog(req.user!.organization.id)));
+productsRouter.post('/', async (req,res) => { const input=productInputSchema.safeParse(req.body); if(!input.success) throw new AppError(400,'PRODUCT_INVALID','Please resolve the highlighted product details.',input.error.flatten()); res.status(201).json({ product: await createProduct(req.user!.organization.id,input.data) }); });
+productsRouter.put('/:id', async (req,res) => { const input=productInputSchema.safeParse(req.body); if(!input.success) throw new AppError(400,'PRODUCT_INVALID','Please resolve the highlighted product details.',input.error.flatten()); res.json({ product: await updateProduct(req.user!.organization.id,req.params.id!,input.data) }); });
+productsRouter.post('/categories', async (req,res) => { const input=categoryInputSchema.safeParse(req.body); if(!input.success) throw new AppError(400,'CATEGORY_INVALID','Enter a valid category.',input.error.flatten()); res.status(201).json({ category: await createCategory(req.user!.organization.id,input.data) }); });
+productsRouter.post('/tax-categories', async (req,res) => { const input=taxCategoryInputSchema.safeParse(req.body); if(!input.success) throw new AppError(400,'TAX_CATEGORY_INVALID','Enter a valid tax category.',input.error.flatten()); res.status(201).json({ taxCategory: await createTaxCategory(req.user!.organization.id,input.data) }); });

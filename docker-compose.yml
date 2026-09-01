@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: fuelledger-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fuelledger
+      POSTGRES_PASSWORD: fuelledger
+      POSTGRES_DB: fuelledger
+    ports:
+      - "5433:5432"
+    volumes:
+      - fuelledger_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fuelledger -d fuelledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  fuelledger_postgres_data:
