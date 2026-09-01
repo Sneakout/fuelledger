@@ -6,5 +6,6 @@ coverage
 playwright-report
 test-results
 *.log
+*.tsbuildinfo
 .DS_Store
 apps/web/.vite
