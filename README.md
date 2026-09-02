@@ -2,7 +2,7 @@
 
 **Every litre. Every product. Every rupee.**
 
-Milestone 0 foundation for a modern fuel-station business operating system. This repository intentionally contains infrastructure, authentication, navigation, and placeholder modules only.
+Modern business operating system for Indian petrol pumps: shifts, nozzle custody, sales, collections, wet stock, credit, purchases, expenses, accounting, reports and multi-pump owner control.
 
 ## Quick start
 
@@ -17,3 +17,7 @@ Development login: `owner@fuelledger.local` / `FuelLedger123!`
 ## Quality checks
 
 Run `pnpm check`. See [`docs/architecture.md`](docs/architecture.md) and [`docs/milestones.md`](docs/milestones.md) for scope and design notes.
+
+## Production
+
+Vercel deployment and production safety requirements are documented in [`docs/production-readiness.md`](docs/production-readiness.md). Do not use development seeds or a local database for real petrol-pump records.

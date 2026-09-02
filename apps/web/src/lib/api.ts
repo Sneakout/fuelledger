@@ -1,5 +1,5 @@
 import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, PurchaseInvoiceInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/api';
+const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 export class ApiRequestError extends Error { constructor(message: string, public readonly code: string, public readonly requestId?: string) { super(message); } }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { ...init, credentials: 'include', headers: { 'Content-Type': 'application/json', ...init?.headers } });

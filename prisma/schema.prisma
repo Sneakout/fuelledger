@@ -870,9 +870,35 @@ model User {
   expenses         Expense[]
   journals         Journal[]
   stationAccess    UserStationAccess[]
+  sessions         UserSession[]
 
   @@index([organizationId])
   @@map("users")
+}
+
+model UserSession {
+  id            String    @id
+  userId        String    @map("user_id")
+  expiresAt     DateTime  @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  lastSeenAt    DateTime  @default(now()) @map("last_seen_at")
+  userAgent     String?   @map("user_agent")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, expiresAt])
+  @@map("user_sessions")
+}
+
+model AuthThrottle {
+  key             String    @id
+  attempts        Int       @default(0)
+  windowStartedAt DateTime  @default(now()) @map("window_started_at")
+  blockedUntil    DateTime? @map("blocked_until")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([blockedUntil])
+  @@map("auth_throttles")
 }
 
 model UserStationAccess {
