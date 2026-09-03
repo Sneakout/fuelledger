@@ -254,6 +254,7 @@ model Product {
   organizationId    String          @map("organization_id")
   name              String
   code              String
+  hsnCode           String?         @map("hsn_code")
   category          ProductCategory
   customCategoryId  String?         @map("custom_category_id")
   unit              UnitOfMeasure
@@ -696,6 +697,7 @@ model PurchaseInvoiceLine {
   quantity Decimal @db.Decimal(14, 3)
   unitCost Decimal @db.Decimal(12, 2) @map("unit_cost")
   taxRate Decimal @default(0) @db.Decimal(5, 2) @map("tax_rate")
+  hsnCode String? @map("hsn_code")
   lineTotal Decimal @db.Decimal(14, 2) @map("line_total")
   invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
   product Product? @relation(fields: [productId], references: [id], onDelete: Restrict)

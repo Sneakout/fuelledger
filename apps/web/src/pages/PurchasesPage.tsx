@@ -42,6 +42,7 @@ type Line = {
   quantity: number;
   unitCost: number;
   taxRate: number;
+  hsnCode: string;
 };
 const emptyLine = (): Line => ({
   productId: "",
@@ -50,6 +51,7 @@ const emptyLine = (): Line => ({
   quantity: 1,
   unitCost: 0,
   taxRate: 0,
+  hsnCode: "",
 });
 const supplierCodeFromName = (name: string) => name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
 export function PurchasesPage() {
@@ -75,6 +77,7 @@ export function PurchasesPage() {
     invoiceDate: today(),
     dueDate: today(),
     taxAmount: 0,
+    invoiceTotal: "",
     notes: "",
     receiveNow: true,
   });
@@ -102,10 +105,8 @@ export function PurchasesPage() {
   useEffect(() => {
     void load().catch(() => setError("Unable to load purchases."));
   }, []);
-  const subtotal = useMemo(
-    () => lines.reduce((s, x) => s + x.quantity * x.unitCost, 0),
-    [lines],
-  );
+  const subtotal = useMemo(() => lines.reduce((sum, line) => { const product = data?.products.find(item => item.id === line.productId); return sum + line.quantity * (product?.category === 'FUEL' ? 1000 : 1) * line.unitCost; }, 0), [data, lines]);
+  const calculatedTax = useMemo(() => lines.reduce((sum, line) => { const product = data?.products.find(item => item.id === line.productId); const amount = line.quantity * (product?.category === 'FUEL' ? 1000 : 1) * line.unitCost; return sum + (product && product.category !== 'FUEL' ? amount * Number(product.taxCategory?.rate ?? 0) / 100 : 0); }, 0), [data, lines]);
   async function saveSupplier() {
     const name = supplier.name.trim();
     if (!name) { setError("Enter the supplier name before saving."); return; }
@@ -130,15 +131,18 @@ export function PurchasesPage() {
     try {
       await api.createPurchaseInvoice({
         ...invoice,
+        invoiceTotal: invoice.invoiceTotal ? Number(invoice.invoiceTotal) : undefined,
+        taxAmount: invoice.invoiceTotal ? Math.max(0, Number(invoice.invoiceTotal) - subtotal) : calculatedTax,
         invoiceDate: iso(invoice.invoiceDate),
         dueDate: iso(invoice.dueDate),
         notes: invoice.notes || undefined,
         attachment: await attachment(file),
-        lines: lines.map((x) => ({
-          ...x,
+        lines: lines.map((x) => { const product = data?.products.find(item => item.id === x.productId); return ({
+          ...x, quantity: product?.category === 'FUEL' ? x.quantity * 1000 : x.quantity,
+          taxRate: product?.category === 'FUEL' ? 0 : Number(product?.taxCategory?.rate ?? 0), hsnCode: x.hsnCode || product?.hsnCode || undefined,
           productId: x.productId || null,
           tankId: x.tankId || null,
-        })),
+        }); }),
       });
       setMode(null);
       setFile(null);
@@ -527,15 +531,16 @@ export function PurchasesPage() {
                     />
                   </label>
                   <label className="field">
-                    <span>Tax amount</span>
+                    <span>Invoice total (optional)</span>
                     <input
                       type="number"
                       min="0"
-                      value={invoice.taxAmount}
+                      placeholder={String(Math.round(subtotal + calculatedTax))}
+                      value={invoice.invoiceTotal}
                       onChange={(e) =>
                         setInvoice({
                           ...invoice,
-                          taxAmount: Number(e.target.value),
+                          invoiceTotal: e.target.value,
                         })
                       }
                     />
@@ -570,7 +575,7 @@ export function PurchasesPage() {
                                       productId: e.target.value,
                                       tankId: "",
                                       description: p?.name ?? "",
-                                      unitCost: Number(p?.purchasePrice ?? 0),
+                                      unitCost: Number(p?.purchasePrice ?? 0), hsnCode: p?.hsnCode ?? '',
                                     }
                                   : x,
                               ),
@@ -607,7 +612,8 @@ export function PurchasesPage() {
                           </select>
                         )}
                         <input
-                          aria-label={`Quantity ${index + 1}`}
+                          aria-label={`${product?.category === 'FUEL' ? 'Quantity in KL' : 'Quantity'} ${index + 1}`}
+                          title={product?.category === 'FUEL' ? 'Quantity (KL)' : 'Quantity'}
                           type="number"
                           min=".001"
                           value={line.quantity}
@@ -622,7 +628,8 @@ export function PurchasesPage() {
                           }
                         />
                         <input
-                          aria-label={`Unit cost ${index + 1}`}
+                          aria-label={`Rate per ${product?.category === 'FUEL' ? 'litre' : 'unit'} ${index + 1}`}
+                          title={product?.category === 'FUEL' ? 'Rate (₹ per litre)' : 'Rate'}
                           type="number"
                           min="0"
                           value={line.unitCost}
@@ -636,6 +643,7 @@ export function PurchasesPage() {
                             )
                           }
                         />
+                        <input aria-label={`HSN code ${index + 1}`} title="HSN code" placeholder="HSN code" value={line.hsnCode} onChange={e=>setLines(lines.map((x,i)=>i===index?{...x,hsnCode:e.target.value}:x))}/>
                         {lines.length > 1 && (
                           <button
                             onClick={() =>
@@ -674,7 +682,7 @@ export function PurchasesPage() {
                       onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                     />
                   </label>
-                  <strong>Total {money(subtotal + invoice.taxAmount)}</strong>
+                  <strong>Total {money(invoice.invoiceTotal ? Number(invoice.invoiceTotal) : subtotal + calculatedTax)}</strong>
                 </div>
                 <div className="editor-footer">
                   <button className="secondary" onClick={() => setMode(null)}>

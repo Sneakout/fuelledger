@@ -3,7 +3,7 @@ import { CirclePlus, Edit3, Package, Plus, Tags, X } from 'lucide-react';
 import { ApiRequestError, api, type Catalog, type CatalogProduct, type ProductForm } from '../lib/api';
 import '../products.css';
 const categories = ['FUEL','DEF','LUBRICANTS','FLUIDS','RETAIL','ACCESSORIES','SERVICES','EV_CHARGING','OTHER']; const units = ['LITRE','KILOGRAM','PIECE','BOX','UNIT','KWH'];
-const blank = (): ProductForm => ({ name:'',code:'',category:'RETAIL',customCategoryId:null,unit:'PIECE',purchasePrice:0,sellingPrice:0,taxCategoryId:null,inventoryTracked:true,tankLinked:false,meterLinked:false,isService:false,active:true });
+const blank = (): ProductForm => ({ name:'',code:'',hsnCode:'',category:'RETAIL',customCategoryId:null,unit:'PIECE',purchasePrice:0,sellingPrice:0,taxCategoryId:null,inventoryTracked:true,tankLinked:false,meterLinked:false,isService:false,active:true });
 const makeCode = (value: string) => value.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24);
 function Field({label,value,onChange,type='text'}:{label:string;value:string|number;onChange(value:string):void;type?:string}){return <label className="field"><span>{label}</span><input type={type} value={value} onChange={e=>onChange(e.target.value)}/></label>}
 export function ProductsPage(){const [catalog,setCatalog]=useState<Catalog|null>(null);const [form,setForm]=useState<ProductForm|null>(null);const [editing,setEditing]=useState<string|null>(null);const [error,setError]=useState('');const [fieldErrors,setFieldErrors]=useState<Partial<Record<'name'|'code'|'category'|'unit'|'purchasePrice'|'sellingPrice',string>>>({});const [categoryName,setCategoryName]=useState('');const [taxName,setTaxName]=useState('');const [taxRate,setTaxRate]=useState('0');
