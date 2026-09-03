@@ -8,7 +8,7 @@ import {
   Truck,
   X,
 } from "lucide-react";
-import { api, ApiRequestError, type PurchaseInvoice, type PurchasesBootstrap } from "../lib/api";
+import { api, ApiRequestError, type InvoicePricePreview, type PurchaseInvoice, type PurchasesBootstrap } from "../lib/api";
 const money = (v: number | string) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -88,6 +88,8 @@ export function PurchasesPage() {
   const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(
     null,
   );
+  const [pricePreview, setPricePreview] =
+    useState<InvoicePricePreview | null>(null);
   const [payment, setPayment] = useState({
     stationId: "",
     invoiceId: "",
@@ -163,9 +165,19 @@ export function PurchasesPage() {
           invoiceDate: iso(invoice.invoiceDate),
           dueDate: iso(invoice.dueDate),
           notes: invoice.notes || undefined,
+          refreshPrices: Boolean(pricePreview),
+          markPaid: invoice.paidNow,
+          paymentMethod: invoice.paidNow
+            ? invoice.paymentMethod
+            : undefined,
+          paymentReferenceNo:
+            invoice.paidNow && invoice.paymentReferenceNo
+              ? invoice.paymentReferenceNo
+              : undefined,
         });
         setMode(null);
         setEditingInvoice(null);
+        setPricePreview(null);
         await load();
         return;
       }
@@ -252,6 +264,20 @@ export function PurchasesPage() {
   const open = data.invoices.filter(
     (x) => x.outstanding > 0 && x.status !== "VOID",
   );
+  const editingPaid =
+    editingInvoice?.payments.reduce(
+      (sum, row) => sum + Number(row.amount),
+      0,
+    ) ?? 0;
+  const editingOutstanding = Math.max(
+    0,
+    (pricePreview?.totalAmount ??
+      Number(editingInvoice?.totalAmount ?? 0)) - editingPaid,
+  );
+  const displayedTax =
+    mode === "edit-invoice"
+      ? (pricePreview?.taxAmount ?? Number(editingInvoice?.taxAmount ?? 0))
+      : calculatedTax;
   return (
     <main className="page purchases-page">
       <div className="page-heading">
@@ -386,6 +412,7 @@ export function PurchasesPage() {
                   className="text-button"
                   onClick={() => {
                     setEditingInvoice(item);
+                    setPricePreview(null);
                     setInvoice((current) => ({
                       ...current,
                       stationId: item.station.id,
@@ -555,9 +582,9 @@ export function PurchasesPage() {
                 </h2>
                 {mode === "edit-invoice" && (
                   <p className="invoice-edit-note">
-                    Amounts and received stock stay locked after saving to protect
-                    inventory and accounting. You can update the invoice number,
-                    dates, and notes.
+                    Quantities stay fixed to protect received stock. Use Refresh
+                    prices to fetch the latest purchase prices from Products,
+                    review the new total, and then save.
                   </p>
                 )}
                 <div className="form-grid">
@@ -655,8 +682,60 @@ export function PurchasesPage() {
                 </div>
                 {mode === "edit-invoice" ? (
                   <div className="invoice-locked-summary">
-                    <span>Saved invoice total</span>
-                    <strong>{money(editingInvoice?.totalAmount ?? 0)}</strong>
+                    <div>
+                      <span>
+                        {pricePreview
+                          ? "Refreshed invoice total"
+                          : "Saved invoice total"}
+                      </span>
+                      <strong>
+                        {money(
+                          pricePreview?.totalAmount ??
+                            editingInvoice?.totalAmount ??
+                            0,
+                        )}
+                      </strong>
+                    </div>
+                    <button
+                      className="secondary small"
+                      type="button"
+                      disabled={saving}
+                      onClick={() => {
+                        if (!editingInvoice) return;
+                        setSaving(true);
+                        setError("");
+                        void api
+                          .purchaseInvoicePricePreview(editingInvoice.id)
+                          .then(setPricePreview)
+                          .catch((e) =>
+                            setError(
+                              e instanceof ApiRequestError
+                                ? e.message
+                                : "Unable to refresh product prices.",
+                            ),
+                          )
+                          .finally(() => setSaving(false));
+                      }}
+                    >
+                      Refresh prices
+                    </button>
+                    {pricePreview && (
+                      <div className="invoice-price-preview">
+                        {pricePreview.lines.map((line) => (
+                          <small key={line.id}>
+                            {line.productName}: {line.quantity.toLocaleString("en-IN")} ×{" "}
+                            {money(line.previousUnitCost)}
+                            {line.previousUnitCost !== line.unitCost && (
+                              <> → {money(line.unitCost)}</>
+                            )}
+                          </small>
+                        ))}
+                        <b>
+                          Latest prices loaded. They will be applied only when
+                          you save changes.
+                        </b>
+                      </div>
+                    )}
                   </div>
                 ) : (
                 <div className="invoice-lines">
@@ -913,18 +992,75 @@ export function PurchasesPage() {
                       </label>
                     </>
                   )}
+                  {mode === "edit-invoice" && editingOutstanding > 0 && (
+                    <>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={invoice.paidNow}
+                          onChange={(e) =>
+                            setInvoice({
+                              ...invoice,
+                              paidNow: e.target.checked,
+                            })
+                          }
+                        />{" "}
+                        Mark remaining {money(editingOutstanding)} as fully paid
+                      </label>
+                      {invoice.paidNow && (
+                        <>
+                          <label className="field">
+                            <span>Paid by</span>
+                            <select
+                              value={invoice.paymentMethod}
+                              onChange={(e) =>
+                                setInvoice({
+                                  ...invoice,
+                                  paymentMethod: e.target
+                                    .value as typeof invoice.paymentMethod,
+                                })
+                              }
+                            >
+                              {["CASH", "UPI", "CARD", "OTHER"].map((method) => (
+                                <option key={method}>{method}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="field">
+                            <span>Payment reference (optional)</span>
+                            <input
+                              value={invoice.paymentReferenceNo}
+                              onChange={(e) =>
+                                setInvoice({
+                                  ...invoice,
+                                  paymentReferenceNo: e.target.value,
+                                })
+                              }
+                            />
+                          </label>
+                        </>
+                      )}
+                    </>
+                  )}
                   <div className="invoice-total-summary">
                     <span>
-                      Lines {money(mode === "edit-invoice" ? Number(editingInvoice?.subtotal ?? 0) : subtotal)}
+                      Lines{" "}
+                      {money(
+                        mode === "edit-invoice"
+                          ? (pricePreview?.subtotal ??
+                              Number(editingInvoice?.subtotal ?? 0))
+                          : subtotal,
+                      )}
                     </span>
-                    {calculatedTax > 0 && (
-                      <span>Tax {money(calculatedTax)}</span>
+                    {displayedTax > 0 && (
+                      <span>Tax {money(displayedTax)}</span>
                     )}
                     <strong>
                       Total{" "}
                       {money(
                         mode === "edit-invoice"
-                          ? Number(editingInvoice?.totalAmount ?? 0)
+                          ? (pricePreview?.totalAmount ??
+                            Number(editingInvoice?.totalAmount ?? 0))
                           : invoice.invoiceTotal
                           ? Number(invoice.invoiceTotal)
                           : subtotal + calculatedTax,
