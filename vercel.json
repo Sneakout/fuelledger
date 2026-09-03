@@ -1,11 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "corepack pnpm -w run db:generate && corepack pnpm --filter @fuelledger/web build",
+  "buildCommand": "corepack pnpm -w run db:generate && corepack pnpm --filter @fuelledger/api build && corepack pnpm --filter @fuelledger/web build",
   "outputDirectory": "apps/web/dist",
   "installCommand": "corepack pnpm install --frozen-lockfile && corepack pnpm -w run db:generate",
   "framework": "vite",
   "regions": ["sin1"],
-  "functions": { "api/[...path].ts": { "maxDuration": 30 } },
+  "functions": { "api/[...path].mjs": { "maxDuration": 30 } },
   "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
   "headers": [{ "source": "/(.*)", "headers": [
     { "key": "X-Content-Type-Options", "value": "nosniff" },
