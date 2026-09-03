@@ -18,9 +18,16 @@ export async function createStation(organizationId: string, setup: StationSetup)
     const productRecords = await Promise.all(setup.products.map(async product => {
       const existingProduct = await tx.product.findUnique({ where: { organizationId_code: { organizationId, code: product.code } } });
       if (!existingProduct) return tx.product.create({ data: { organizationId, ...product } });
-      const compatible = existingProduct.category === product.category && existingProduct.unit === product.unit && existingProduct.inventoryTracked === product.inventoryTracked && existingProduct.tankLinked === product.tankLinked && existingProduct.meterLinked === product.meterLinked && existingProduct.isService === product.isService;
-      if (!compatible) throw new AppError(409, 'PRODUCT_CONFIGURATION_CONFLICT', `${product.code} already exists in your catalog with different tracking settings. Update that product first, then set up this petrol pump.`);
-      return existingProduct;
+      const sameKind = existingProduct.category === product.category && existingProduct.unit === product.unit && existingProduct.isService === product.isService;
+      if (!sameKind) throw new AppError(409, 'PRODUCT_CONFIGURATION_CONFLICT', `${product.code} already exists in your catalog as a different type of product. Use a different product code for this petrol pump.`);
+      // A fuel product may already exist in the catalog before its first tank or nozzle is added.
+      // Enable the required tracking flags instead of making the owner repair catalog setup manually.
+      return tx.product.update({ where: { id: existingProduct.id }, data: {
+        inventoryTracked: existingProduct.inventoryTracked || product.inventoryTracked,
+        tankLinked: existingProduct.tankLinked || product.tankLinked,
+        meterLinked: existingProduct.meterLinked || product.meterLinked,
+        active: existingProduct.active || product.active,
+      } });
     }));
     const products = new Map(productRecords.map(product => [product.code, product.id]));
     const configuration = await tx.stationConfiguration.create({ data: { stationId: station.id, version: 1 } });
