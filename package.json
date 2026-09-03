@@ -14,7 +14,7 @@
     "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build",
     "db:generate": "prisma generate --schema=prisma/schema.prisma",
     "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
+    "db:deploy": "node scripts/deploy-migrations.mjs",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:demo": "tsx prisma/demo-seed.ts",
     "db:studio": "prisma studio"

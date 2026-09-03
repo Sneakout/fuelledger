@@ -18,7 +18,8 @@ Set the following **Production** environment variables in the Vercel dashboard. 
 | Variable | Required value |
 | --- | --- |
 | `NODE_ENV` | `production` |
-| `DATABASE_URL` | Pooled, TLS-enabled PostgreSQL connection string |
+| `DATABASE_URL` | Pooled, TLS-enabled PostgreSQL connection string used by the application |
+| `DIRECT_URL` | Direct, unpooled PostgreSQL connection string used by database migrations |
 | `JWT_SECRET` | A new random secret of at least 48 characters |
 | `APP_URL` | `https://your-production-domain` |
 | `CORS_ORIGIN` | Same value as `APP_URL` |
