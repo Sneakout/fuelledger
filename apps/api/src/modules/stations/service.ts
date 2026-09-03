@@ -9,16 +9,19 @@ export async function createStation(organizationId: string, setup: StationSetup)
   const pending = await prisma.station.findFirst({ where: { organizationId, configurations: { none: {} } }, orderBy: { createdAt: 'asc' } });
   const exists = await prisma.station.findUnique({ where: { organizationId_code: { organizationId, code: setup.profile.code } } });
   if (exists && exists.id !== pending?.id) throw new AppError(409, 'STATION_CODE_EXISTS', 'A petrol pump already uses this code.');
-  const productCodes = setup.products.map(product => product.code);
-  const existingProducts = await prisma.product.findMany({ where: { organizationId, code: { in: productCodes } } });
-  if (existingProducts.length) throw new AppError(409, 'PRODUCT_CODE_EXISTS', `Product code ${existingProducts[0]?.code} already exists in your organization.`);
   return prisma.$transaction(async tx => {
     const { phone, gstin, openingTime, closingTime, ...profile } = setup.profile;
     const stationData = { ...profile, phone: phone || null, gstin: gstin || null, openingTime: openingTime || null, closingTime: closingTime || null };
     const station = pending
       ? await tx.station.update({ where: { id: pending.id }, data: stationData })
       : await tx.station.create({ data: { organizationId, ...stationData } });
-    const productRecords = await Promise.all(setup.products.map(product => tx.product.create({ data: { organizationId, ...product } })));
+    const productRecords = await Promise.all(setup.products.map(async product => {
+      const existingProduct = await tx.product.findUnique({ where: { organizationId_code: { organizationId, code: product.code } } });
+      if (!existingProduct) return tx.product.create({ data: { organizationId, ...product } });
+      const compatible = existingProduct.category === product.category && existingProduct.unit === product.unit && existingProduct.inventoryTracked === product.inventoryTracked && existingProduct.tankLinked === product.tankLinked && existingProduct.meterLinked === product.meterLinked && existingProduct.isService === product.isService;
+      if (!compatible) throw new AppError(409, 'PRODUCT_CONFIGURATION_CONFLICT', `${product.code} already exists in your catalog with different tracking settings. Update that product first, then set up this petrol pump.`);
+      return existingProduct;
+    }));
     const products = new Map(productRecords.map(product => [product.code, product.id]));
     const configuration = await tx.stationConfiguration.create({ data: { stationId: station.id, version: 1 } });
     const tankRecords = await Promise.all(setup.tanks.map(tank => tx.tank.create({ data: { configurationId: configuration.id, productId: products.get(tank.productCode)!, code: tank.code, nominalCapacity: new Prisma.Decimal(tank.nominalCapacity), workingCapacity: new Prisma.Decimal(tank.workingCapacity), openingStock: new Prisma.Decimal(tank.openingStock), tankType: tank.tankType, dipMethod: tank.dipMethod, status: tank.status } })));
