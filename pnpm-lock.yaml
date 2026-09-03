@@ -9,13 +9,13 @@ importers:
   .:
     devDependencies:
       '@prisma/client':
-        specifier: ^6.19.3
+        specifier: 6.19.3
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       '@types/node':
         specifier: ^22.15.0
         version: 22.20.1
       prisma:
-        specifier: ^6.16.2
+        specifier: 6.19.3
         version: 6.19.3(typescript@5.9.3)
       tsx:
         specifier: ^4.20.5
@@ -30,7 +30,7 @@ importers:
         specifier: workspace:*
         version: link:../../packages/shared
       '@prisma/client':
-        specifier: ^6.16.2
+        specifier: 6.19.3
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
       bcryptjs:
         specifier: ^3.0.2

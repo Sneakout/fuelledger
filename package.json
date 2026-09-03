@@ -11,7 +11,7 @@
     "lint": "corepack pnpm -r lint",
     "test": "corepack pnpm -r test",
     "check": "corepack pnpm lint && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build",
-    "db:generate": "prisma generate",
+    "db:generate": "prisma generate --schema=prisma/schema.prisma",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
@@ -19,9 +19,9 @@
     "db:studio": "prisma studio"
   },
   "devDependencies": {
-    "@prisma/client": "^6.19.3",
+    "@prisma/client": "6.19.3",
     "@types/node": "^22.15.0",
-    "prisma": "^6.16.2",
+    "prisma": "6.19.3",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
   }
