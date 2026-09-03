@@ -1,4 +1,4 @@
-import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, OwnerNotificationSettingsInput, PurchaseInvoiceInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationProfileInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
+import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput, DensityReadingInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, OwnerNotificationSettingsInput, PurchaseInvoiceInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationProfileInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
 const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 export class ApiRequestError extends Error { constructor(message: string, public readonly code: string, public readonly requestId?: string, public readonly details?: unknown) { super(message); } }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -43,6 +43,7 @@ export const api = {
   createReceipt: (input: ReceiptForm) => request<{ receipt: unknown }>('/inventory/receipts', { method: 'POST', body: JSON.stringify(input) }),
   createAdjustment: (input: AdjustmentForm) => request<{ entry: unknown }>('/inventory/adjustments', { method: 'POST', body: JSON.stringify(input) }),
   recordTankReading: (input: TankReadingForm) => request<{ reading: unknown }>('/inventory/tank-readings', { method: 'POST', body: JSON.stringify(input) }),
+  recordDensity: (input: DensityReadingInput) => request<{ reading: unknown }>('/inventory/density-readings', { method: 'POST', body: JSON.stringify(input) }),
   reconciliationBootstrap: () => request<ReconciliationBootstrap>('/reconciliation/bootstrap'),
   reconcileShift: (id:string,input:ReconciliationForm) => request<{shift:ReconciliationShift}>(`/reconciliation/shifts/${id}`, {method:'POST',body:JSON.stringify(input)}),
   customersBootstrap: () => request<CustomersBootstrap>('/customers/bootstrap'),
@@ -106,8 +107,8 @@ export type SaleCustomer = {id:string;name:string;code:string;type:string;credit
 export type SalesBootstrap = { openShifts: OpenSaleShift[]; products: SalesProduct[]; employees:Array<{id:string;name:string;role:string}>; sales:Sale[];customers:SaleCustomer[] };
 export type SaleForm = SaleInput;
 export type InventoryProduct = { id:string;name:string;code:string;unit:string;tankLinked:boolean };
-export type InventoryStation = { id:string;name:string;code:string; configurations:Array<{tanks:Array<{id:string;code:string;product:{id:string;name:string;code:string;unit:string}}>}> };
-export type ReconciliationLine = { station:{id:string;name:string;code:string}|undefined;tank:{id:string;code:string}|null;product:{id:string;name:string;code:string;unit:string};opening:number;receipts:number;sales:number;adjustments:number;bookStock:number;physicalStock:number|null;variance:number|null;dipReading:number|null;readAt:string|null };
+export type InventoryStation = { id:string;name:string;code:string; configurations:Array<{tanks:Array<{id:string;code:string;product:{id:string;name:string;code:string;unit:string;category:string}}>}> };
+export type ReconciliationLine = { station:{id:string;name:string;code:string}|undefined;tank:{id:string;code:string}|null;product:{id:string;name:string;code:string;unit:string;category?:string};opening:number;receipts:number;sales:number;adjustments:number;bookStock:number;physicalStock:number|null;variance:number|null;dipReading:number|null;readAt:string|null;density:number|null;densityRecordedAt:string|null };
 export type InventoryLedgerEntry = {id:string;type:string;quantityDelta:string;note:string|null;occurredAt:string;product:{name:string;code:string;unit:string};station:{name:string;code:string};tank:{code:string}|null};
 export type PurchaseReceipt = {id:string;supplierName:string;referenceNo:string|null;receivedAt:string;station:{name:string};lines:Array<{quantity:string;unitCost:string;product:{name:string;code:string;unit:string};tank:{code:string}|null}>};
 export type InventoryBootstrap = {stations:InventoryStation[];products:InventoryProduct[];tanks:ReconciliationLine[];untanked:ReconciliationLine[];ledger:InventoryLedgerEntry[];receipts:PurchaseReceipt[]};

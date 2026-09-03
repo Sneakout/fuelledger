@@ -96,6 +96,13 @@ export const categoryInputSchema = z.object({ name: z.string().trim().min(2), co
 export const taxCategoryInputSchema = z.object({ name: z.string().trim().min(2), rate: z.coerce.number().min(0).max(100) });
 export type ProductInput = z.infer<typeof productInputSchema>;
 
+export const densityReadingInputSchema = z.object({
+  stationId: z.string().cuid(),
+  tankId: z.string().cuid(),
+  density: z.coerce.number().min(600, 'Enter a realistic density.').max(1200, 'Enter a realistic density.'),
+});
+export type DensityReadingInput = z.infer<typeof densityReadingInputSchema>;
+
 const reading = z.object({ id: z.string().cuid(), value: z.coerce.number().min(0) });
 export const openShiftSchema = z.object({ stationId: z.string().cuid(), managerId: z.string().cuid(), userIds: z.array(z.string().cuid()).min(1), nozzleAssignments:z.array(z.object({nozzleId:z.string().cuid(),userId:z.string().cuid()})), openingCash: z.coerce.number().min(0), tankReadings: z.array(reading), nozzleReadings: z.array(reading), notes: z.string().max(500).optional() });
 export const closeShiftSchema = z.object({ closingCash: z.coerce.number().min(0), tankReadings: z.array(reading), nozzleReadings: z.array(reading), notes: z.string().max(500).optional() });

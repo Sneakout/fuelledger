@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ownerNotificationSettingsSchema, stationProfileSchema, stationSetupSchema, type StationSetup } from './index.js';
-import { closeShiftSchema, customerInputSchema, customerReceiptInputSchema, expenseCategoryInputSchema, expenseInputSchema, inventoryAdjustmentSchema, openShiftSchema, paymentMethods, productInputSchema, purchaseInvoiceInputSchema, receiptInputSchema, reconciliationInputSchema, saleInputSchema, supplierInputSchema, supplierPaymentInputSchema, tankReadingInputSchema, vehicleInputSchema } from './index.js';
+import { closeShiftSchema, customerInputSchema, customerReceiptInputSchema, densityReadingInputSchema, expenseCategoryInputSchema, expenseInputSchema, inventoryAdjustmentSchema, openShiftSchema, paymentMethods, productInputSchema, purchaseInvoiceInputSchema, receiptInputSchema, reconciliationInputSchema, saleInputSchema, supplierInputSchema, supplierPaymentInputSchema, tankReadingInputSchema, vehicleInputSchema } from './index.js';
 
 const fuel = (code: string) => ({ name: code, code, category: 'FUEL' as const, unit: 'LITRE' as const, inventoryTracked: true, tankLinked: true, meterLinked: true, isService: false, active: true });
 function setup(tanks: Array<[string, string]>, extras: StationSetup['products'] = []): StationSetup { const products = [fuel('MS'), fuel('HSD'), ...extras]; return { profile: { name: 'Test Station', code: 'TEST', addressLine1: '1 Main Road', city: 'Kochi', state: 'Kerala', postalCode: '682001' }, products, tanks: tanks.map(([code, productCode]) => ({ code, productCode, nominalCapacity: 20000, workingCapacity: 19000, openingStock: 1000, tankType: 'UNDERGROUND', dipMethod: 'MANUAL', status: 'ACTIVE' })), dispensers: [{ code: 'D-1', location: 'Front', status: 'ACTIVE', nozzles: tanks.map(([code, productCode], index) => ({ code: `N-${index + 1}`, productCode, openingMeter: 0, status: 'ACTIVE', tankCodes: [code] })) }] }; }
@@ -57,6 +57,8 @@ describe('inventory validation', () => {
   it('accepts a received fuel or retail stock line', () => expect(receiptInputSchema.safeParse({ stationId:id, supplierName:'Demo Oil Company', lines:[{ productId:id, tankId:id, quantity:1200, unitCost:96 }, { productId:id, quantity:12, unitCost:12 }] }).success).toBe(true));
   it('requires received quantities and meaningful adjustments', () => { expect(receiptInputSchema.safeParse({ stationId:id, supplierName:'Demo Oil', lines:[{productId:id,quantity:0,unitCost:0}] }).success).toBe(false); expect(inventoryAdjustmentSchema.safeParse({stationId:id,productId:id,quantityDelta:0,notes:'Count'}).success).toBe(false); });
   it('captures a physical tank reading independently of book stock', () => expect(tankReadingInputSchema.safeParse({stationId:id,tankId:id,physicalStock:1194.5,dipReading:234.2}).success).toBe(true));
+  it('accepts a realistic daily fuel density', () => expect(densityReadingInputSchema.safeParse({stationId:id,tankId:id,density:742.5}).success).toBe(true));
+  it('rejects an implausible density reading', () => expect(densityReadingInputSchema.safeParse({stationId:id,tankId:id,density:200}).success).toBe(false));
 });
 
 describe('shift reconciliation validation', () => {
