@@ -1,11 +1,16 @@
 import {
+  Activity,
+  ArrowRight,
   BadgeCheck,
+  BrainCircuit,
   CalendarDays,
   Check,
   DatabaseBackup,
   Headphones,
   LockKeyhole,
+  MessageSquareText,
   Phone,
+  ScanSearch,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
@@ -91,8 +96,8 @@ export function SubscriptionPage() {
               <small>No recurring subscription</small>
               <b>Pay once. Use for life.</b>
               <p>
-                The setup fee includes assisted onboarding and your first
-                month of full access.
+                The setup fee includes assisted onboarding and your first month
+                of full access.
               </p>
             </span>
           </div>
@@ -178,6 +183,89 @@ export function SubscriptionPage() {
             <b>Assisted onboarding</b>
             <p>Included in the one-time setup fee.</p>
           </div>
+        </article>
+      </section>
+      <section className="intelligence-offer">
+        <div className="intelligence-copy">
+          <span className="intelligence-kicker">
+            <i /> A recurring AI service
+          </span>
+          <h2>
+            FuelLedger
+            <span> Intelligence.</span>
+          </h2>
+          <p>
+            Turn each day’s operations into a clear owner briefing. FuelLedger
+            Intelligence finds unusual movement, highlights what needs your
+            attention and helps you ask better questions before a small issue
+            becomes an expensive one.
+          </p>
+          <div className="intelligence-benefits">
+            <article>
+              <span>01</span>
+              <Activity />
+              <b>Daily business-health briefings</b>
+            </article>
+            <article>
+              <span>02</span>
+              <ScanSearch />
+              <b>Sales, stock and collection anomaly alerts</b>
+            </article>
+            <article>
+              <span>03</span>
+              <MessageSquareText />
+              <b>25 AI owner questions every month</b>
+            </article>
+          </div>
+          <small>
+            Requires FuelLedger Complete. GST applies where applicable.
+          </small>
+        </div>
+        <article className="intelligence-card">
+          <header>
+            <span className="intelligence-mark">
+              <BrainCircuit />
+            </span>
+            <div>
+              <small>FuelLedger Intelligence</small>
+              <b>AI owner briefings and actions</b>
+            </div>
+            <em>Early access</em>
+          </header>
+          <div className="intelligence-prices">
+            <div>
+              <small>Monthly</small>
+              <b>{money(1199)}</b>
+              <span>per petrol pump / month</span>
+            </div>
+            <div className="best-value">
+              <small>Best value · Annual</small>
+              <b>{money(11999)}</b>
+              <span>per petrol pump / year</span>
+              <em>Two months effectively free</em>
+            </div>
+          </div>
+          <div className="founding-offer">
+            <span>Founding petrol pump offer</span>
+            <b>{money(7999)} for the first year</b>
+            <p>
+              Available to the first 50 petrol pumps. Renews at {money(11999)}
+              /year.
+            </p>
+          </div>
+          <a
+            className="intelligence-action"
+            href="https://wa.me/918977506454?text=Hi%2C%20I%27m%20interested%20in%20FuelLedger%20Intelligence%20early%20access."
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span>Join Intelligence early access</span>
+            <ArrowRight />
+          </a>
+          <p className="intelligence-note">
+            Intelligence is an optional recurring service and is not included in
+            the FuelLedger Complete lifetime fee.
+          </p>
         </article>
       </section>
     </main>
