@@ -38,7 +38,7 @@ function startupFailure(error) {
 export default async function handler(request, response) {
   try {
     if (!application) {
-      const { createApp } = await import("../apps/api/dist/app.js");
+      const { createApp } = await import("../apps/api/dist/vercel-app.js");
       application = createApp();
     }
     return application(request, response);
