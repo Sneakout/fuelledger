@@ -4,7 +4,7 @@ FuelLedger is configured for a single Vercel project: the React app is served at
 
 ## Required production services
 
-- Vercel **Pro** project in the Singapore region (`sin1`), not the Hobby plan.
+- Vercel project in the Singapore region (`sin1`). The Hobby plan is suitable for the initial pilot; Vercel Pro is required before enabling frequent scheduled WhatsApp alerts.
 - Managed PostgreSQL located near Singapore, with TLS, connection pooling, daily backups and point-in-time recovery. Neon, Supabase, or AWS Aurora are suitable choices.
 - Private object storage for production attachments before accepting significant document volumes. Database-backed attachments remain capped at 500 KB and are suitable only for the initial pilot.
 - Error alerting and uptime monitoring configured against `/api/health`.
@@ -54,7 +54,7 @@ FuelLedger can alert an opted-in owner about missing morning density readings, l
 3. After taking a verified production database backup, run `corepack pnpm db:deploy` once from a protected release terminal using the production `DATABASE_URL`.
 4. Sign in as the owner, open **WhatsApp alerts**, enter the owner's number with country code, confirm consent, choose alert types and use **Send test alert**.
 
-`vercel.json` schedules an hourly production-only check. Alert rules use India time (`Asia/Kolkata`): density is checked at 9:00 AM, open shifts at 11:00 PM, and the daily summary at the hour selected by the owner. Vercel scheduled functions are protected with `CRON_SECRET`; never expose this value in the web app.
+The initial Hobby-compatible deployment supports saving alert preferences and sending a manual test alert. Before enabling automated alerts, upgrade to Vercel Pro and restore the hourly scheduled check. Alert rules use India time (`Asia/Kolkata`): density is checked at 9:00 AM, open shifts at 11:00 PM, and the daily summary at the hour selected by the owner. Scheduled functions are protected with `CRON_SECRET`; never expose this value in the web app.
 
 ## Smoke checklist
 
