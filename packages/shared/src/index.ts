@@ -88,6 +88,11 @@ export const stationSetupSchema = z.object({
   for (const [dIndex, dispenser] of setup.dispensers.entries()) for (const [nIndex, nozzle] of dispenser.nozzles.entries()) { const product = products.get(nozzle.productCode); if (!product) context.addIssue({ code: 'custom', message: `Nozzle ${nozzle.code} refers to an unknown product.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'productCode'] }); else if (!product.meterLinked) context.addIssue({ code: 'custom', message: `${product.code} must be meter-linked before assigning it to a nozzle.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'productCode'] }); if (duplicate(nozzle.tankCodes)) context.addIssue({ code: 'custom', message: 'A nozzle cannot map to the same tank twice.', path: ['dispensers', dIndex, 'nozzles', nIndex, 'tankCodes'] }); for (const tankCode of nozzle.tankCodes) { const tank = tanks.get(tankCode); if (!tank) context.addIssue({ code: 'custom', message: `Nozzle ${nozzle.code} refers to an unknown tank.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'tankCodes'] }); else if (tank.productCode !== nozzle.productCode) context.addIssue({ code: 'custom', message: `Nozzle ${nozzle.code} and tank ${tankCode} must use the same product.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'tankCodes'] }); } }
 });
 export type StationSetup = z.infer<typeof stationSetupSchema>;
+// Drafts deliberately accept incomplete equipment while an owner is still setting up.
+export const stationSetupDraftSchema = z.object({
+  setup: z.object({}).passthrough(),
+});
+export type StationSetupDraftInput = z.infer<typeof stationSetupDraftSchema>;
 
 export const productInputSchema = z.object({
   name: z.string().trim().min(2), code: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]+$/), category: z.enum(productCategories), customCategoryId: z.string().cuid().nullable().optional(), unit: z.enum(units), purchasePrice: z.coerce.number().min(0), sellingPrice: z.coerce.number().min(0), taxCategoryId: z.string().cuid().nullable().optional(), inventoryTracked: z.boolean(), tankLinked: z.boolean(), meterLinked: z.boolean(), isService: z.boolean(), active: z.boolean(),

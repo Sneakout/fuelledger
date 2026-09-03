@@ -149,6 +149,7 @@ model Organization {
   journals Journal[]
   notificationSettings OwnerNotificationSettings?
   notificationDeliveries OwnerNotificationDelivery[]
+  stationSetupDrafts StationSetupDraft[]
 
   @@map("organizations")
 }
@@ -185,10 +186,25 @@ model Station {
   journals Journal[]
   userAccess UserStationAccess[]
   notificationDeliveries OwnerNotificationDelivery[]
+  setupDraft StationSetupDraft?
 
   @@unique([organizationId, code])
   @@index([organizationId])
   @@map("stations")
+}
+
+model StationSetupDraft {
+  id             String   @id @default(cuid())
+  organizationId String   @map("organization_id")
+  stationId      String   @unique @map("station_id")
+  setup          Json
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  station        Station @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, updatedAt])
+  @@map("station_setup_drafts")
 }
 
 model OwnerNotificationSettings {
