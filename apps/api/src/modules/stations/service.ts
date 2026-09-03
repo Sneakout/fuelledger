@@ -1,4 +1,4 @@
-import type { StationSetup } from '@fuelledger/shared';
+import type { StationProfileInput, StationSetup } from '@fuelledger/shared';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
@@ -25,5 +25,24 @@ export async function createStation(organizationId: string, setup: StationSetup)
     const tanks = new Map(tankRecords.map(tank => [tank.code, tank.id]));
     for (const dispenser of setup.dispensers) { const dispenserRecord = await tx.dispenser.create({ data: { configurationId: configuration.id, code: dispenser.code, location: dispenser.location || null, status: dispenser.status } }); for (const nozzle of dispenser.nozzles) await tx.nozzle.create({ data: { dispenserId: dispenserRecord.id, productId: products.get(nozzle.productCode)!, code: nozzle.code, openingMeter: new Prisma.Decimal(nozzle.openingMeter), status: nozzle.status, tankMappings: { create: nozzle.tankCodes.map(tankCode => ({ tankId: tanks.get(tankCode)! })) } } }); }
     return tx.station.findUniqueOrThrow({ where: { id: station.id }, include: stationInclude });
+  });
+}
+
+export async function updateStationProfile(organizationId: string, stationId: string, profile: StationProfileInput) {
+  const station = await prisma.station.findFirst({ where: { id: stationId, organizationId } });
+  if (!station) throw new AppError(404, 'STATION_NOT_FOUND', 'This petrol pump could not be found.');
+  const codeOwner = await prisma.station.findUnique({ where: { organizationId_code: { organizationId, code: profile.code } } });
+  if (codeOwner && codeOwner.id !== stationId) throw new AppError(409, 'STATION_CODE_EXISTS', 'A petrol pump already uses this code.');
+  const { phone, gstin, openingTime, closingTime, ...required } = profile;
+  return prisma.station.update({
+    where: { id: stationId },
+    data: {
+      ...required,
+      phone: phone || null,
+      gstin: gstin || null,
+      openingTime: openingTime || null,
+      closingTime: closingTime || null,
+    },
+    include: stationInclude,
   });
 }

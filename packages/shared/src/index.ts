@@ -40,8 +40,21 @@ export type NozzleCustodyInput=z.infer<typeof nozzleCustodySchema>;
 export const productCategories = ['FUEL', 'DEF', 'LUBRICANTS', 'FLUIDS', 'RETAIL', 'ACCESSORIES', 'SERVICES', 'EV_CHARGING', 'OTHER'] as const;
 export const units = ['LITRE', 'KILOGRAM', 'PIECE', 'BOX', 'UNIT', 'KWH'] as const;
 const equipmentStatus = z.enum(['ACTIVE', 'INACTIVE']);
+export const stationProfileSchema = z.object({
+  name: z.string().trim().min(2),
+  code: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]+$/, 'Use letters, numbers, and hyphens only'),
+  addressLine1: z.string().trim().min(3),
+  city: z.string().trim().min(2),
+  state: z.string().trim().min(2),
+  postalCode: z.string().trim().min(4),
+  phone: z.string().trim().optional(),
+  gstin: z.string().trim().optional(),
+  openingTime: z.string().optional(),
+  closingTime: z.string().optional(),
+});
+export type StationProfileInput = z.infer<typeof stationProfileSchema>;
 export const stationSetupSchema = z.object({
-  profile: z.object({ name: z.string().min(2), code: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]+$/, 'Use letters, numbers, and hyphens only'), addressLine1: z.string().min(3), city: z.string().min(2), state: z.string().min(2), postalCode: z.string().min(4), phone: z.string().optional(), gstin: z.string().optional(), openingTime: z.string().optional(), closingTime: z.string().optional() }),
+  profile: stationProfileSchema,
   products: z.array(z.object({ name: z.string().min(2), code: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]+$/), category: z.enum(productCategories), unit: z.enum(units), inventoryTracked: z.boolean(), tankLinked: z.boolean(), meterLinked: z.boolean(), isService: z.boolean(), active: z.boolean() })).min(1),
   tanks: z.array(z.object({ code: z.string().min(1), productCode: z.string().min(1), nominalCapacity: z.coerce.number().positive(), workingCapacity: z.coerce.number().positive(), openingStock: z.coerce.number().min(0), tankType: z.enum(['UNDERGROUND', 'ABOVE_GROUND']), dipMethod: z.enum(['MANUAL', 'ATG']), status: equipmentStatus })),
   dispensers: z.array(z.object({ code: z.string().min(1), location: z.string().optional(), status: equipmentStatus, nozzles: z.array(z.object({ code: z.string().min(1), productCode: z.string().min(1), openingMeter: z.coerce.number().min(0), status: equipmentStatus, tankCodes: z.array(z.string().min(1)) })).min(1) })),

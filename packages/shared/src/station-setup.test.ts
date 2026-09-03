@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stationSetupSchema, type StationSetup } from './index.js';
+import { stationProfileSchema, stationSetupSchema, type StationSetup } from './index.js';
 import { closeShiftSchema, customerInputSchema, customerReceiptInputSchema, expenseCategoryInputSchema, expenseInputSchema, inventoryAdjustmentSchema, openShiftSchema, paymentMethods, productInputSchema, purchaseInvoiceInputSchema, receiptInputSchema, reconciliationInputSchema, saleInputSchema, supplierInputSchema, supplierPaymentInputSchema, tankReadingInputSchema, vehicleInputSchema } from './index.js';
 
 const fuel = (code: string) => ({ name: code, code, category: 'FUEL' as const, unit: 'LITRE' as const, inventoryTracked: true, tankLinked: true, meterLinked: true, isService: false, active: true });
@@ -13,6 +13,13 @@ describe('station setup validation', () => {
   it.each(scenarios)('accepts %s', (_name, tanks) => { const extras = _name === 'Station C' ? [{ name: 'DEF', code: 'DEF', category: 'DEF' as const, unit: 'LITRE' as const, inventoryTracked: true, tankLinked: true, meterLinked: true, isService: false, active: true }] : []; expect(stationSetupSchema.safeParse(setup(tanks, extras)).success).toBe(true); });
   it('accepts Station D with services and multiple product types', () => { const result = setup([['MS-1','MS'],['HSD-1','HSD'],['DEF-1','DEF']], [{ name:'DEF',code:'DEF',category:'DEF',unit:'LITRE',inventoryTracked:true,tankLinked:true,meterLinked:true,isService:false,active:true }, { name:'Car wash',code:'CAR-WASH',category:'SERVICES',unit:'UNIT',inventoryTracked:false,tankLinked:false,meterLinked:false,isService:true,active:true }]); expect(stationSetupSchema.safeParse(result).success).toBe(true); });
   it('rejects an unsafe nozzle-to-tank product mapping', () => { const result = setup([['MS-1','MS'],['HSD-1','HSD']]); result.dispensers[0]!.nozzles[0]!.tankCodes = ['HSD-1']; expect(stationSetupSchema.safeParse(result).success).toBe(false); });
+});
+
+describe('station profile validation', () => {
+  const valid = { name: 'ABC Fuels', code: 'ABC-1', addressLine1: '1 Main Road', city: 'Kochi', state: 'Kerala', postalCode: '682001', phone: '', gstin: '', openingTime: '06:00', closingTime: '22:00' };
+  it('accepts an editable petrol pump profile', () => expect(stationProfileSchema.safeParse(valid).success).toBe(true));
+  it('normalizes the petrol pump code', () => expect(stationProfileSchema.parse({ ...valid, code: 'abc-1' }).code).toBe('ABC-1'));
+  it('rejects an invalid petrol pump code', () => expect(stationProfileSchema.safeParse({ ...valid, code: 'ABC 1' }).success).toBe(false));
 });
 
 describe('shift validation', () => {

@@ -1,4 +1,4 @@
-import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, PurchaseInvoiceInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
+import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, PurchaseInvoiceInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationProfileInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
 const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 export class ApiRequestError extends Error { constructor(message: string, public readonly code: string, public readonly requestId?: string) { super(message); } }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -28,6 +28,7 @@ export const api = {
   changePassword:(input:ChangePasswordInput)=>request<{ok:boolean}>('/auth/change-password',{method:'POST',body:JSON.stringify(input)}),
   stations: () => request<{ stations: StationSummary[] }>('/stations'),
   createStation: (setup: StationSetup) => request<{ station: StationSummary }>('/stations', { method: 'POST', body: JSON.stringify(setup) }),
+  updateStation: (id: string, profile: StationProfileInput) => request<{ station: StationSummary }>(`/stations/${id}`, { method: 'PUT', body: JSON.stringify(profile) }),
   catalog: () => request<Catalog>('/products'),
   createProduct: (input: ProductForm) => request<{ product: CatalogProduct }>('/products', { method: 'POST', body: JSON.stringify(input) }),
   updateProduct: (id: string, input: ProductForm) => request<{ product: CatalogProduct }>(`/products/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
@@ -81,7 +82,7 @@ export type CatalogProduct = { id: string; name: string; code: string; category:
 export type ProductForm = Omit<CatalogProduct, 'id' | 'purchasePrice' | 'sellingPrice' | 'taxCategory' | 'customCategory'> & { purchasePrice: number; sellingPrice: number };
 export type Catalog = { products: CatalogProduct[]; categories: CatalogCategory[]; taxCategories: CatalogTaxCategory[] };
 export type StationSummary = {
-  id: string; name: string; code: string; city: string; state: string; active: boolean;
+  id: string; name: string; code: string; addressLine1: string; city: string; state: string; postalCode: string; phone: string | null; gstin: string | null; openingTime: string | null; closingTime: string | null; active: boolean;
   configurations: Array<{
     version: number;
     tanks: Array<{ id: string; code: string; product: { name: string; code: string }; openingStock: string }>;
