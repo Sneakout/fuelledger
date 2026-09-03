@@ -20,7 +20,10 @@ const at = (daysAgo: number, hour: number) => {
 };
 
 async function main() {
-  if (process.env.NODE_ENV === "production")
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.FUELLEDGER_PROVISION_DEMO !== "CONFIRM"
+  )
     throw new Error(
       "Demo seed is disabled in production. Provision demo data in an isolated environment.",
     );
@@ -28,28 +31,124 @@ async function main() {
     where: { email: "owner@fuelledger.local" },
   });
   if (!owner) throw new Error("Run the regular seed first.");
-  const station = await prisma.station.findFirst({
-    where: { organizationId: owner.organizationId, active: true },
-    include: {
-      configurations: {
-        where: { active: true },
-        take: 1,
-        include: {
-          tanks: { include: { product: true } },
-          dispensers: {
-            include: {
-              nozzles: { include: { product: true, tankMappings: true } },
-            },
+  const stationInclude = {
+    configurations: {
+      where: { active: true },
+      take: 1,
+      include: {
+        tanks: { include: { product: true } },
+        dispensers: {
+          include: {
+            nozzles: { include: { product: true, tankMappings: true } },
           },
         },
       },
     },
+  };
+  let station = await prisma.station.findFirst({
+    where: { organizationId: owner.organizationId, active: true },
+    include: stationInclude,
   });
+  if (!station?.configurations[0]) {
+    const products = await prisma.product.findMany({
+      where: {
+        organizationId: owner.organizationId,
+        code: { in: ["MS", "HSD"] },
+      },
+    });
+    const productByCode = new Map(products.map((product) => [product.code, product]));
+    const ms = productByCode.get("MS");
+    const hsd = productByCode.get("HSD");
+    if (!ms || !hsd) throw new Error("Run the regular seed first.");
+
+    const pump = station ??
+      (await prisma.station.create({
+        data: {
+          organizationId: owner.organizationId,
+          name: "FuelLedger Demo Petrol Pump",
+          code: "DEMO-PUMP",
+          addressLine1: "Avinashi Road",
+          city: "Coimbatore",
+          state: "Tamil Nadu",
+          postalCode: "641018",
+          openingTime: "06:00",
+          closingTime: "23:00",
+        },
+      }));
+
+    await prisma.$transaction(async (transaction) => {
+      const configuration = await transaction.stationConfiguration.create({
+        data: { stationId: pump.id, version: 1 },
+      });
+      const tankSpecs = [
+        { code: "MS Tank 1", productId: ms.id, openingStock: 12450 },
+        { code: "HSD Tank 1", productId: hsd.id, openingStock: 14750 },
+        { code: "HSD Tank 2", productId: hsd.id, openingStock: 13900 },
+      ];
+      const tanks = await Promise.all(
+        tankSpecs.map((tank) =>
+          transaction.tank.create({
+            data: {
+              configurationId: configuration.id,
+              ...tank,
+              nominalCapacity: 20000,
+              workingCapacity: 19000,
+              tankType: "UNDERGROUND",
+              dipMethod: "MANUAL",
+              status: "ACTIVE",
+            },
+          }),
+        ),
+      );
+      const tankByCode = new Map(tanks.map((tank) => [tank.code, tank.id]));
+      const dispenserSpecs = [
+        {
+          code: "DU 1",
+          nozzles: [
+            { code: "MS Nozzle 1", productId: ms.id, tank: "MS Tank 1" },
+            { code: "HSD Nozzle 1", productId: hsd.id, tank: "HSD Tank 1" },
+          ],
+        },
+        {
+          code: "DU 2",
+          nozzles: [
+            { code: "HSD Nozzle 2", productId: hsd.id, tank: "HSD Tank 2" },
+          ],
+        },
+      ];
+      for (const dispenserSpec of dispenserSpecs) {
+        const dispenser = await transaction.dispenser.create({
+          data: {
+            configurationId: configuration.id,
+            code: dispenserSpec.code,
+            location: "Forecourt",
+            status: "ACTIVE",
+          },
+        });
+        for (const nozzle of dispenserSpec.nozzles) {
+          await transaction.nozzle.create({
+            data: {
+              dispenserId: dispenser.id,
+              productId: nozzle.productId,
+              code: nozzle.code,
+              openingMeter: 500000,
+              status: "ACTIVE",
+              tankMappings: {
+                create: { tankId: tankByCode.get(nozzle.tank)! },
+              },
+            },
+          });
+        }
+      }
+    });
+    station = await prisma.station.findUnique({
+      where: { id: pump.id },
+      include: stationInclude,
+    });
+  }
   const configuration = station?.configurations[0];
   if (!station || !configuration)
-    throw new Error(
-      "Configure the demo petrol pump before loading demo activity.",
-    );
+    throw new Error("The demo petrol pump could not be provisioned.");
 
   const attendants = await Promise.all(
     ["Arun Kumar", "Meena S", "Rafiq Ali", "Vijay P"].map(async (name, index) =>
