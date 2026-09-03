@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ownerNotificationSettingsSchema, stationProfileSchema, stationSetupSchema, type StationSetup } from './index.js';
+import { ownerNotificationSettingsSchema, stationEquipmentSchema, stationProfileSchema, stationSetupSchema, type StationSetup } from './index.js';
 import { closeShiftSchema, customerInputSchema, customerReceiptInputSchema, densityReadingInputSchema, expenseCategoryInputSchema, expenseInputSchema, inventoryAdjustmentSchema, openShiftSchema, paymentMethods, productInputSchema, purchaseInvoiceInputSchema, purchaseInvoiceUpdateSchema, receiptInputSchema, reconciliationInputSchema, saleInputSchema, supplierInputSchema, supplierPaymentInputSchema, tankReadingInputSchema, vehicleInputSchema } from './index.js';
 
 const fuel = (code: string) => ({ name: code, code, category: 'FUEL' as const, unit: 'LITRE' as const, inventoryTracked: true, tankLinked: true, meterLinked: true, isService: false, active: true });
@@ -20,6 +20,15 @@ describe('station profile validation', () => {
   it('accepts an editable petrol pump profile', () => expect(stationProfileSchema.safeParse(valid).success).toBe(true));
   it('normalizes the petrol pump code', () => expect(stationProfileSchema.parse({ ...valid, code: 'abc-1' }).code).toBe('ABC-1'));
   it('rejects an invalid petrol pump code', () => expect(stationProfileSchema.safeParse({ ...valid, code: 'ABC 1' }).success).toBe(false));
+});
+
+describe('station equipment editing validation', () => {
+  const id='ckshift000000000000000001';
+  const productId='ckproduct0000000000000001';
+  const valid={configurationId:id,tanks:[{key:'tank-1',id,code:'T-1',productId,nominalCapacity:20000,workingCapacity:19000,openingStock:1000,tankType:'UNDERGROUND' as const,dipMethod:'MANUAL' as const,status:'ACTIVE' as const}],dispensers:[{id,code:'D-1',location:'Main island',status:'ACTIVE' as const,nozzles:[{id,code:'N-1',productId,openingMeter:100,status:'ACTIVE' as const,tankKeys:['tank-1']}]}]};
+  it('accepts safe tank and DU edits',()=>expect(stationEquipmentSchema.safeParse(valid).success).toBe(true));
+  it('rejects active nozzles without a tank',()=>expect(stationEquipmentSchema.safeParse({...valid,dispensers:[{...valid.dispensers[0]!,nozzles:[{...valid.dispensers[0]!.nozzles[0]!,tankKeys:[]}]}]}).success).toBe(false));
+  it('rejects an active nozzle connected to an inactive tank',()=>expect(stationEquipmentSchema.safeParse({...valid,tanks:[{...valid.tanks[0]!,status:'INACTIVE'}]}).success).toBe(false));
 });
 
 describe('owner WhatsApp alert validation', () => {

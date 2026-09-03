@@ -88,6 +88,32 @@ export const stationSetupSchema = z.object({
   for (const [dIndex, dispenser] of setup.dispensers.entries()) for (const [nIndex, nozzle] of dispenser.nozzles.entries()) { const product = products.get(nozzle.productCode); if (!product) context.addIssue({ code: 'custom', message: `Nozzle ${nozzle.code} refers to an unknown product.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'productCode'] }); else if (!product.meterLinked) context.addIssue({ code: 'custom', message: `${product.code} must be meter-linked before assigning it to a nozzle.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'productCode'] }); if (duplicate(nozzle.tankCodes)) context.addIssue({ code: 'custom', message: 'A nozzle cannot map to the same tank twice.', path: ['dispensers', dIndex, 'nozzles', nIndex, 'tankCodes'] }); for (const tankCode of nozzle.tankCodes) { const tank = tanks.get(tankCode); if (!tank) context.addIssue({ code: 'custom', message: `Nozzle ${nozzle.code} refers to an unknown tank.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'tankCodes'] }); else if (tank.productCode !== nozzle.productCode) context.addIssue({ code: 'custom', message: `Nozzle ${nozzle.code} and tank ${tankCode} must use the same product.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'tankCodes'] }); } }
 });
 export type StationSetup = z.infer<typeof stationSetupSchema>;
+const equipmentCode = z.string().trim().toUpperCase().min(1).max(40).regex(/^[A-Z0-9-]+$/, 'Use letters, numbers, and hyphens only');
+export const stationEquipmentSchema = z.object({
+  configurationId: z.string().cuid(),
+  tanks: z.array(z.object({ key: z.string().min(1).max(80), id: z.string().cuid().optional(), code: equipmentCode, productId: z.string().cuid(), nominalCapacity: z.coerce.number().positive(), workingCapacity: z.coerce.number().positive(), openingStock: z.coerce.number().min(0), tankType: z.enum(['UNDERGROUND', 'ABOVE_GROUND']), dipMethod: z.enum(['MANUAL', 'ATG']), status: equipmentStatus })),
+  dispensers: z.array(z.object({ id: z.string().cuid().optional(), code: equipmentCode, location: z.string().trim().max(120).optional(), status: equipmentStatus, nozzles: z.array(z.object({ id: z.string().cuid().optional(), code: equipmentCode, productId: z.string().cuid(), openingMeter: z.coerce.number().min(0), status: equipmentStatus, tankKeys: z.array(z.string().min(1).max(80)) })) })),
+}).superRefine((equipment, context) => {
+  const duplicate = (values: string[]) => new Set(values).size !== values.length;
+  if (duplicate(equipment.tanks.map(item => item.code))) context.addIssue({ code: 'custom', message: 'Tank IDs must be unique.', path: ['tanks'] });
+  if (duplicate(equipment.dispensers.map(item => item.code))) context.addIssue({ code: 'custom', message: 'DU IDs must be unique.', path: ['dispensers'] });
+  if (duplicate(equipment.tanks.map(item => item.key))) context.addIssue({ code: 'custom', message: 'Tank references must be unique.', path: ['tanks'] });
+  const tanks = new Map(equipment.tanks.map(item => [item.key, item]));
+  for (const [tankIndex, item] of equipment.tanks.entries()) {
+    if (item.workingCapacity > item.nominalCapacity) context.addIssue({ code: 'custom', message: 'Working capacity cannot exceed nominal capacity.', path: ['tanks', tankIndex, 'workingCapacity'] });
+    if (item.openingStock > item.workingCapacity) context.addIssue({ code: 'custom', message: 'Opening stock cannot exceed working capacity.', path: ['tanks', tankIndex, 'openingStock'] });
+  }
+  for (const [dIndex, dispenser] of equipment.dispensers.entries()) {
+    if (duplicate(dispenser.nozzles.map(item => item.code))) context.addIssue({ code: 'custom', message: `Nozzle IDs must be unique within DU ${dispenser.code}.`, path: ['dispensers', dIndex, 'nozzles'] });
+    if (dispenser.status === 'INACTIVE' && dispenser.nozzles.some(item => item.status === 'ACTIVE')) context.addIssue({ code: 'custom', message: `Make all nozzles inactive before making DU ${dispenser.code} inactive.`, path: ['dispensers', dIndex, 'status'] });
+    for (const [nIndex, item] of dispenser.nozzles.entries()) {
+      if (duplicate(item.tankKeys)) context.addIssue({ code: 'custom', message: 'A nozzle cannot connect to the same tank twice.', path: ['dispensers', dIndex, 'nozzles', nIndex, 'tankKeys'] });
+      if (item.status === 'ACTIVE' && item.tankKeys.length === 0) context.addIssue({ code: 'custom', message: `Active nozzle ${item.code} must connect to a tank.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'tankKeys'] });
+      for (const tankKey of item.tankKeys) { const tank = tanks.get(tankKey); if (!tank) context.addIssue({ code: 'custom', message: `Nozzle ${item.code} refers to an unknown tank.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'tankKeys'] }); else if (tank.productId !== item.productId) context.addIssue({ code: 'custom', message: `Nozzle ${item.code} and tank ${tank.code} must use the same product.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'tankKeys'] }); else if (item.status === 'ACTIVE' && tank.status !== 'ACTIVE') context.addIssue({ code: 'custom', message: `Active nozzle ${item.code} cannot connect to inactive tank ${tank.code}.`, path: ['dispensers', dIndex, 'nozzles', nIndex, 'tankKeys'] }); }
+    }
+  }
+});
+export type StationEquipmentInput = z.infer<typeof stationEquipmentSchema>;
 // Drafts deliberately accept incomplete equipment while an owner is still setting up.
 export const stationSetupDraftSchema = z.object({
   setup: z.object({}).passthrough(),

@@ -1,9 +1,9 @@
 import { Router } from 'express';
-import { stationProfileSchema, stationSetupDraftSchema, stationSetupSchema } from '@fuelledger/shared';
+import { stationEquipmentSchema, stationProfileSchema, stationSetupDraftSchema, stationSetupSchema } from '@fuelledger/shared';
 import { AppError } from '../lib/errors.js';
 import { permittedStationIds, requireOwner } from '../lib/station-access.js';
 import { authenticate } from '../middleware/authenticate.js';
-import { createStation, getStationSetupDraft, listStations, saveStationSetupDraft, updateStationProfile } from '../modules/stations/service.js';
+import { createStation, getStationEquipment, getStationSetupDraft, listStations, saveStationSetupDraft, updateStationEquipment, updateStationProfile } from '../modules/stations/service.js';
 
 export const stationsRouter = Router();
 stationsRouter.use(authenticate);
@@ -23,6 +23,16 @@ stationsRouter.put('/:id/draft', async (req, res) => {
   const parsed = stationSetupDraftSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError(400, 'DRAFT_INVALID', 'This draft could not be saved.');
   res.json({ draft: await saveStationSetupDraft(req.user!.organization.id, req.params.id!, parsed.data.setup) });
+});
+stationsRouter.get('/:id/equipment', async (req, res) => {
+  requireOwner(req.user!);
+  res.json(await getStationEquipment(req.user!.organization.id, req.params.id!));
+});
+stationsRouter.put('/:id/equipment', async (req, res) => {
+  requireOwner(req.user!);
+  const parsed = stationEquipmentSchema.safeParse(req.body);
+  if (!parsed.success) throw new AppError(400, 'EQUIPMENT_INVALID', parsed.error.issues[0]?.message ?? 'Please review the equipment details.', parsed.error.flatten());
+  res.json({ station: await updateStationEquipment(req.user!.organization.id, req.params.id!, parsed.data) });
 });
 stationsRouter.put('/:id', async (req, res) => {
   requireOwner(req.user!);

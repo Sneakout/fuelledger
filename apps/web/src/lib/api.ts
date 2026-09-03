@@ -1,4 +1,4 @@
-import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput, DensityReadingInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, OwnerNotificationSettingsInput, PurchaseInvoiceInput, PurchaseInvoiceUpdateInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationProfileInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
+import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput, DensityReadingInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, OwnerNotificationSettingsInput, PurchaseInvoiceInput, PurchaseInvoiceUpdateInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationEquipmentInput, StationProfileInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
 const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 export class ApiRequestError extends Error { constructor(message: string, public readonly code: string, public readonly requestId?: string, public readonly details?: unknown) { super(message); } }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -31,6 +31,8 @@ export const api = {
   stationSetupDraft: (id: string) => request<{ draft: { setup: StationSetup; updatedAt: string } | null }>(`/stations/${id}/draft`),
   saveStationSetupDraft: (id: string, setup: StationSetup) => request<{ draft: { setup: StationSetup; updatedAt: string } }>(`/stations/${id}/draft`, { method: 'PUT', body: JSON.stringify({ setup }) }),
   updateStation: (id: string, profile: StationProfileInput) => request<{ station: StationSummary }>(`/stations/${id}`, { method: 'PUT', body: JSON.stringify(profile) }),
+  stationEquipment: (id: string) => request<StationEquipment>(`/stations/${id}/equipment`),
+  updateStationEquipment: (id: string, input: StationEquipmentInput) => request<{ station: StationSummary }>(`/stations/${id}/equipment`, { method: 'PUT', body: JSON.stringify(input) }),
   catalog: () => request<Catalog>('/products'),
   createProduct: (input: ProductForm) => request<{ product: CatalogProduct }>('/products', { method: 'POST', body: JSON.stringify(input) }),
   updateProduct: (id: string, input: ProductForm) => request<{ product: CatalogProduct }>(`/products/${id}`, { method: 'PUT', body: JSON.stringify(input) }),
@@ -96,9 +98,17 @@ export type StationSummary = {
   id: string; name: string; code: string; addressLine1: string; city: string; state: string; postalCode: string; phone: string | null; gstin: string | null; openingTime: string | null; closingTime: string | null; active: boolean;
   configurations: Array<{
     version: number;
-    tanks: Array<{ id: string; code: string; product: { name: string; code: string }; openingStock: string }>;
-    dispensers: Array<{ id: string; code: string; nozzles: Array<{ id: string; code: string }> }>;
+    tanks: Array<{ id: string; code: string; status: 'ACTIVE' | 'INACTIVE'; product: { name: string; code: string }; openingStock: string }>;
+    dispensers: Array<{ id: string; code: string; status: 'ACTIVE' | 'INACTIVE'; nozzles: Array<{ id: string; code: string; status: 'ACTIVE' | 'INACTIVE' }> }>;
   }>;
+};
+export type StationEquipment = {
+  configuration: {
+    id: string; version: number;
+    tanks: Array<{ id: string; code: string; productId: string; nominalCapacity: string; workingCapacity: string; openingStock: string; tankType: 'UNDERGROUND' | 'ABOVE_GROUND'; dipMethod: 'MANUAL' | 'ATG'; status: 'ACTIVE' | 'INACTIVE'; product: { id: string; name: string; code: string } }>;
+    dispensers: Array<{ id: string; code: string; location: string | null; status: 'ACTIVE' | 'INACTIVE'; nozzles: Array<{ id: string; code: string; productId: string; openingMeter: string; status: 'ACTIVE' | 'INACTIVE'; product: { id: string; name: string; code: string }; tankMappings: Array<{ tank: { id: string; code: string } }> }> }>;
+  };
+  products: Array<{ id: string; name: string; code: string; tankLinked: boolean; meterLinked: boolean }>;
 };
 export type SalesProduct = { id:string;name:string;code:string;unit:string;sellingPrice:string;meterLinked:boolean;tankLinked:boolean;isService:boolean;category:string };
 export type OpenSaleShift = {
