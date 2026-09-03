@@ -51,6 +51,7 @@ const emptyLine = (): Line => ({
   unitCost: 0,
   taxRate: 0,
 });
+const supplierCodeFromName = (name: string) => name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
 export function PurchasesPage() {
   const [data, setData] = useState<PurchasesBootstrap | null>(null),
     [mode, setMode] = useState<Mode>(null),
@@ -106,10 +107,12 @@ export function PurchasesPage() {
     [lines],
   );
   async function saveSupplier() {
+    const name = supplier.name.trim();
+    if (!name) { setError("Enter the supplier name before saving."); return; }
     setSaving(true);
     setError("");
     try {
-      await api.createSupplier(supplier);
+      await api.createSupplier({ ...supplier, name, code: supplierCodeFromName(name) });
       setMode(null);
       setSupplier({ ...supplier, name: "", code: "" });
       await load();
@@ -359,18 +362,7 @@ export function PurchasesPage() {
                       }
                     />
                   </label>
-                  <label className="field">
-                    <span>Code</span>
-                    <input
-                      value={supplier.code}
-                      onChange={(e) =>
-                        setSupplier({
-                          ...supplier,
-                          code: e.target.value.toUpperCase(),
-                        })
-                      }
-                    />
-                  </label>
+                  <div className="field"><span>Supplier code</span><div className="field-note">Generated automatically from the supplier name.</div></div>
                   <label className="field">
                     <span>Phone</span>
                     <input
