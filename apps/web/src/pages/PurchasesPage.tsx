@@ -598,59 +598,73 @@ export function PurchasesPage() {
                         ) ?? [];
                     return (
                       <div className="invoice-line" key={index}>
-                        <select
-                          aria-label={`Product ${index + 1}`}
-                          value={line.productId}
-                          onChange={(e) => {
-                            const p = data.products.find(
-                              (x) => x.id === e.target.value,
-                            );
-                            setLines(
-                              lines.map((x, i) =>
-                                i === index
-                                  ? {
-                                      ...x,
-                                      productId: e.target.value,
-                                      tankId: "",
-                                      description: p?.name ?? "",
-                                      unitCost: Number(p?.purchasePrice ?? 0),
-                                      hsnCode: p?.hsnCode ?? "",
-                                    }
-                                  : x,
-                              ),
-                            );
-                          }}
-                        >
-                          <option value="">Choose product</option>
-                          {data.products.map((x) => (
-                            <option key={x.id} value={x.id}>
-                              {x.name}
-                            </option>
-                          ))}
-                        </select>
-                        {product?.tankLinked && (
+                        <label className="invoice-line-field">
+                          <span>Product</span>
                           <select
-                            aria-label={`Tank ${index + 1}`}
-                            value={line.tankId}
-                            onChange={(e) =>
+                            aria-label={`Product ${index + 1}`}
+                            value={line.productId}
+                            onChange={(e) => {
+                              const p = data.products.find(
+                                (x) => x.id === e.target.value,
+                              );
                               setLines(
                                 lines.map((x, i) =>
                                   i === index
-                                    ? { ...x, tankId: e.target.value }
+                                    ? {
+                                        ...x,
+                                        productId: e.target.value,
+                                        tankId: "",
+                                        description: p?.name ?? "",
+                                        unitCost: Number(p?.purchasePrice ?? 0),
+                                        hsnCode: p?.hsnCode ?? "",
+                                      }
                                     : x,
                                 ),
-                              )
-                            }
+                              );
+                            }}
                           >
-                            <option value="">Tank</option>
-                            {tanks.map((x) => (
+                            <option value="">Choose product</option>
+                            {data.products.map((x) => (
                               <option key={x.id} value={x.id}>
-                                {x.code}
+                                {x.name}
                               </option>
                             ))}
                           </select>
+                        </label>
+                        {product?.tankLinked ? (
+                          <label className="invoice-line-field">
+                            <span>Tank</span>
+                            <select
+                              aria-label={`Tank ${index + 1}`}
+                              value={line.tankId}
+                              onChange={(e) =>
+                                setLines(
+                                  lines.map((x, i) =>
+                                    i === index
+                                      ? { ...x, tankId: e.target.value }
+                                      : x,
+                                  ),
+                                )
+                              }
+                            >
+                              <option value="">Tank</option>
+                              {tanks.map((x) => (
+                                <option key={x.id} value={x.id}>
+                                  {x.code}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ) : (
+                          <span className="invoice-line-spacer" />
                         )}
-                        <input
+                        <label className="invoice-line-field">
+                          <span>
+                            {product?.category === "FUEL"
+                              ? "Quantity (L)"
+                              : `Quantity (${product?.unit ?? "units"})`}
+                          </span>
+                          <input
                           aria-label={`${product?.category === "FUEL" ? "Quantity in litres" : "Quantity"} ${index + 1}`}
                           title={
                             product?.category === "FUEL"
@@ -675,8 +689,15 @@ export function PurchasesPage() {
                               ),
                             )
                           }
-                        />
-                        <input
+                          />
+                        </label>
+                        <label className="invoice-line-field">
+                          <span>
+                            {product?.category === "FUEL"
+                              ? "Rate / L (₹)"
+                              : "Rate / unit (₹)"}
+                          </span>
+                          <input
                           aria-label={`Rate per ${product?.category === "FUEL" ? "litre" : "unit"} ${index + 1}`}
                           title={
                             product?.category === "FUEL"
@@ -697,8 +718,11 @@ export function PurchasesPage() {
                               ),
                             )
                           }
-                        />
-                        <input
+                          />
+                        </label>
+                        <label className="invoice-line-field">
+                          <span>HSN code</span>
+                          <input
                           aria-label={`HSN code ${index + 1}`}
                           title="HSN code"
                           placeholder="HSN code"
@@ -712,7 +736,8 @@ export function PurchasesPage() {
                               ),
                             )
                           }
-                        />
+                          />
+                        </label>
                         {lines.length > 1 && (
                           <button
                             onClick={() =>
