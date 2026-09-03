@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stationProfileSchema, stationSetupSchema, type StationSetup } from './index.js';
+import { ownerNotificationSettingsSchema, stationProfileSchema, stationSetupSchema, type StationSetup } from './index.js';
 import { closeShiftSchema, customerInputSchema, customerReceiptInputSchema, expenseCategoryInputSchema, expenseInputSchema, inventoryAdjustmentSchema, openShiftSchema, paymentMethods, productInputSchema, purchaseInvoiceInputSchema, receiptInputSchema, reconciliationInputSchema, saleInputSchema, supplierInputSchema, supplierPaymentInputSchema, tankReadingInputSchema, vehicleInputSchema } from './index.js';
 
 const fuel = (code: string) => ({ name: code, code, category: 'FUEL' as const, unit: 'LITRE' as const, inventoryTracked: true, tankLinked: true, meterLinked: true, isService: false, active: true });
@@ -20,6 +20,12 @@ describe('station profile validation', () => {
   it('accepts an editable petrol pump profile', () => expect(stationProfileSchema.safeParse(valid).success).toBe(true));
   it('normalizes the petrol pump code', () => expect(stationProfileSchema.parse({ ...valid, code: 'abc-1' }).code).toBe('ABC-1'));
   it('rejects an invalid petrol pump code', () => expect(stationProfileSchema.safeParse({ ...valid, code: 'ABC 1' }).success).toBe(false));
+});
+
+describe('owner WhatsApp alert validation', () => {
+  const settings = { whatsappNumber: '+91 89775 06454', whatsappOptedIn: true, densityMissingEnabled: true, lowStockEnabled: true, shiftVarianceEnabled: true, unclosedShiftEnabled: true, dailySummaryEnabled: true, overdueCustomerEnabled: true, lowStockPercent: 20, varianceThreshold: 500, dailySummaryHour: 20 };
+  it('accepts an opted-in WhatsApp number and normalizes it', () => expect(ownerNotificationSettingsSchema.parse(settings).whatsappNumber).toBe('918977506454'));
+  it('requires a WhatsApp number when alerts are opted in', () => expect(ownerNotificationSettingsSchema.safeParse({ ...settings, whatsappNumber: '' }).success).toBe(false));
 });
 
 describe('shift validation', () => {

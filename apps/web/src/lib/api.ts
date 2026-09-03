@@ -1,4 +1,4 @@
-import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, PurchaseInvoiceInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationProfileInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
+import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, OwnerNotificationSettingsInput, PurchaseInvoiceInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationProfileInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
 const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 export class ApiRequestError extends Error { constructor(message: string, public readonly code: string, public readonly requestId?: string) { super(message); } }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -66,8 +66,14 @@ export const api = {
   deactivateStaff:(userId:string)=>request<{id:string;active:boolean}>(`/access/users/${userId}`,{method:'DELETE'}),
   updateStationAccess:(userId:string,input:StationAccessInput)=>request<{userId:string;stationIds:string[]}>(`/access/users/${userId}`,{method:'PUT',body:JSON.stringify(input)}),
   updateNozzleCustody:(shiftId:string,assignments:Array<{nozzleId:string;userId:string}>)=>request<{shift:Shift}>(`/shifts/${shiftId}/nozzle-assignments`,{method:'PUT',body:JSON.stringify({assignments})}),
+  notificationSettings:()=>request<NotificationBootstrap>('/notifications'),
+  updateNotificationSettings:(input:OwnerNotificationSettingsInput)=>request<{settings:NotificationSettings}>('/notifications',{method:'PUT',body:JSON.stringify(input)}),
+  testWhatsApp:()=>request<{delivery:{status:string;reason?:string}}>('/notifications/test',{method:'POST'}),
   demoLeads:()=>request<DemoLeadsBootstrap>('/platform/demo-leads'),
 };
+export type NotificationSettings={whatsappNumber:string|null;whatsappOptedIn:boolean;densityMissingEnabled:boolean;lowStockEnabled:boolean;shiftVarianceEnabled:boolean;unclosedShiftEnabled:boolean;dailySummaryEnabled:boolean;overdueCustomerEnabled:boolean;lowStockPercent:number;varianceThreshold:number;dailySummaryHour:number;providerReady:boolean};
+export type NotificationDelivery={id:string;type:string;station:{name:string;code:string}|null;destination:string;message:string;status:'PENDING'|'SENT'|'FAILED';errorMessage:string|null;sentAt:string|null;createdAt:string};
+export type NotificationBootstrap={settings:NotificationSettings;deliveries:NotificationDelivery[]};
 export type DemoLead={id:string;contact:string;kind:string;createdAt:string;expiresAt:string};
 export type DemoLeadsBootstrap={leads:DemoLead[];summary:{sessions:number;uniqueContacts:number}};
 export type Reading = { id: string; value: number };

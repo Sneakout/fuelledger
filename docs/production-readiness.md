@@ -26,6 +26,12 @@ Set the following **Production** environment variables in the Vercel dashboard. 
 | `PLATFORM_ADMIN_EMAILS` | Comma-separated FuelLedger team email addresses allowed to view demo enquiries |
 | `VITE_API_URL` | `/api` (or leave unset) |
 | `VITE_GOOGLE_CLIENT_ID` | Production Google OAuth client ID |
+| `WHATSAPP_ACCESS_TOKEN` | Meta WhatsApp Cloud API system-user access token |
+| `WHATSAPP_PHONE_NUMBER_ID` | Meta WhatsApp sender phone number ID |
+| `WHATSAPP_API_VERSION` | The supported Meta Graph API version, for example `v23.0` |
+| `WHATSAPP_TEMPLATE_NAME` | Approved WhatsApp template name, for example `fuelledger_alert` |
+| `WHATSAPP_TEMPLATE_LANGUAGE` | Template language code, normally `en` |
+| `CRON_SECRET` | New random secret of at least 16 characters, used only by Vercel's scheduled alert call |
 
 Add the production domain to Google OAuth's Authorized JavaScript Origins. Use a separate database and separate secrets for Preview deployments; previews must not point to the customer database.
 
@@ -38,6 +44,17 @@ Add the production domain to Google OAuth's Authorized JavaScript Origins. Use a
 5. Confirm `https://your-domain/api/health` returns `{ "status": "ok", "database": "connected" }`.
 6. Run the smoke checklist below with a non-demo owner account and a manager assigned to one petrol pump.
 7. Enable uptime alerts and a database backup-failure alert before onboarding the first paid customer.
+
+## WhatsApp owner alerts
+
+FuelLedger can alert an opted-in owner about missing morning density readings, low tank stock, cash variances, open shifts, the daily summary and overdue customer payments. The app records each delivery attempt, so the owner can see whether an alert was sent or failed.
+
+1. In Meta Business Manager, connect the sending WhatsApp number and create an approved utility template named `fuelledger_alert` with one body variable: `{{1}}`. The application sends the complete alert as that variable.
+2. Add the WhatsApp and `CRON_SECRET` variables above to Vercel's **Production** environment, then redeploy.
+3. After taking a verified production database backup, run `corepack pnpm db:deploy` once from a protected release terminal using the production `DATABASE_URL`.
+4. Sign in as the owner, open **WhatsApp alerts**, enter the owner's number with country code, confirm consent, choose alert types and use **Send test alert**.
+
+`vercel.json` schedules an hourly production-only check. Alert rules use India time (`Asia/Kolkata`): density is checked at 9:00 AM, open shifts at 11:00 PM, and the daily summary at the hour selected by the owner. Vercel scheduled functions are protected with `CRON_SECRET`; never expose this value in the web app.
 
 ## Smoke checklist
 

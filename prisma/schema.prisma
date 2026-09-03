@@ -106,6 +106,22 @@ enum AccountType {
   EXPENSE
 }
 
+enum OwnerNotificationType {
+  DENSITY_MISSING
+  LOW_STOCK
+  SHIFT_VARIANCE
+  SHIFT_OPEN
+  DAILY_SUMMARY
+  OVERDUE_CUSTOMER
+  SYSTEM_TEST
+}
+
+enum NotificationDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
 model Organization {
   id        String   @id @default(cuid())
   name      String
@@ -131,6 +147,8 @@ model Organization {
   expenses Expense[]
   chartAccounts ChartAccount[]
   journals Journal[]
+  notificationSettings OwnerNotificationSettings?
+  notificationDeliveries OwnerNotificationDelivery[]
 
   @@map("organizations")
 }
@@ -166,10 +184,53 @@ model Station {
   expenses Expense[]
   journals Journal[]
   userAccess UserStationAccess[]
+  notificationDeliveries OwnerNotificationDelivery[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
   @@map("stations")
+}
+
+model OwnerNotificationSettings {
+  id                   String   @id @default(cuid())
+  organizationId       String   @unique @map("organization_id")
+  whatsappNumber       String?  @map("whatsapp_number")
+  whatsappOptedIn      Boolean  @default(false) @map("whatsapp_opted_in")
+  densityMissingEnabled Boolean @default(true) @map("density_missing_enabled")
+  lowStockEnabled      Boolean  @default(true) @map("low_stock_enabled")
+  shiftVarianceEnabled Boolean  @default(true) @map("shift_variance_enabled")
+  unclosedShiftEnabled Boolean  @default(true) @map("unclosed_shift_enabled")
+  dailySummaryEnabled  Boolean  @default(true) @map("daily_summary_enabled")
+  overdueCustomerEnabled Boolean @default(true) @map("overdue_customer_enabled")
+  lowStockPercent      Int      @default(20) @map("low_stock_percent")
+  varianceThreshold    Decimal  @default(500) @db.Decimal(12, 2) @map("variance_threshold")
+  dailySummaryHour     Int      @default(20) @map("daily_summary_hour")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@map("owner_notification_settings")
+}
+
+model OwnerNotificationDelivery {
+  id                String                     @id @default(cuid())
+  organizationId    String                     @map("organization_id")
+  stationId         String?                    @map("station_id")
+  type              OwnerNotificationType
+  dedupeKey         String                     @unique @map("dedupe_key")
+  destination       String                     @map("destination")
+  message           String
+  status            NotificationDeliveryStatus @default(PENDING)
+  providerMessageId String?                    @map("provider_message_id")
+  errorMessage      String?                    @map("error_message")
+  sentAt            DateTime?                  @map("sent_at")
+  createdAt         DateTime                    @default(now()) @map("created_at")
+  organization      Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  station           Station?                    @relation(fields: [stationId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, createdAt])
+  @@index([stationId, createdAt])
+  @@map("owner_notification_deliveries")
 }
 
 model Product {

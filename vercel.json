@@ -6,6 +6,7 @@
   "framework": "vite",
   "regions": ["sin1"],
   "functions": { "api/server.mjs": { "maxDuration": 30 } },
+  "crons": [{ "path": "/api/notifications/cron/daily", "schedule": "30 * * * *" }],
   "rewrites": [
     { "source": "/api/:path*", "destination": "/api/server?path=:path*" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }

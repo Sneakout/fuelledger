@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { collectionAccount, postJournal } from '../accounting/service.js';
+import { notifyLowStock } from '../notifications/service.js';
 
 const saleInclude = { station: { select: { id: true, name: true, code: true } }, shift: { select: { id: true, shiftNumber: true, status: true } }, product: { select: { id: true, name: true, code: true, unit: true, meterLinked: true, isService: true } }, employee: { select: { id: true, name: true, role: true } }, tank: { select: { id: true, code: true } }, nozzle: { select: { id: true, code: true, dispenser: { select: { code: true } } } }, customer: { select: { id: true, name: true, code: true, type: true } }, vehicle: { select: { id: true, number: true, label: true } } } as const;
 
@@ -35,11 +36,17 @@ export async function createSale(organizationId: string, input: SaleInput) {
   if (!permittedEmployees.has(input.employeeId)) throw new AppError(400, 'EMPLOYEE_NOT_ON_SHIFT', 'Choose a team member assigned to this shift.');
   if (['CREDIT', 'FLEET'].includes(input.paymentMethod) && !input.customerId) throw new AppError(400, 'CUSTOMER_REQUIRED', 'Choose a customer account for this payment type.');
   const metered = product.meterLinked;
-  if (metered) return createMeteredSale(organizationId, input, shift, product);
+  if (metered) {
+    const sale = await createMeteredSale(organizationId, input, shift, product);
+    if (sale.tank?.id) await notifyLowStock(organizationId, sale.tank.id).catch(() => undefined);
+    return sale;
+  }
   if (input.tankId || input.nozzleId || input.meterOpening !== null && input.meterOpening !== undefined || input.meterClosing !== null && input.meterClosing !== undefined) throw new AppError(400, 'EQUIPMENT_NOT_APPLICABLE', 'This product is not sold from a meter. Record the quantity directly.');
   const quantity = input.quantity;
   if (!quantity) throw new AppError(400, 'QUANTITY_REQUIRED', 'Enter a quantity for this sale.');
-  return persistSale({ organizationId, input, kind: product.isService ? 'SERVICE' : 'PRODUCT', quantity, product });
+  const sale = await persistSale({ organizationId, input, kind: product.isService ? 'SERVICE' : 'PRODUCT', quantity, product });
+  if (sale.tank?.id) await notifyLowStock(organizationId, sale.tank.id).catch(() => undefined);
+  return sale;
 }
 
 async function createMeteredSale(organizationId: string, input: SaleInput, shift: { id: string; configurationId: string; nozzleReadings: Array<{ nozzleId: string; openingMeter: Prisma.Decimal }>;nozzleAssignments:Array<{nozzleId:string;userId:string}> }, product: { id: string; inventoryTracked: boolean; isService: boolean; purchasePrice: Prisma.Decimal }) {

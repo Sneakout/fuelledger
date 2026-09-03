@@ -26,6 +26,26 @@ export type SignupInput=z.infer<typeof signupSchema>;
 export type GoogleAuthInput=z.infer<typeof googleAuthSchema>;
 export type DemoAccessInput=z.infer<typeof demoAccessSchema>;
 export type ApiError = { error: { code: string; message: string; requestId?: string; details?: unknown } };
+const whatsappNumber = z.preprocess(
+  value => typeof value === 'string' ? value.replace(/[\s()-]/g, '') : value,
+  z.string().regex(/^\+?[1-9]\d{7,14}$/, 'Enter a valid WhatsApp number with country code.').transform(value => value.replace(/\D/g, '')),
+);
+export const ownerNotificationSettingsSchema = z.object({
+  whatsappNumber: whatsappNumber.optional().or(z.literal('')),
+  whatsappOptedIn: z.boolean(),
+  densityMissingEnabled: z.boolean(),
+  lowStockEnabled: z.boolean(),
+  shiftVarianceEnabled: z.boolean(),
+  unclosedShiftEnabled: z.boolean(),
+  dailySummaryEnabled: z.boolean(),
+  overdueCustomerEnabled: z.boolean(),
+  lowStockPercent: z.coerce.number().int().min(1).max(50),
+  varianceThreshold: z.coerce.number().min(0).max(1_000_000),
+  dailySummaryHour: z.coerce.number().int().min(0).max(23),
+}).superRefine((value, context) => {
+  if (value.whatsappOptedIn && !value.whatsappNumber) context.addIssue({ code: 'custom', path: ['whatsappNumber'], message: 'Enter the owner’s WhatsApp number before enabling alerts.' });
+});
+export type OwnerNotificationSettingsInput = z.infer<typeof ownerNotificationSettingsSchema>;
 export const stationAccessInputSchema=z.object({stationIds:z.array(z.string().cuid()).max(100)});
 export type StationAccessInput=z.infer<typeof stationAccessInputSchema>;
 export const staffInputSchema=z.object({name:z.string().trim().min(2).max(100),stationIds:z.array(z.string().cuid()).min(1)});
