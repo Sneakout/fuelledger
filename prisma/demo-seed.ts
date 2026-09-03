@@ -12,6 +12,7 @@ import {
 } from "../apps/api/src/modules/accounting/service.js";
 
 const prisma = new PrismaClient();
+const transactionOptions = { maxWait: 15_000, timeout: 60_000 };
 const at = (daysAgo: number, hour: number) => {
   const date = new Date();
   date.setDate(date.getDate() - daysAgo);
@@ -140,7 +141,7 @@ async function main() {
           });
         }
       }
-    });
+    }, transactionOptions);
     station = await prisma.station.findUnique({
       where: { id: pump.id },
       include: stationInclude,
@@ -283,8 +284,8 @@ async function main() {
       if (!posted) {
         const revenue = quantity * price;
         const cost = quantity * Number(nozzle.product.purchasePrice);
-        await prisma.$transaction((transaction) =>
-          postJournal(transaction, {
+        await prisma.$transaction(
+          (transaction) => postJournal(transaction, {
             organizationId: owner.organizationId,
             stationId: station.id,
             createdById: owner.id,
@@ -305,6 +306,7 @@ async function main() {
               { account: "1200", credit: cost },
             ],
           }),
+          transactionOptions,
         );
       }
     }
@@ -451,8 +453,8 @@ async function main() {
     if (posted) continue;
     const revenue = Number(sale.totalAmount),
       cost = Number(sale.quantity) * Number(sale.product.purchasePrice);
-    await prisma.$transaction((transaction) =>
-      postJournal(transaction, {
+    await prisma.$transaction(
+      (transaction) => postJournal(transaction, {
         organizationId: owner.organizationId,
         stationId: sale.stationId,
         createdById: sale.employeeId,
@@ -475,6 +477,7 @@ async function main() {
             : []),
         ],
       }),
+      transactionOptions,
     );
   }
   const allExpenses = await prisma.expense.findMany({
@@ -489,8 +492,8 @@ async function main() {
       })
     )
       continue;
-    await prisma.$transaction((transaction) =>
-      postJournal(transaction, {
+    await prisma.$transaction(
+      (transaction) => postJournal(transaction, {
         organizationId: owner.organizationId,
         stationId: expense.stationId,
         createdById: expense.createdById,
@@ -507,6 +510,7 @@ async function main() {
           },
         ],
       }),
+      transactionOptions,
     );
   }
   console.log("Realistic demo activity loaded.");
