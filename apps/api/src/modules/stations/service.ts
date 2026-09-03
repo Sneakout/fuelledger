@@ -36,7 +36,6 @@ export async function createStation(organizationId: string, setup: StationSetup)
     const tankRecords = await Promise.all(setup.tanks.map(tank => tx.tank.create({ data: { configurationId: configuration.id, productId: products.get(tank.productCode)!, code: tank.code, nominalCapacity: new Prisma.Decimal(tank.nominalCapacity), workingCapacity: new Prisma.Decimal(tank.workingCapacity), openingStock: new Prisma.Decimal(tank.openingStock), tankType: tank.tankType, dipMethod: tank.dipMethod, status: tank.status } })));
     const tanks = new Map(tankRecords.map(tank => [tank.code, tank.id]));
     for (const dispenser of setup.dispensers) { const dispenserRecord = await tx.dispenser.create({ data: { configurationId: configuration.id, code: dispenser.code, location: dispenser.location || null, status: dispenser.status } }); for (const nozzle of dispenser.nozzles) await tx.nozzle.create({ data: { dispenserId: dispenserRecord.id, productId: products.get(nozzle.productCode)!, code: nozzle.code, openingMeter: new Prisma.Decimal(nozzle.openingMeter), status: nozzle.status, tankMappings: { create: nozzle.tankCodes.map(tankCode => ({ tankId: tanks.get(tankCode)! })) } } }); }
-    await tx.stationSetupDraft.deleteMany({ where: { stationId: station.id } });
     return tx.station.findUniqueOrThrow({ where: { id: station.id }, include: stationInclude });
   });
 }
