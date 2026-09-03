@@ -5,6 +5,7 @@
   "packageManager": "pnpm@11.19.0",
   "engines": { "node": "22.x" },
   "scripts": {
+    "postinstall": "prisma generate --schema=prisma/schema.prisma",
     "dev": "corepack pnpm --parallel --filter @fuelledger/api --filter @fuelledger/web dev",
     "build": "corepack pnpm -r build",
     "typecheck": "corepack pnpm -r typecheck",
