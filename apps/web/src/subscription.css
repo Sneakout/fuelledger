@@ -61,8 +61,7 @@
 }
 .plan-card,
 .billing-summary,
-.subscription-promises,
-.volume-pricing {
+.subscription-promises {
   border: 1px solid var(--line);
   border-radius: 20px;
   background: #fff;
@@ -82,8 +81,7 @@
   gap: 11px;
 }
 .plan-card h2,
-.billing-summary h2,
-.volume-pricing h2 {
+.billing-summary h2 {
   margin: 4px 0;
   font-size: 20px;
 }
@@ -297,39 +295,6 @@
   font-size: 8px;
   line-height: 1.5;
 }
-.volume-pricing {
-  margin-top: 16px;
-  padding: 23px;
-}
-.volume-pricing header {
-  margin-bottom: 14px;
-}
-.volume-pricing > div {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-}
-.volume-pricing > div span {
-  display: flex;
-  flex-direction: column;
-  padding: 16px;
-  border-right: 1px solid var(--line);
-}
-.volume-pricing > div span:last-child {
-  border: 0;
-}
-.volume-pricing b {
-  font-size: 10px;
-}
-.volume-pricing em {
-  margin-top: 4px;
-  color: #187357;
-  font-size: 10px;
-  font-style: normal;
-  font-weight: 800;
-}
 @media (max-width: 900px) {
   .subscription-layout {
     grid-template-columns: 1fr;
@@ -339,9 +304,6 @@
   }
   .subscription-promises article:nth-child(2) {
     border-right: 0;
-  }
-  .volume-pricing > div {
-    grid-template-columns: 1fr 1fr;
   }
 }
 @media (max-width: 600px) {
@@ -356,12 +318,10 @@
   }
   .price-choice,
   .included-grid,
-  .subscription-promises,
-  .volume-pricing > div {
+  .subscription-promises {
     grid-template-columns: 1fr;
   }
-  .subscription-promises article,
-  .volume-pricing > div span {
+  .subscription-promises article {
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }

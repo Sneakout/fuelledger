@@ -1,18 +1,15 @@
 import {
   BadgeCheck,
-  Building2,
   CalendarDays,
   Check,
   DatabaseBackup,
   Headphones,
-  IndianRupee,
   LockKeyhole,
   Phone,
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { useAuth } from "../components/AuthProvider";
-import { useStation } from "../components/StationProvider";
 
 const included = [
   "Shift, nozzle and attendant management",
@@ -24,8 +21,6 @@ const included = [
   "Owner dashboard and multi-pump view",
   "Daily backups, exports and audit history",
 ];
-const monthlyRate = (count: number) =>
-  count >= 6 ? 1099 : count >= 3 ? 1299 : 1499;
 const money = (value: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -35,7 +30,6 @@ const money = (value: number) =>
 
 export function SubscriptionPage() {
   const { user } = useAuth();
-  const { stations } = useStation();
   if (user?.role !== "OWNER")
     return (
       <main className="page">
@@ -44,21 +38,19 @@ export function SubscriptionPage() {
         </div>
       </main>
     );
-  const count = Math.max(stations.length, 1);
-  const rate = monthlyRate(count);
   return (
     <main className="page subscription-page">
       <section className="subscription-hero">
         <div>
           <span className="eyebrow">FuelLedger subscription</span>
           <h1>
-            One complete plan.
+            Start for {money(2000)}.
             <br />
-            Every petrol pump under control.
+            Your first month is free.
           </h1>
           <p>
-            All operational, reconciliation and accounting safeguards are
-            included. Nothing essential is hidden behind a higher plan.
+            We set up your petrol pump and help you get started. After the free
+            month, continue with lifetime access for just {money(24000)}.
           </p>
         </div>
         <span className="subscription-shield">
@@ -77,29 +69,30 @@ export function SubscriptionPage() {
                 <h2>FuelLedger Complete</h2>
               </div>
             </div>
-            <span className="plan-status">Launch pricing</span>
+            <span className="plan-status">Simple pricing</span>
           </header>
           <div className="price-choice">
             <div>
-              <small>Pay monthly</small>
-              <b>{money(rate)}</b>
-              <span>per petrol pump / month</span>
+              <small>First-time setup</small>
+              <b>{money(2000)}</b>
+              <span>per petrol pump</span>
+              <em>1 month free</em>
             </div>
             <div className="featured-price">
-              <small>Pay annually</small>
-              <b>{money(14999)}</b>
-              <span>per petrol pump / year</span>
-              <em>About 2 months free</em>
+              <small>Lifetime access</small>
+              <b>{money(24000)}</b>
+              <span>lifetime access per petrol pump</span>
+              <em>One-time payment</em>
             </div>
           </div>
           <div className="launch-offer">
-            <Sparkles />
+            <BadgeCheck />
             <span>
-              <small>Early-adopter first year</small>
-              <b>{money(11999)} per petrol pump</b>
+              <small>No recurring subscription</small>
+              <b>Pay once. Use for life.</b>
               <p>
-                Includes assisted setup. Renewal moves to the standard annual
-                price.
+                The setup fee includes assisted onboarding and your first
+                month of full access.
               </p>
             </span>
           </div>
@@ -125,34 +118,32 @@ export function SubscriptionPage() {
           </footer>
         </article>
         <aside className="billing-summary">
-          <span className="eyebrow">Your estimate</span>
-          <h2>
-            {count} {count === 1 ? "petrol pump" : "petrol pumps"}
-          </h2>
+          <span className="eyebrow">How it works</span>
+          <h2>Simple from day one</h2>
           <div className="estimate">
-            <Building2 />
+            <Sparkles />
             <span>
-              <small>Monthly rate per pump</small>
-              <b>{money(rate)}</b>
+              <small>Step 1</small>
+              <b>{money(2000)} assisted setup</b>
             </span>
           </div>
           <div className="estimate">
-            <IndianRupee />
+            <CalendarDays />
             <span>
-              <small>Estimated monthly subscription</small>
-              <b>{money(rate * count)}</b>
+              <small>Step 2</small>
+              <b>Use FuelLedger free for 1 month</b>
             </span>
           </div>
           <div className="estimate total">
-            <CalendarDays />
+            <BadgeCheck />
             <span>
-              <small>Standard annual total</small>
-              <b>{money(14999 * count)}</b>
+              <small>Step 3</small>
+              <b>Just {money(24000)} for lifetime access</b>
             </span>
           </div>
           <p>
-            The final checkout will show GST and the complete payable amount
-            before payment.
+            Prices are per petrol pump. Applicable GST will be shown before
+            payment.
           </p>
         </aside>
       </section>
@@ -160,8 +151,8 @@ export function SubscriptionPage() {
         <article>
           <BadgeCheck />
           <div>
-            <b>14-day business trial</b>
-            <p>Use your own petrol-pump data without entering a card.</p>
+            <b>One full month free</b>
+            <p>Use every included feature with your own petrol-pump data.</p>
           </div>
         </article>
         <article>
@@ -185,33 +176,9 @@ export function SubscriptionPage() {
           <Headphones />
           <div>
             <b>Assisted onboarding</b>
-            <p>Included with the early-adopter annual offer.</p>
+            <p>Included in the one-time setup fee.</p>
           </div>
         </article>
-      </section>
-      <section className="volume-pricing">
-        <header>
-          <span className="eyebrow">Multi-pump pricing</span>
-          <h2>Lower price as your network grows</h2>
-        </header>
-        <div>
-          <span>
-            <b>1–2 petrol pumps</b>
-            <em>{money(1499)} each / month</em>
-          </span>
-          <span>
-            <b>3–5 petrol pumps</b>
-            <em>{money(1299)} each / month</em>
-          </span>
-          <span>
-            <b>6–10 petrol pumps</b>
-            <em>{money(1099)} each / month</em>
-          </span>
-          <span>
-            <b>More than 10</b>
-            <em>Custom pricing</em>
-          </span>
-        </div>
       </section>
     </main>
   );
