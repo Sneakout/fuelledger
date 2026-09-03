@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { invoiceBalanceDisplay } from "./PurchasesPage";
+import { invoiceBalanceDisplay, onlyCompatibleTankId } from "./PurchasesPage";
 
 describe("purchase invoice balance display", () => {
   it("shows the full paid amount instead of zero outstanding", () => {
@@ -21,5 +21,30 @@ describe("purchase invoice balance display", () => {
       amount: 1010000,
       detail: "Amount due",
     });
+  });
+});
+
+describe("purchase invoice tank selection", () => {
+  const stations = [{
+    id: "station-1",
+    name: "Station One",
+    code: "S-1",
+    configurations: [{ tanks: [
+      { id: "tank-ms", code: "T-1", productId: "MS" },
+      { id: "tank-hsd-1", code: "T-2", productId: "HSD" },
+      { id: "tank-hsd-2", code: "T-3", productId: "HSD" },
+    ] }],
+  }];
+
+  it("selects the tank when exactly one tank carries the product", () => {
+    expect(onlyCompatibleTankId(stations, "station-1", "MS")).toBe("tank-ms");
+  });
+
+  it("requires a choice when multiple tanks carry the product", () => {
+    expect(onlyCompatibleTankId(stations, "station-1", "HSD")).toBe("");
+  });
+
+  it("leaves the tank empty when the station or product has no tank", () => {
+    expect(onlyCompatibleTankId(stations, "station-1", "DEF")).toBe("");
   });
 });

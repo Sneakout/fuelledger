@@ -8,7 +8,7 @@ import {
   Truck,
   X,
 } from "lucide-react";
-import { api, ApiRequestError, type InvoicePricePreview, type PurchaseInvoice, type PurchasesBootstrap } from "../lib/api";
+import { api, ApiRequestError, type InvoicePricePreview, type PurchaseInvoice, type PurchasesBootstrap, type PurchaseStation } from "../lib/api";
 const money = (v: number | string) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -22,6 +22,11 @@ export const invoiceBalanceDisplay = (invoice: Pick<PurchaseInvoice, "totalAmoun
   if (outstanding === 0) return { amount: total, detail: "Paid in full" };
   if (paid > 0) return { amount: outstanding, detail: `${money(paid)} paid · ${money(total)} total` };
   return { amount: outstanding, detail: "Amount due" };
+};
+export const onlyCompatibleTankId = (stations: PurchaseStation[], stationId: string, productId: string) => {
+  if (!productId) return "";
+  const tanks = stations.find((station) => station.id === stationId)?.configurations[0]?.tanks.filter((tank) => tank.productId === productId) ?? [];
+  return tanks.length === 1 ? tanks[0]!.id : "";
 };
 const iso = (date: string) => new Date(`${date}T00:00:00`).toISOString();
 const today = () => new Date().toISOString().slice(0, 10);
@@ -620,9 +625,11 @@ export function PurchasesPage() {
                     <select
                       value={invoice.stationId}
                       disabled={mode === "edit-invoice"}
-                      onChange={(e) =>
-                        setInvoice({ ...invoice, stationId: e.target.value })
-                      }
+                      onChange={(e) => {
+                        const stationId = e.target.value;
+                        setInvoice({ ...invoice, stationId });
+                        setLines((current) => current.map((line) => ({ ...line, tankId: onlyCompatibleTankId(data.stations, stationId, line.productId) })));
+                      }}
                     >
                       {data.stations.map((x) => (
                         <option key={x.id} value={x.id}>
@@ -769,16 +776,17 @@ export function PurchasesPage() {
                             aria-label={`Product ${index + 1}`}
                             value={line.productId}
                             onChange={(e) => {
+                              const productId = e.target.value;
                               const p = data.products.find(
-                                (x) => x.id === e.target.value,
+                                (x) => x.id === productId,
                               );
                               setLines(
                                 lines.map((x, i) =>
                                   i === index
                                     ? {
                                         ...x,
-                                        productId: e.target.value,
-                                        tankId: "",
+                                        productId,
+                                        tankId: onlyCompatibleTankId(data.stations, invoice.stationId, productId),
                                         description: p?.name ?? "",
                                         unitCost: Number(p?.purchasePrice ?? 0),
                                         hsnCode: p?.hsnCode ?? "",
@@ -934,7 +942,7 @@ export function PurchasesPage() {
                 <div className="invoice-options">
                   {mode !== "edit-invoice" && (
                     <>
-                      <label>
+                      <label className="invoice-check">
                         <input
                           type="checkbox"
                           checked={invoice.receiveNow}
@@ -947,7 +955,7 @@ export function PurchasesPage() {
                         />{" "}
                         Receive stock now
                       </label>
-                      <label>
+                      <label className="invoice-check">
                         <input
                           type="checkbox"
                           checked={invoice.paidNow}
