@@ -126,7 +126,7 @@ export function LoginPage() {
             <em>Every rupee.</em>
           </h1>
           <p>
-            One calm, connected view of your station—from the forecourt to the
+            One calm, connected view of your fuel station, from the forecourt to the
             books.
           </p>
         </div>
