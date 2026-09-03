@@ -89,11 +89,31 @@ export const stationSetupSchema = z.object({
 });
 export type StationSetup = z.infer<typeof stationSetupSchema>;
 const equipmentCode = z.string().trim().toUpperCase().min(1).max(40).regex(/^[A-Z0-9-]+$/, 'Use letters, numbers, and hyphens only');
-export const stationEquipmentSchema = z.object({
+export const stationEquipmentShapeSchema = z.object({
   configurationId: z.string().cuid(),
   tanks: z.array(z.object({ key: z.string().min(1).max(80), id: z.string().cuid().optional(), code: equipmentCode, productId: z.string().cuid(), nominalCapacity: z.coerce.number().positive(), workingCapacity: z.coerce.number().positive(), openingStock: z.coerce.number().min(0), tankType: z.enum(['UNDERGROUND', 'ABOVE_GROUND']), dipMethod: z.enum(['MANUAL', 'ATG']), status: equipmentStatus })),
   dispensers: z.array(z.object({ id: z.string().cuid().optional(), code: equipmentCode, location: z.string().trim().max(120).optional(), status: equipmentStatus, nozzles: z.array(z.object({ id: z.string().cuid().optional(), code: equipmentCode, productId: z.string().cuid(), openingMeter: z.coerce.number().min(0), status: equipmentStatus, tankKeys: z.array(z.string().min(1).max(80)) })) })),
-}).superRefine((equipment, context) => {
+});
+export type StationEquipmentShapeInput = z.infer<typeof stationEquipmentShapeSchema>;
+export function restorePersistedEquipmentConnections(equipment: StationEquipmentShapeInput, persistedTankIdsByNozzleId: ReadonlyMap<string, readonly string[]>): StationEquipmentShapeInput {
+  const tankKeyById = new Map(equipment.tanks.flatMap(tank => tank.id ? [[tank.id, tank.key] as const] : []));
+  const tanksByKey = new Map(equipment.tanks.map(tank => [tank.key, tank]));
+  return {
+    ...equipment,
+    dispensers: equipment.dispensers.map(dispenser => ({
+      ...dispenser,
+      nozzles: dispenser.nozzles.map(nozzle => {
+        if (nozzle.status !== 'ACTIVE' || nozzle.tankKeys.length || !nozzle.id) return nozzle;
+        const restored = [...new Set((persistedTankIdsByNozzleId.get(nozzle.id) ?? []).map(tankId => tankKeyById.get(tankId)).filter((key): key is string => Boolean(key)).filter(key => {
+          const tank = tanksByKey.get(key);
+          return tank?.status === 'ACTIVE' && tank.productId === nozzle.productId;
+        }))];
+        return restored.length ? { ...nozzle, tankKeys: restored } : nozzle;
+      }),
+    })),
+  };
+}
+export const stationEquipmentSchema = stationEquipmentShapeSchema.superRefine((equipment, context) => {
   const duplicate = (values: string[]) => new Set(values).size !== values.length;
   if (duplicate(equipment.tanks.map(item => item.code))) context.addIssue({ code: 'custom', message: 'Tank IDs must be unique.', path: ['tanks'] });
   if (duplicate(equipment.dispensers.map(item => item.code))) context.addIssue({ code: 'custom', message: 'DU IDs must be unique.', path: ['dispensers'] });

@@ -129,10 +129,12 @@ function TankConnections({ tanks, productId, value, active, onChange }: { tanks:
   const compatible = tanks.filter(tank => tank.productId === productId && tank.status === 'ACTIVE');
   return <div className="field tank-connections"><span>Connected tanks</span><div className="tank-connection-picker">{compatible.map(tank => { const selected = value.includes(tank.key); return <button type="button" className={selected ? 'selected' : ''} key={tank.key} onClick={() => { if (selected && active && value.length === 1) return; onChange(selected ? value.filter(key => key !== tank.key) : [...value, tank.key]); }}><Fuel size={13}/>{tank.code}{selected&&<Check size={12}/>}</button>; })}{compatible.length===0&&<small>No active tank carries this product.</small>}</div><small>{active?'At least one tank is kept selected for an active nozzle.':'Tank selection is optional while this nozzle is inactive.'}</small></div>;
 }
-function EquipmentEditDialog({ station, data, saving, error, onCancel, onSave }: { station: StationSummary; data: StationEquipment | null; saving: boolean; error: string; onCancel(): void; onSave(input: StationEquipmentInput): Promise<void> }) {
+function EquipmentEditDialog({ station, data, saving, error: receivedError, onCancel, onSave }: { station: StationSummary; data: StationEquipment | null; saving: boolean; error: string; onCancel(): void; onSave(input: StationEquipmentInput): Promise<void> }) {
   const [draft, setDraft] = useState<StationEquipmentInput | null>(() => data ? equipmentInput(data) : null);
+  const [error, setDisplayedError] = useState(receivedError);
   useEffect(() => { if (data) setDraft(equipmentInput(data)); }, [data]);
-  const change = (fn: (next: StationEquipmentInput) => void) => setDraft(previous => { if (!previous) return previous; const next = structuredClone(previous); fn(next); return next; });
+  useEffect(() => setDisplayedError(receivedError), [receivedError]);
+  const change = (fn: (next: StationEquipmentInput) => void) => { setDisplayedError(''); setDraft(previous => { if (!previous) return previous; const next = structuredClone(previous); fn(next); return next; }); };
   const tankProducts = data?.products.filter(item => item.tankLinked) ?? [];
   const meterProducts = data?.products.filter(item => item.meterLinked) ?? [];
   const validation = draft ? stationEquipmentSchema.safeParse(draft) : null;

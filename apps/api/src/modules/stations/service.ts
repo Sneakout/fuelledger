@@ -1,4 +1,4 @@
-import type { StationEquipmentInput, StationProfileInput, StationSetup } from '@fuelledger/shared';
+import { restorePersistedEquipmentConnections, stationEquipmentSchema, type StationEquipmentShapeInput, type StationProfileInput, type StationSetup } from '@fuelledger/shared';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
@@ -85,17 +85,22 @@ export async function getStationEquipment(organizationId: string, stationId: str
   return { configuration, products };
 }
 
-export async function updateStationEquipment(organizationId: string, stationId: string, input: StationEquipmentInput) {
+export async function updateStationEquipment(organizationId: string, stationId: string, submittedInput: StationEquipmentShapeInput) {
   const configuration = await prisma.stationConfiguration.findFirst({
-    where: { id: input.configurationId, stationId, active: true, station: { organizationId, active: true } },
+    where: { id: submittedInput.configurationId, stationId, active: true, station: { organizationId, active: true } },
     include: {
       station: { select: { id: true } },
       tanks: { include: { _count: { select: { shiftReadings: true, sales: true, inventoryLedger: true, receiptLines: true, physicalReadings: true, densityReadings: true } } } },
-      dispensers: { include: { nozzles: { include: { _count: { select: { shiftReadings: true, shiftAssignments: true, sales: true } } } } } },
+      dispensers: { include: { nozzles: { include: { tankMappings: { select: { tankId: true } }, _count: { select: { shiftReadings: true, shiftAssignments: true, sales: true } } } } } },
     },
   });
   if (!configuration) throw new AppError(404, 'CONFIGURATION_NOT_FOUND', 'The active equipment configuration could not be found. Refresh and try again.');
   if (await prisma.shift.findFirst({ where: { stationId, status: 'OPEN' }, select: { id: true } })) throw new AppError(409, 'SHIFT_OPEN', 'Close the current shift before changing tanks, DUs, or nozzles.');
+  const persistedTankIdsByNozzleId = new Map(configuration.dispensers.flatMap(dispenser => dispenser.nozzles.map(nozzle => [nozzle.id, nozzle.tankMappings.map(mapping => mapping.tankId)] as const)));
+  const reconciled = restorePersistedEquipmentConnections(submittedInput, persistedTankIdsByNozzleId);
+  const parsed = stationEquipmentSchema.safeParse(reconciled);
+  if (!parsed.success) throw new AppError(400, 'EQUIPMENT_INVALID', parsed.error.issues[0]?.message ?? 'Please review the equipment details.', parsed.error.flatten());
+  const input = parsed.data;
   const existingTankIds = new Set(configuration.tanks.map(item => item.id));
   const existingDispenserIds = new Set(configuration.dispensers.map(item => item.id));
   const existingNozzleIds = new Set(configuration.dispensers.flatMap(item => item.nozzles.map(nozzle => nozzle.id)));

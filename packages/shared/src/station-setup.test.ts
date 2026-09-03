@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ownerNotificationSettingsSchema, stationEquipmentSchema, stationProfileSchema, stationSetupSchema, type StationSetup } from './index.js';
+import { ownerNotificationSettingsSchema, restorePersistedEquipmentConnections, stationEquipmentSchema, stationProfileSchema, stationSetupSchema, type StationSetup } from './index.js';
 import { closeShiftSchema, customerInputSchema, customerReceiptInputSchema, densityReadingInputSchema, expenseCategoryInputSchema, expenseInputSchema, inventoryAdjustmentSchema, openShiftSchema, paymentMethods, productInputSchema, purchaseInvoiceInputSchema, purchaseInvoiceUpdateSchema, receiptInputSchema, reconciliationInputSchema, saleInputSchema, supplierInputSchema, supplierPaymentInputSchema, tankReadingInputSchema, vehicleInputSchema } from './index.js';
 
 const fuel = (code: string) => ({ name: code, code, category: 'FUEL' as const, unit: 'LITRE' as const, inventoryTracked: true, tankLinked: true, meterLinked: true, isService: false, active: true });
@@ -29,6 +29,8 @@ describe('station equipment editing validation', () => {
   it('accepts safe tank and DU edits',()=>expect(stationEquipmentSchema.safeParse(valid).success).toBe(true));
   it('rejects active nozzles without a tank',()=>expect(stationEquipmentSchema.safeParse({...valid,dispensers:[{...valid.dispensers[0]!,nozzles:[{...valid.dispensers[0]!.nozzles[0]!,tankKeys:[]}]}]}).success).toBe(false));
   it('rejects an active nozzle connected to an inactive tank',()=>expect(stationEquipmentSchema.safeParse({...valid,tanks:[{...valid.tanks[0]!,status:'INACTIVE'}]}).success).toBe(false));
+  it('restores a valid saved connection omitted by the browser',()=>{const submitted={...valid,dispensers:[{...valid.dispensers[0]!,nozzles:[{...valid.dispensers[0]!.nozzles[0]!,tankKeys:[]}]}]};const restored=restorePersistedEquipmentConnections(submitted,new Map([[id,[id]]]));expect(restored.dispensers[0]!.nozzles[0]!.tankKeys).toEqual(['tank-1']);expect(stationEquipmentSchema.safeParse(restored).success).toBe(true);});
+  it('does not restore a saved connection to an incompatible tank',()=>{const submitted={...valid,tanks:[{...valid.tanks[0]!,status:'INACTIVE' as const}],dispensers:[{...valid.dispensers[0]!,nozzles:[{...valid.dispensers[0]!.nozzles[0]!,tankKeys:[]}]}]};const restored=restorePersistedEquipmentConnections(submitted,new Map([[id,[id]]]));expect(restored.dispensers[0]!.nozzles[0]!.tankKeys).toEqual([]);expect(stationEquipmentSchema.safeParse(restored).success).toBe(false);});
 });
 
 describe('owner WhatsApp alert validation', () => {

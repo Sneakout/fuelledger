@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { stationEquipmentSchema, stationProfileSchema, stationSetupDraftSchema, stationSetupSchema } from '@fuelledger/shared';
+import { stationEquipmentShapeSchema, stationProfileSchema, stationSetupDraftSchema, stationSetupSchema } from '@fuelledger/shared';
 import { AppError } from '../lib/errors.js';
 import { permittedStationIds, requireOwner } from '../lib/station-access.js';
 import { authenticate } from '../middleware/authenticate.js';
@@ -30,7 +30,7 @@ stationsRouter.get('/:id/equipment', async (req, res) => {
 });
 stationsRouter.put('/:id/equipment', async (req, res) => {
   requireOwner(req.user!);
-  const parsed = stationEquipmentSchema.safeParse(req.body);
+  const parsed = stationEquipmentShapeSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError(400, 'EQUIPMENT_INVALID', parsed.error.issues[0]?.message ?? 'Please review the equipment details.', parsed.error.flatten());
   res.json({ station: await updateStationEquipment(req.user!.organization.id, req.params.id!, parsed.data) });
 });
