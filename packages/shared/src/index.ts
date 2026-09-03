@@ -9,6 +9,7 @@ export const userSchema = z.object({
   organization: z.object({ id: z.string(), name: z.string() }),
   allStations: z.boolean(),
   stations: z.array(z.object({ id: z.string(), name: z.string(), code: z.string() })),
+  isPlatformAdmin: z.boolean().optional(),
   mustChangePassword:z.boolean().optional(),
   demoExpiresAt:z.string().datetime().optional(),
 });

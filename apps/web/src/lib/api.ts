@@ -53,7 +53,10 @@ export const api = {
   deactivateStaff:(userId:string)=>request<{id:string;active:boolean}>(`/access/users/${userId}`,{method:'DELETE'}),
   updateStationAccess:(userId:string,input:StationAccessInput)=>request<{userId:string;stationIds:string[]}>(`/access/users/${userId}`,{method:'PUT',body:JSON.stringify(input)}),
   updateNozzleCustody:(shiftId:string,assignments:Array<{nozzleId:string;userId:string}>)=>request<{shift:Shift}>(`/shifts/${shiftId}/nozzle-assignments`,{method:'PUT',body:JSON.stringify({assignments})}),
+  demoLeads:()=>request<DemoLeadsBootstrap>('/platform/demo-leads'),
 };
+export type DemoLead={id:string;contact:string;kind:string;createdAt:string;expiresAt:string};
+export type DemoLeadsBootstrap={leads:DemoLead[];summary:{sessions:number;uniqueContacts:number}};
 export type Reading = { id: string; value: number };
 export type ShiftOpenForm = { stationId: string; managerId: string; userIds: string[]; nozzleAssignments:Array<{nozzleId:string;userId:string}>; openingCash: number; tankReadings: Reading[]; nozzleReadings: Reading[]; notes?: string };
 export type ShiftCloseForm = { closingCash: number; tankReadings: Reading[]; nozzleReadings: Reading[]; notes?: string };

@@ -23,6 +23,7 @@ Set the following **Production** environment variables in the Vercel dashboard. 
 | `APP_URL` | `https://your-production-domain` |
 | `CORS_ORIGIN` | Same value as `APP_URL` |
 | `GOOGLE_CLIENT_ID` | Production Google OAuth client ID |
+| `PLATFORM_ADMIN_EMAILS` | Comma-separated FuelLedger team email addresses allowed to view demo enquiries |
 | `VITE_API_URL` | `/api` (or leave unset) |
 | `VITE_GOOGLE_CLIENT_ID` | Production Google OAuth client ID |
 

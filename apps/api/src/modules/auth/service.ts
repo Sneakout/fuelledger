@@ -9,7 +9,7 @@ import type {
   SignupInput,
   User,
 } from "@fuelledger/shared";
-import { env } from "../../config/env.js";
+import { env, isPlatformAdminEmail } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 
@@ -283,6 +283,7 @@ function present(
     allStations,
     stations: record.stationAccess.map((item) => item.station),
     mustChangePassword: record.mustChangePassword,
+    isPlatformAdmin: isPlatformAdminEmail(record.email),
     ...(demoExpiresAt ? { demoExpiresAt: demoExpiresAt.toISOString() } : {}),
   };
 }
