@@ -102,20 +102,15 @@ export async function googleAuth(input: GoogleAuthInput, userAgent?: string) {
     include: userInclude,
   });
   if (!record) {
-    if (!input.organizationName)
-      throw new AppError(
-        400,
-        "BUSINESS_NAME_REQUIRED",
-        "Enter your petrol pump name before creating an account with Google.",
-      );
+    const initialPumpName = "My Petrol Pump";
     record = await prisma.$transaction(async (tx) => {
       const organization = await tx.organization.create({
-        data: { name: input.organizationName! },
+        data: { name: initialPumpName },
       });
       await tx.station.create({
         data: {
           organizationId: organization.id,
-          name: input.organizationName!,
+          name: initialPumpName,
           code: "PUMP-1",
           addressLine1: "To be configured",
           city: "To be configured",

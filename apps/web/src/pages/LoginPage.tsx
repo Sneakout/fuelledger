@@ -40,8 +40,6 @@ export function LoginPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const googleButton = useRef<HTMLDivElement>(null);
-  const organizationNameRef = useRef("");
-  organizationNameRef.current = organizationName;
   useEffect(() => {
     if (!googleClientId) return;
     const render = () => {
@@ -52,11 +50,7 @@ export function LoginPage() {
         callback: (response) => {
           setBusy(true);
           setError("");
-          const business = organizationNameRef.current.trim();
-          void googleLogin({
-            credential: response.credential,
-            ...(business ? { organizationName: business } : {}),
-          })
+          void googleLogin({ credential: response.credential })
             .catch((item) =>
               setError(
                 item instanceof Error
@@ -162,7 +156,7 @@ export function LoginPage() {
           <h2>
             {mode === "signup"
               ? "Create your business account"
-              : "Sign in to your station"}
+              : "Sign in to FuelLedger"}
           </h2>
           <p>
             {mode === "signup"
