@@ -1,6 +1,6 @@
 import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, OwnerNotificationSettingsInput, PurchaseInvoiceInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationProfileInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
 const API_URL = import.meta.env.VITE_API_URL ?? '/api';
-export class ApiRequestError extends Error { constructor(message: string, public readonly code: string, public readonly requestId?: string) { super(message); } }
+export class ApiRequestError extends Error { constructor(message: string, public readonly code: string, public readonly requestId?: string, public readonly details?: unknown) { super(message); } }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { ...init, credentials: 'include', headers: { 'Content-Type': 'application/json', ...init?.headers } });
   if (response.status === 204) return undefined as T;
@@ -14,7 +14,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = await response.json() as T | ApiError;
   if (!response.ok) {
     const apiError = body as ApiError;
-    throw new ApiRequestError(apiError.error?.message ?? 'Something went wrong.', apiError.error?.code ?? 'REQUEST_FAILED', apiError.error?.requestId);
+    throw new ApiRequestError(apiError.error?.message ?? 'Something went wrong.', apiError.error?.code ?? 'REQUEST_FAILED', apiError.error?.requestId, apiError.error?.details);
   }
   return body as T;
 }
