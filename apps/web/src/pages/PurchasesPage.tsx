@@ -15,6 +15,14 @@ const money = (v: number | string) =>
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(Number(v));
+export const invoiceBalanceDisplay = (invoice: Pick<PurchaseInvoice, "totalAmount" | "outstanding">) => {
+  const total = Number(invoice.totalAmount);
+  const outstanding = Math.max(0, Number(invoice.outstanding));
+  const paid = Math.max(0, total - outstanding);
+  if (outstanding === 0) return { amount: total, detail: "Paid in full" };
+  if (paid > 0) return { amount: outstanding, detail: `${money(paid)} paid · ${money(total)} total` };
+  return { amount: outstanding, detail: "Amount due" };
+};
 const iso = (date: string) => new Date(`${date}T00:00:00`).toISOString();
 const today = () => new Date().toISOString().slice(0, 10);
 async function attachment(file: File | null) {
@@ -357,8 +365,9 @@ export function PurchasesPage() {
               </div>
               <span>{data.invoices.length} invoices</span>
             </div>
-            {data.invoices.map((item) => (
-              <article key={item.id}>
+            {data.invoices.map((item) => {
+              const balance = invoiceBalanceDisplay(item);
+              return <article key={item.id}>
                 <span className="invoice-icon">
                   <FileText />
                 </span>
@@ -386,13 +395,14 @@ export function PurchasesPage() {
                   </span>
                 </div>
                 <div className="invoice-balance">
-                  <b>{money(item.outstanding)}</b>
-                  <small>of {money(item.totalAmount)}</small>
+                  <b>{money(balance.amount)}</b>
+                  <small>{balance.detail}</small>
                   <em className={item.status.toLowerCase()}>
-                    {item.overdue ? "OVERDUE" : item.status.replace("_", " ")}
+                    {item.outstanding === 0 ? "PAID" : item.overdue ? "OVERDUE" : item.status.replace("_", " ")}
                   </em>
                 </div>
-                {item.outstanding > 0 && (
+                <div className="invoice-actions">
+                  {item.outstanding > 0 && (
                   <button
                     className="text-button"
                     onClick={() => {
@@ -407,31 +417,32 @@ export function PurchasesPage() {
                   >
                     Pay
                   </button>
-                )}
-                <button
-                  className="text-button"
-                  onClick={() => {
-                    setEditingInvoice(item);
-                    setPricePreview(null);
-                    setInvoice((current) => ({
-                      ...current,
-                      stationId: item.station.id,
-                      supplierId: item.supplier.id,
-                      invoiceNumber: item.invoiceNumber,
-                      invoiceDate: item.invoiceDate.slice(0, 10),
-                      dueDate: item.dueDate.slice(0, 10),
-                      notes: item.notes ?? "",
-                      receiveNow: Boolean(item.receipt),
-                      paidNow: false,
-                      paymentReferenceNo: "",
-                    }));
-                    setMode("edit-invoice");
-                  }}
-                >
-                  Edit
-                </button>
-              </article>
-            ))}
+                  )}
+                  <button
+                    className="text-button"
+                    onClick={() => {
+                      setEditingInvoice(item);
+                      setPricePreview(null);
+                      setInvoice((current) => ({
+                        ...current,
+                        stationId: item.station.id,
+                        supplierId: item.supplier.id,
+                        invoiceNumber: item.invoiceNumber,
+                        invoiceDate: item.invoiceDate.slice(0, 10),
+                        dueDate: item.dueDate.slice(0, 10),
+                        notes: item.notes ?? "",
+                        receiveNow: Boolean(item.receipt),
+                        paidNow: false,
+                        paymentReferenceNo: "",
+                      }));
+                      setMode("edit-invoice");
+                    }}
+                  >
+                    View / Edit
+                  </button>
+                </div>
+              </article>;
+            })}
             {!data.invoices.length && (
               <p className="history-empty">No purchase invoices yet.</p>
             )}
