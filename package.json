@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "pnpm@11.19.0",
-  "engines": { "node": ">=22" },
+  "engines": { "node": "22.x" },
   "scripts": {
     "dev": "corepack pnpm --parallel --filter @fuelledger/api --filter @fuelledger/web dev",
     "build": "corepack pnpm -r build",
