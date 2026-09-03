@@ -8,7 +8,7 @@ import {
   Truck,
   X,
 } from "lucide-react";
-import { api, ApiRequestError, type PurchasesBootstrap } from "../lib/api";
+import { api, ApiRequestError, type PurchaseInvoice, type PurchasesBootstrap } from "../lib/api";
 const money = (v: number | string) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -34,7 +34,7 @@ async function attachment(file: File | null) {
     contentBase64,
   };
 }
-type Mode = "supplier" | "invoice" | "payment" | null;
+type Mode = "supplier" | "invoice" | "edit-invoice" | "payment" | null;
 type Line = {
   productId: string;
   tankId: string;
@@ -80,8 +80,14 @@ export function PurchasesPage() {
     invoiceTotal: "",
     notes: "",
     receiveNow: true,
+    paidNow: false,
+    paymentMethod: "UPI" as "CASH" | "UPI" | "CARD" | "OTHER",
+    paymentReferenceNo: "",
   });
   const [lines, setLines] = useState<Line[]>([emptyLine()]);
+  const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(
+    null,
+  );
   const [payment, setPayment] = useState({
     stationId: "",
     invoiceId: "",
@@ -151,6 +157,18 @@ export function PurchasesPage() {
     setSaving(true);
     setError("");
     try {
+      if (editingInvoice) {
+        await api.updatePurchaseInvoice(editingInvoice.id, {
+          invoiceNumber: invoice.invoiceNumber,
+          invoiceDate: iso(invoice.invoiceDate),
+          dueDate: iso(invoice.dueDate),
+          notes: invoice.notes || undefined,
+        });
+        setMode(null);
+        setEditingInvoice(null);
+        await load();
+        return;
+      }
       await api.createPurchaseInvoice({
         ...invoice,
         invoiceTotal: invoice.invoiceTotal
@@ -182,7 +200,14 @@ export function PurchasesPage() {
       });
       setMode(null);
       setFile(null);
-      setInvoice((x) => ({ ...x, invoiceNumber: "", taxAmount: 0, notes: "" }));
+      setInvoice((x) => ({
+        ...x,
+        invoiceNumber: "",
+        taxAmount: 0,
+        notes: "",
+        paidNow: false,
+        paymentReferenceNo: "",
+      }));
       setLines([emptyLine()]);
       await load();
     } catch (e) {
@@ -357,6 +382,27 @@ export function PurchasesPage() {
                     Pay
                   </button>
                 )}
+                <button
+                  className="text-button"
+                  onClick={() => {
+                    setEditingInvoice(item);
+                    setInvoice((current) => ({
+                      ...current,
+                      stationId: item.station.id,
+                      supplierId: item.supplier.id,
+                      invoiceNumber: item.invoiceNumber,
+                      invoiceDate: item.invoiceDate.slice(0, 10),
+                      dueDate: item.dueDate.slice(0, 10),
+                      notes: item.notes ?? "",
+                      receiveNow: Boolean(item.receipt),
+                      paidNow: false,
+                      paymentReferenceNo: "",
+                    }));
+                    setMode("edit-invoice");
+                  }}
+                >
+                  Edit
+                </button>
               </article>
             ))}
             {!data.invoices.length && (
@@ -501,13 +547,25 @@ export function PurchasesPage() {
               </>
             ) : (
               <>
-                <span className="eyebrow">New purchase</span>
-                <h2>Purchase invoice</h2>
+                <span className="eyebrow">
+                  {mode === "edit-invoice" ? "Edit purchase invoice" : "New purchase"}
+                </span>
+                <h2>
+                  {mode === "edit-invoice" ? "Update invoice details" : "Purchase invoice"}
+                </h2>
+                {mode === "edit-invoice" && (
+                  <p className="invoice-edit-note">
+                    Amounts and received stock stay locked after saving to protect
+                    inventory and accounting. You can update the invoice number,
+                    dates, and notes.
+                  </p>
+                )}
                 <div className="form-grid">
                   <label className="field">
                     <span>Supplier</span>
                     <select
                       value={invoice.supplierId}
+                      disabled={mode === "edit-invoice"}
                       onChange={(e) =>
                         setInvoice({ ...invoice, supplierId: e.target.value })
                       }
@@ -523,6 +581,7 @@ export function PurchasesPage() {
                     <span>Station</span>
                     <select
                       value={invoice.stationId}
+                      disabled={mode === "edit-invoice"}
                       onChange={(e) =>
                         setInvoice({ ...invoice, stationId: e.target.value })
                       }
@@ -571,6 +630,7 @@ export function PurchasesPage() {
                     <input
                       type="number"
                       min="0"
+                      disabled={mode === "edit-invoice"}
                       placeholder={String(
                         Math.round(subtotal + calculatedTax),
                       )}
@@ -583,7 +643,22 @@ export function PurchasesPage() {
                       }
                     />
                   </label>
+                  <label className="field">
+                    <span>Notes (optional)</span>
+                    <input
+                      value={invoice.notes}
+                      onChange={(e) =>
+                        setInvoice({ ...invoice, notes: e.target.value })
+                      }
+                    />
+                  </label>
                 </div>
+                {mode === "edit-invoice" ? (
+                  <div className="invoice-locked-summary">
+                    <span>Saved invoice total</span>
+                    <strong>{money(editingInvoice?.totalAmount ?? 0)}</strong>
+                  </div>
+                ) : (
                 <div className="invoice-lines">
                   <h3>Invoice lines</h3>
                   {lines.map((line, index) => {
@@ -765,34 +840,92 @@ export function PurchasesPage() {
                     <Plus size={14} /> Add line
                   </button>
                 </div>
+                )}
                 <div className="invoice-options">
-                  <label>
-                    <input
-                      type="checkbox"
-                      checked={invoice.receiveNow}
-                      onChange={(e) =>
-                        setInvoice({ ...invoice, receiveNow: e.target.checked })
-                      }
-                    />{" "}
-                    Receive stock now
-                  </label>
-                  <label className="field">
-                    <span>Attachment (max 500 KB)</span>
-                    <input
-                      type="file"
-                      accept="image/*,.pdf"
-                      onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                    />
-                  </label>
+                  {mode !== "edit-invoice" && (
+                    <>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={invoice.receiveNow}
+                          onChange={(e) =>
+                            setInvoice({
+                              ...invoice,
+                              receiveNow: e.target.checked,
+                            })
+                          }
+                        />{" "}
+                        Receive stock now
+                      </label>
+                      <label>
+                        <input
+                          type="checkbox"
+                          checked={invoice.paidNow}
+                          onChange={(e) =>
+                            setInvoice({
+                              ...invoice,
+                              paidNow: e.target.checked,
+                            })
+                          }
+                        />{" "}
+                        Paid in full already
+                      </label>
+                      {invoice.paidNow && (
+                        <>
+                          <label className="field">
+                            <span>Paid by</span>
+                            <select
+                              value={invoice.paymentMethod}
+                              onChange={(e) =>
+                                setInvoice({
+                                  ...invoice,
+                                  paymentMethod: e.target
+                                    .value as typeof invoice.paymentMethod,
+                                })
+                              }
+                            >
+                              {["CASH", "UPI", "CARD", "OTHER"].map((method) => (
+                                <option key={method}>{method}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="field">
+                            <span>Payment reference (optional)</span>
+                            <input
+                              value={invoice.paymentReferenceNo}
+                              onChange={(e) =>
+                                setInvoice({
+                                  ...invoice,
+                                  paymentReferenceNo: e.target.value,
+                                })
+                              }
+                            />
+                          </label>
+                        </>
+                      )}
+                      <label className="field">
+                        <span>Attachment (max 500 KB)</span>
+                        <input
+                          type="file"
+                          accept="image/*,.pdf"
+                          onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                        />
+                      </label>
+                    </>
+                  )}
                   <div className="invoice-total-summary">
-                    <span>Lines {money(subtotal)}</span>
+                    <span>
+                      Lines {money(mode === "edit-invoice" ? Number(editingInvoice?.subtotal ?? 0) : subtotal)}
+                    </span>
                     {calculatedTax > 0 && (
                       <span>Tax {money(calculatedTax)}</span>
                     )}
                     <strong>
                       Total{" "}
                       {money(
-                        invoice.invoiceTotal
+                        mode === "edit-invoice"
+                          ? Number(editingInvoice?.totalAmount ?? 0)
+                          : invoice.invoiceTotal
                           ? Number(invoice.invoiceTotal)
                           : subtotal + calculatedTax,
                       )}
@@ -808,7 +941,11 @@ export function PurchasesPage() {
                     disabled={saving}
                     onClick={() => void saveInvoice()}
                   >
-                    {saving ? "Saving…" : "Save invoice"}
+                    {saving
+                      ? "Saving…"
+                      : mode === "edit-invoice"
+                        ? "Save changes"
+                        : "Save invoice"}
                   </button>
                 </div>
               </>

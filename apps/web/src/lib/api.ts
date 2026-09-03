@@ -1,4 +1,4 @@
-import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput, DensityReadingInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, OwnerNotificationSettingsInput, PurchaseInvoiceInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationProfileInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
+import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput, DensityReadingInput,ExpenseCategoryInput, ExpenseInput, GoogleAuthInput,InventoryAdjustmentInput, LoginInput, ManagerInput, OwnerNotificationSettingsInput, PurchaseInvoiceInput, PurchaseInvoiceUpdateInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput,StationAccessInput, StationProfileInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
 const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 export class ApiRequestError extends Error { constructor(message: string, public readonly code: string, public readonly requestId?: string, public readonly details?: unknown) { super(message); } }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -56,6 +56,7 @@ export const api = {
   purchasesBootstrap:()=>request<PurchasesBootstrap>('/purchases/bootstrap'),
   createSupplier:(input:SupplierInput)=>request<{supplier:Supplier}>('/purchases/suppliers',{method:'POST',body:JSON.stringify(input)}),
   createPurchaseInvoice:(input:PurchaseInvoiceInput)=>request<{invoice:PurchaseInvoice}>('/purchases/invoices',{method:'POST',body:JSON.stringify(input)}),
+  updatePurchaseInvoice:(id:string,input:PurchaseInvoiceUpdateInput)=>request<{invoice:PurchaseInvoice}>(`/purchases/invoices/${id}`,{method:'PUT',body:JSON.stringify(input)}),
   paySupplierInvoice:(input:SupplierPaymentInput)=>request<{payment:unknown}>('/purchases/payments',{method:'POST',body:JSON.stringify(input)}),
   createExpenseCategory:(input:ExpenseCategoryInput)=>request<{category:ExpenseCategory}>('/purchases/expense-categories',{method:'POST',body:JSON.stringify(input)}),
   createExpense:(input:ExpenseInput)=>request<{expense:Expense}>('/purchases/expenses',{method:'POST',body:JSON.stringify(input)}),
