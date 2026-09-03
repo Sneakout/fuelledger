@@ -37,6 +37,13 @@ function startupFailure(error) {
 
 export default async function handler(request, response) {
   try {
+    const incomingUrl = new URL(request.url, "http://fuelledger.internal");
+    const apiPath = incomingUrl.searchParams.get("path");
+    if (apiPath) {
+      incomingUrl.searchParams.delete("path");
+      const query = incomingUrl.searchParams.toString();
+      request.url = `/api/${apiPath}${query ? `?${query}` : ""}`;
+    }
     if (!application) {
       const { createApp } = await import("../apps/api/dist/vercel-app.js");
       application = createApp();
