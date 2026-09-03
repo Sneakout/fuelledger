@@ -35,8 +35,8 @@ export function LoginPage() {
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [name, setName] = useState("");
   const [organizationName, setOrganizationName] = useState("");
-  const [email, setEmail] = useState("owner@fuelledger.local");
-  const [password, setPassword] = useState("FuelLedger123!");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const googleButton = useRef<HTMLDivElement>(null);
@@ -204,9 +204,13 @@ export function LoginPage() {
               <Mail size={18} />
               <input
                 type="email"
+                name="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
                 autoComplete="email"
+                autoCapitalize="none"
+                spellCheck={false}
+                placeholder="you@company.com"
                 required
               />
             </div>
@@ -217,11 +221,13 @@ export function LoginPage() {
               <LockKeyhole size={18} />
               <input
                 type="password"
+                name="password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 autoComplete={
                   mode === "signup" ? "new-password" : "current-password"
                 }
+                placeholder={mode === "signup" ? "Create a secure password" : "Enter your password"}
                 minLength={8}
                 required
               />
