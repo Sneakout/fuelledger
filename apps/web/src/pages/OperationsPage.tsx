@@ -1,9 +1,557 @@
-import { useEffect,useMemo,useState } from 'react';import { CheckCircle2,Clock3,Fuel,LockKeyhole,Play } from 'lucide-react';import { ApiRequestError,api,type Reading,type Shift,type ShiftBootstrap,type ShiftStation } from '../lib/api';
-const money=(value:string|number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(Number(value));const captured=(value:string)=>new Date(value).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'});function Field({label,value,onChange}:{label:string;value:number;onChange(value:number):void}){return <label className="field"><span>{label}</span><input type="number" min="0" value={value} onChange={e=>onChange(Number(e.target.value))}/></label>}
-function ShiftTimes({shift,closing=false}:{shift:Shift;closing?:boolean}){return <section className="shift-times"><span><Clock3/><i><small>Shift opened</small><b>{captured(shift.openedAt)}</b></i></span><span><Clock3/><i><small>Shift closed</small><b>{shift.closedAt?captured(shift.closedAt):closing?'Captured when you close this shift':'—'}</b></i></span><p>Times are captured by FuelLedger’s server and cannot be edited.</p></section>}
-export function OperationsPage(){const[data,setData]=useState<ShiftBootstrap|null>(null),[stationId,setStationId]=useState(''),[managerId,setManagerId]=useState(''),[userIds,setUserIds]=useState<string[]>([]),[nozzleAssignments,setNozzleAssignments]=useState<Array<{nozzleId:string;userId:string}>>([]),[openingCash,setOpeningCash]=useState(0),[openTanks,setOpenTanks]=useState<Reading[]>([]),[openNozzles,setOpenNozzles]=useState<Reading[]>([]),[closeCash,setCloseCash]=useState(0),[closeTanks,setCloseTanks]=useState<Reading[]>([]),[closeNozzles,setCloseNozzles]=useState<Reading[]>([]),[notes,setNotes]=useState(''),[error,setError]=useState(''),[saving,setSaving]=useState(false);
-const load=()=>api.shiftBootstrap().then(result=>{setData(result);const station=result.stations[0];if(station&&!stationId)selectStation(station,result);}).catch(()=>setError('Unable to load shifts.'));useEffect(()=>{void load();},[]);const selectStation=(station:ShiftStation,source=data)=>{setStationId(station.id);const config=station.configurations[0];setOpenTanks(config?.tanks.map(t=>({id:t.id,value:Number(t.openingStock)}))??[]);setOpenNozzles(config?.dispensers.flatMap(d=>d.nozzles.map(n=>({id:n.id,value:Number(n.openingMeter)})))??[]);const manager=source?.users.find(u=>u.role==='MANAGER')??source?.users[0];if(manager){setManagerId(manager.id);setUserIds([manager.id]);setNozzleAssignments(config?.dispensers.flatMap(d=>d.nozzles.map(n=>({nozzleId:n.id,userId:manager.id})))??[]);}};const active=useMemo(()=>data?.shifts.find(s=>s.status==='OPEN'),[data]);const selected=data?.stations.find(s=>s.id===stationId);const config=selected?.configurations[0];useEffect(()=>{if(active){setCloseTanks(active.tankReadings.map(r=>({id:r.tankId,value:Number(r.openingDip)})));setCloseNozzles(active.nozzleReadings.map(r=>({id:r.nozzleId,value:Number(r.openingMeter)})));setCloseCash(Number(active.openingCash));}},[active?.id]);const replace=(items:Reading[],id:string,value:number,setter:(items:Reading[])=>void)=>setter(items.map(item=>item.id===id?{...item,value}:item));async function open(){if(!stationId||!managerId){setError('Choose a station and manager.');return;}setSaving(true);setError('');try{await api.openShift({stationId,managerId,userIds,nozzleAssignments,openingCash,tankReadings:openTanks,nozzleReadings:openNozzles,notes});setNotes('');load();}catch(e){setError(e instanceof ApiRequestError?e.message:'Unable to open shift.');}finally{setSaving(false);}}async function close(){if(!active)return;setSaving(true);setError('');try{await api.closeShift(active.id,{closingCash:closeCash,tankReadings:closeTanks,nozzleReadings:closeNozzles,notes});setNotes('');load();}catch(e){setError(e instanceof ApiRequestError?e.message:'Unable to close shift.');}finally{setSaving(false);}}
-if(!data)return <main className="page"><div className="loading"><span/><p>Preparing shift workspace…</p></div></main>;if(active)return <main className="page"><div className="page-heading"><div><span className="eyebrow">Open shift · #{active.shiftNumber}</span><h1>{active.station.name} is running</h1><p>Manager: {active.manager.name}. Enter only the closing readings when the shift ends.</p></div><span className="shift-status open"><Clock3 size={15}/> Open now</span></div>{error&&<div className="form-error">{error}</div>}<ShiftTimes shift={active} closing/><section className="shift-grid"><article className="reading-panel"><h2>Close the shift</h2><p>FuelLedger compares these readings with the opening figures automatically.</p><Field label="Actual closing cash" value={closeCash} onChange={setCloseCash}/><Readings title="Closing tank readings" items={active.tankReadings.map(r=>({id:r.tankId,label:`${r.tank.code} · ${r.tank.product.code}`,opening:Number(r.openingDip)}))} values={closeTanks} onChange={v=>replace(closeTanks,v.id,v.value,setCloseTanks)}/><Readings title="Closing meter readings" items={active.nozzleReadings.map(r=>({id:r.nozzleId,label:`${r.nozzle.dispenser.code} / ${r.nozzle.code} · ${r.nozzle.product.code}`,opening:Number(r.openingMeter)}))} values={closeNozzles} onChange={v=>replace(closeNozzles,v.id,v.value,setCloseNozzles)}/><label className="field"><span>Close note (optional)</span><input value={notes} onChange={e=>setNotes(e.target.value)}/></label><button className="primary" disabled={saving} onClick={()=>void close()}><LockKeyhole size={17}/> Close & review shift</button></article><ShiftSummary shift={active} closingCash={closeCash} closeNozzles={closeNozzles}/></section></main>;
-return <main className="page"><div className="page-heading"><div><span className="eyebrow">Shift operations</span><h1>Start a shift in minutes</h1><p>Capture the starting point once. Everything else can follow from the equipment and transactions.</p></div><span className="shift-status ready"><CheckCircle2 size={15}/> Ready to open</span></div>{error&&<div className="form-error">{error}</div>}<section className="shift-grid"><article className="reading-panel"><h2>Open shift</h2><p className="time-note"><Clock3/> Opening time is captured automatically when you open the shift.</p><div className="form-grid compact"><label className="field"><span>Station</span><select value={stationId} onChange={e=>{const next=data.stations.find(s=>s.id===e.target.value);if(next)selectStation(next);}}>{data.stations.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label><label className="field"><span>Shift manager</span><select value={managerId} onChange={e=>setManagerId(e.target.value)}>{data.users.map(u=><option key={u.id} value={u.id}>{u.name} · {u.role.toLowerCase()}</option>)}</select></label></div><Field label="Opening cash" value={openingCash} onChange={setOpeningCash}/><div className="team-picker"><span>Shift team</span>{data.users.map(user=><label key={user.id}><input type="checkbox" checked={userIds.includes(user.id)} onChange={e=>setUserIds(current=>e.target.checked?[...current,user.id]:current.filter(id=>id!==user.id))}/>{user.name}</label>)}</div><Readings title="Opening tank readings" items={config?.tanks.map(t=>({id:t.id,label:`${t.code} · ${t.product.code}`,opening:Number(t.openingStock)}))??[]} values={openTanks} onChange={v=>replace(openTanks,v.id,v.value,setOpenTanks)}/><Readings title="Opening meter readings" items={config?.dispensers.flatMap(d=>d.nozzles.map(n=>({id:n.id,label:`${d.code} / ${n.code} · ${n.product.code}`,opening:Number(n.openingMeter)})))??[]} values={openNozzles} onChange={v=>replace(openNozzles,v.id,v.value,setOpenNozzles)}/><label className="field"><span>Opening note (optional)</span><input value={notes} onChange={e=>setNotes(e.target.value)}/></label><button className="primary" disabled={saving||!stationId} onClick={()=>void open()}><Play size={17}/> Open shift</button></article><article className="manager-card"><span className="metric-icon green"><Fuel/></span><span className="eyebrow">Simple by design</span><h2>A calm start. A clear finish.</h2><p>Pick the station and people, confirm cash and readings, then open. At close, enter the final readings and FuelLedger makes the summary.</p></article></section><section className="recent-shifts"><h2>Recent shifts</h2>{data.shifts.filter(s=>s.status!=='OPEN').map(s=><div key={s.id}><span><strong>#{s.shiftNumber} · {s.station.name}</strong><small>Opened {captured(s.openedAt)} · Closed {s.closedAt?captured(s.closedAt):'—'}</small></span><span>{s.status.replaceAll('_',' ')}</span><span>{s.summary.fuelVolume.toLocaleString()} L metered</span></div>)}{!data.shifts.length&&<p>No shifts yet. Open the first one above.</p>}</section></main>}
-function Readings({title,items,values,onChange}:{title:string;items:Array<{id:string;label:string;opening:number}>;values:Reading[];onChange(value:Reading):void}){return <section className="shift-readings"><h3>{title}</h3>{items.map(item=>{const value=values.find(v=>v.id===item.id)?.value??0;return <label key={item.id}><span><strong>{item.label}</strong><small>Opening: {item.opening.toLocaleString()}</small></span><input type="number" min="0" value={value} onChange={e=>onChange({id:item.id,value:Number(e.target.value)})}/></label>})}</section>}
-function ShiftSummary({shift,closingCash,closeNozzles}:{shift:Shift;closingCash:number;closeNozzles:Reading[]}){const volume=shift.nozzleReadings.reduce((sum,r)=>sum+Math.max(0,(closeNozzles.find(x=>x.id===r.nozzleId)?.value??Number(r.openingMeter))-Number(r.openingMeter)),0);return <article className="shift-summary"><span className="eyebrow">Shift summary preview</span><h2>Here’s what we captured</h2><div><span>Opening cash</span><strong>{money(shift.openingCash)}</strong></div><div><span>Closing cash</span><strong>{money(closingCash)}</strong></div><div><span>Metered volume</span><strong>{volume.toLocaleString(undefined,{maximumFractionDigits:3})} L</strong></div><div><span>Readings</span><strong>{shift.nozzleReadings.length} nozzles · {shift.tankReadings.length} tanks</strong></div></article>}
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Clock3, Fuel, LockKeyhole, Play } from "lucide-react";
+import {
+  ApiRequestError,
+  api,
+  type Reading,
+  type Shift,
+  type ShiftBootstrap,
+  type ShiftStation,
+} from "../lib/api";
+const money = (value: string | number) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(Number(value));
+const captured = (value: string) =>
+  new Date(value).toLocaleString("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+function Field({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange(value: number): void;
+}) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <input
+        type="number"
+        min="0"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+    </label>
+  );
+}
+function ShiftTimes({
+  shift,
+  closing = false,
+}: {
+  shift: Shift;
+  closing?: boolean;
+}) {
+  return (
+    <section className="shift-times">
+      <span>
+        <Clock3 />
+        <i>
+          <small>Shift opened</small>
+          <b>{captured(shift.openedAt)}</b>
+        </i>
+      </span>
+      <span>
+        <Clock3 />
+        <i>
+          <small>Shift closed</small>
+          <b>
+            {shift.closedAt
+              ? captured(shift.closedAt)
+              : closing
+                ? "Captured when you close this shift"
+                : "—"}
+          </b>
+        </i>
+      </span>
+      <p>Times are captured by FuelLedger’s server and cannot be edited.</p>
+    </section>
+  );
+}
+export function OperationsPage() {
+  const [data, setData] = useState<ShiftBootstrap | null>(null),
+    [stationId, setStationId] = useState(""),
+    [managerId, setManagerId] = useState(""),
+    [userIds, setUserIds] = useState<string[]>([]),
+    [nozzleAssignments, setNozzleAssignments] = useState<
+      Array<{ nozzleId: string; userId: string }>
+    >([]),
+    [openingCash, setOpeningCash] = useState(0),
+    [openTanks, setOpenTanks] = useState<Reading[]>([]),
+    [openNozzles, setOpenNozzles] = useState<Reading[]>([]),
+    [closeCash, setCloseCash] = useState(0),
+    [closeTanks, setCloseTanks] = useState<Reading[]>([]),
+    [closeNozzles, setCloseNozzles] = useState<Reading[]>([]),
+    [notes, setNotes] = useState(""),
+    [error, setError] = useState(""),
+    [loadError, setLoadError] = useState(""),
+    [saving, setSaving] = useState(false);
+  const load = async () => {
+    setLoadError("");
+    let timeoutId: number | undefined;
+    try {
+      const result = await Promise.race([
+        api.shiftBootstrap(),
+        new Promise<never>((_, reject) => {
+          timeoutId = window.setTimeout(
+            () => reject(new Error("SHIFT_WORKSPACE_TIMEOUT")),
+            15_000,
+          );
+        }),
+      ]);
+      setData(result);
+      const station = result.stations[0];
+      if (station && !stationId) selectStation(station, result);
+    } catch (item) {
+      setLoadError(
+        item instanceof ApiRequestError
+          ? item.message
+          : "The shift workspace is taking longer than expected. Check your connection and try again.",
+      );
+    } finally {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    }
+  };
+  useEffect(() => {
+    void load();
+  }, []);
+  const selectStation = (station: ShiftStation, source = data) => {
+    setStationId(station.id);
+    const config = station.configurations[0];
+    setOpenTanks(
+      config?.tanks.map((t) => ({ id: t.id, value: Number(t.openingStock) })) ??
+        [],
+    );
+    setOpenNozzles(
+      config?.dispensers.flatMap((d) =>
+        d.nozzles.map((n) => ({ id: n.id, value: Number(n.openingMeter) })),
+      ) ?? [],
+    );
+    const manager =
+      source?.users.find((u) => u.role === "MANAGER") ?? source?.users[0];
+    if (manager) {
+      setManagerId(manager.id);
+      setUserIds([manager.id]);
+      setNozzleAssignments(
+        config?.dispensers.flatMap((d) =>
+          d.nozzles.map((n) => ({ nozzleId: n.id, userId: manager.id })),
+        ) ?? [],
+      );
+    }
+  };
+  const active = useMemo(
+    () => data?.shifts.find((s) => s.status === "OPEN"),
+    [data],
+  );
+  const selected = data?.stations.find((s) => s.id === stationId);
+  const config = selected?.configurations[0];
+  useEffect(() => {
+    if (active) {
+      setCloseTanks(
+        active.tankReadings.map((r) => ({
+          id: r.tankId,
+          value: Number(r.openingDip),
+        })),
+      );
+      setCloseNozzles(
+        active.nozzleReadings.map((r) => ({
+          id: r.nozzleId,
+          value: Number(r.openingMeter),
+        })),
+      );
+      setCloseCash(Number(active.openingCash));
+    }
+  }, [active?.id]);
+  const replace = (
+    items: Reading[],
+    id: string,
+    value: number,
+    setter: (items: Reading[]) => void,
+  ) =>
+    setter(items.map((item) => (item.id === id ? { ...item, value } : item)));
+  async function open() {
+    if (!stationId || !managerId) {
+      setError("Choose a station and manager.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await api.openShift({
+        stationId,
+        managerId,
+        userIds,
+        nozzleAssignments,
+        openingCash,
+        tankReadings: openTanks,
+        nozzleReadings: openNozzles,
+        notes,
+      });
+      setNotes("");
+      load();
+    } catch (e) {
+      setError(
+        e instanceof ApiRequestError ? e.message : "Unable to open shift.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function close() {
+    if (!active) return;
+    setSaving(true);
+    setError("");
+    try {
+      await api.closeShift(active.id, {
+        closingCash: closeCash,
+        tankReadings: closeTanks,
+        nozzleReadings: closeNozzles,
+        notes,
+      });
+      setNotes("");
+      load();
+    } catch (e) {
+      setError(
+        e instanceof ApiRequestError ? e.message : "Unable to close shift.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+  if (!data)
+    return (
+      <main className="page">
+        {loadError ? (
+          <section className="empty-state" role="alert">
+            <h2>Shift workspace did not load</h2>
+            <p>{loadError}</p>
+            <button className="primary small" onClick={() => void load()}>
+              Try again
+            </button>
+          </section>
+        ) : (
+          <div className="loading">
+            <span />
+            <p>Preparing shift workspace…</p>
+          </div>
+        )}
+      </main>
+    );
+  if (active)
+    return (
+      <main className="page">
+        <div className="page-heading">
+          <div>
+            <span className="eyebrow">Open shift · #{active.shiftNumber}</span>
+            <h1>{active.station.name} is running</h1>
+            <p>
+              Manager: {active.manager.name}. Enter only the closing readings
+              when the shift ends.
+            </p>
+          </div>
+          <span className="shift-status open">
+            <Clock3 size={15} /> Open now
+          </span>
+        </div>
+        {error && <div className="form-error">{error}</div>}
+        <ShiftTimes shift={active} closing />
+        <section className="shift-grid">
+          <article className="reading-panel">
+            <h2>Close the shift</h2>
+            <p>
+              FuelLedger compares these readings with the opening figures
+              automatically.
+            </p>
+            <Field
+              label="Actual closing cash"
+              value={closeCash}
+              onChange={setCloseCash}
+            />
+            <Readings
+              title="Closing tank readings"
+              items={active.tankReadings.map((r) => ({
+                id: r.tankId,
+                label: `${r.tank.code} · ${r.tank.product.code}`,
+                opening: Number(r.openingDip),
+              }))}
+              values={closeTanks}
+              onChange={(v) =>
+                replace(closeTanks, v.id, v.value, setCloseTanks)
+              }
+            />
+            <Readings
+              title="Closing meter readings"
+              items={active.nozzleReadings.map((r) => ({
+                id: r.nozzleId,
+                label: `${r.nozzle.dispenser.code} / ${r.nozzle.code} · ${r.nozzle.product.code}`,
+                opening: Number(r.openingMeter),
+              }))}
+              values={closeNozzles}
+              onChange={(v) =>
+                replace(closeNozzles, v.id, v.value, setCloseNozzles)
+              }
+            />
+            <label className="field">
+              <span>Close note (optional)</span>
+              <input value={notes} onChange={(e) => setNotes(e.target.value)} />
+            </label>
+            <button
+              className="primary"
+              disabled={saving}
+              onClick={() => void close()}
+            >
+              <LockKeyhole size={17} /> Close & review shift
+            </button>
+          </article>
+          <ShiftSummary
+            shift={active}
+            closingCash={closeCash}
+            closeNozzles={closeNozzles}
+          />
+        </section>
+      </main>
+    );
+  return (
+    <main className="page">
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow">Shift operations</span>
+          <h1>Start a shift in minutes</h1>
+          <p>
+            Capture the starting point once. Everything else can follow from the
+            equipment and transactions.
+          </p>
+        </div>
+        <span className="shift-status ready">
+          <CheckCircle2 size={15} /> Ready to open
+        </span>
+      </div>
+      {error && <div className="form-error">{error}</div>}
+      <section className="shift-grid">
+        <article className="reading-panel">
+          <h2>Open shift</h2>
+          <p className="time-note">
+            <Clock3 /> Opening time is captured automatically when you open the
+            shift.
+          </p>
+          <div className="form-grid compact">
+            <label className="field">
+              <span>Station</span>
+              <select
+                value={stationId}
+                onChange={(e) => {
+                  const next = data.stations.find(
+                    (s) => s.id === e.target.value,
+                  );
+                  if (next) selectStation(next);
+                }}
+              >
+                {data.stations.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="field">
+              <span>Shift manager</span>
+              <select
+                value={managerId}
+                onChange={(e) => setManagerId(e.target.value)}
+              >
+                {data.users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name} · {u.role.toLowerCase()}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <Field
+            label="Opening cash"
+            value={openingCash}
+            onChange={setOpeningCash}
+          />
+          <div className="team-picker">
+            <span>Shift team</span>
+            {data.users.map((user) => (
+              <label key={user.id}>
+                <input
+                  type="checkbox"
+                  checked={userIds.includes(user.id)}
+                  onChange={(e) =>
+                    setUserIds((current) =>
+                      e.target.checked
+                        ? [...current, user.id]
+                        : current.filter((id) => id !== user.id),
+                    )
+                  }
+                />
+                {user.name}
+              </label>
+            ))}
+          </div>
+          <Readings
+            title="Opening tank readings"
+            items={
+              config?.tanks.map((t) => ({
+                id: t.id,
+                label: `${t.code} · ${t.product.code}`,
+                opening: Number(t.openingStock),
+              })) ?? []
+            }
+            values={openTanks}
+            onChange={(v) => replace(openTanks, v.id, v.value, setOpenTanks)}
+          />
+          <Readings
+            title="Opening meter readings"
+            items={
+              config?.dispensers.flatMap((d) =>
+                d.nozzles.map((n) => ({
+                  id: n.id,
+                  label: `${d.code} / ${n.code} · ${n.product.code}`,
+                  opening: Number(n.openingMeter),
+                })),
+              ) ?? []
+            }
+            values={openNozzles}
+            onChange={(v) =>
+              replace(openNozzles, v.id, v.value, setOpenNozzles)
+            }
+          />
+          <label className="field">
+            <span>Opening note (optional)</span>
+            <input value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </label>
+          <button
+            className="primary"
+            disabled={saving || !stationId}
+            onClick={() => void open()}
+          >
+            <Play size={17} /> Open shift
+          </button>
+        </article>
+        <article className="manager-card">
+          <span className="metric-icon green">
+            <Fuel />
+          </span>
+          <span className="eyebrow">Simple by design</span>
+          <h2>A calm start. A clear finish.</h2>
+          <p>
+            Pick the station and people, confirm cash and readings, then open.
+            At close, enter the final readings and FuelLedger makes the summary.
+          </p>
+        </article>
+      </section>
+      <section className="recent-shifts">
+        <h2>Recent shifts</h2>
+        {data.shifts
+          .filter((s) => s.status !== "OPEN")
+          .map((s) => (
+            <div key={s.id}>
+              <span>
+                <strong>
+                  #{s.shiftNumber} · {s.station.name}
+                </strong>
+                <small>
+                  Opened {captured(s.openedAt)} · Closed{" "}
+                  {s.closedAt ? captured(s.closedAt) : "—"}
+                </small>
+              </span>
+              <span>{s.status.replaceAll("_", " ")}</span>
+              <span>{s.summary.fuelVolume.toLocaleString()} L metered</span>
+            </div>
+          ))}
+        {!data.shifts.length && <p>No shifts yet. Open the first one above.</p>}
+      </section>
+    </main>
+  );
+}
+function Readings({
+  title,
+  items,
+  values,
+  onChange,
+}: {
+  title: string;
+  items: Array<{ id: string; label: string; opening: number }>;
+  values: Reading[];
+  onChange(value: Reading): void;
+}) {
+  return (
+    <section className="shift-readings">
+      <h3>{title}</h3>
+      {items.map((item) => {
+        const value = values.find((v) => v.id === item.id)?.value ?? 0;
+        return (
+          <label key={item.id}>
+            <span>
+              <strong>{item.label}</strong>
+              <small>Opening: {item.opening.toLocaleString()}</small>
+            </span>
+            <input
+              type="number"
+              min="0"
+              value={value}
+              onChange={(e) =>
+                onChange({ id: item.id, value: Number(e.target.value) })
+              }
+            />
+          </label>
+        );
+      })}
+    </section>
+  );
+}
+function ShiftSummary({
+  shift,
+  closingCash,
+  closeNozzles,
+}: {
+  shift: Shift;
+  closingCash: number;
+  closeNozzles: Reading[];
+}) {
+  const volume = shift.nozzleReadings.reduce(
+    (sum, r) =>
+      sum +
+      Math.max(
+        0,
+        (closeNozzles.find((x) => x.id === r.nozzleId)?.value ??
+          Number(r.openingMeter)) - Number(r.openingMeter),
+      ),
+    0,
+  );
+  return (
+    <article className="shift-summary">
+      <span className="eyebrow">Shift summary preview</span>
+      <h2>Here’s what we captured</h2>
+      <div>
+        <span>Opening cash</span>
+        <strong>{money(shift.openingCash)}</strong>
+      </div>
+      <div>
+        <span>Closing cash</span>
+        <strong>{money(closingCash)}</strong>
+      </div>
+      <div>
+        <span>Metered volume</span>
+        <strong>
+          {volume.toLocaleString(undefined, { maximumFractionDigits: 3 })} L
+        </strong>
+      </div>
+      <div>
+        <span>Readings</span>
+        <strong>
+          {shift.nozzleReadings.length} nozzles · {shift.tankReadings.length}{" "}
+          tanks
+        </strong>
+      </div>
+    </article>
+  );
+}
