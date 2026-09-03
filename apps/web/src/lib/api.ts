@@ -3,8 +3,20 @@ const API_URL = import.meta.env.VITE_API_URL ?? '/api';
 export class ApiRequestError extends Error { constructor(message: string, public readonly code: string, public readonly requestId?: string) { super(message); } }
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, { ...init, credentials: 'include', headers: { 'Content-Type': 'application/json', ...init?.headers } });
-  if (!response.ok) { const body = await response.json() as ApiError; throw new ApiRequestError(body.error.message, body.error.code, body.error.requestId); }
-  return response.status === 204 ? undefined as T : response.json() as Promise<T>;
+  if (response.status === 204) return undefined as T;
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('application/json')) {
+    throw new ApiRequestError(
+      response.ok ? 'The server returned an invalid response.' : 'FuelLedger could not connect to its server. Please try again shortly.',
+      response.ok ? 'INVALID_SERVER_RESPONSE' : 'SERVER_UNAVAILABLE',
+    );
+  }
+  const body = await response.json() as T | ApiError;
+  if (!response.ok) {
+    const apiError = body as ApiError;
+    throw new ApiRequestError(apiError.error?.message ?? 'Something went wrong.', apiError.error?.code ?? 'REQUEST_FAILED', apiError.error?.requestId);
+  }
+  return body as T;
 }
 export const api = {
   login: (input: LoginInput) => request<{ user: User }>('/auth/login', { method: 'POST', body: JSON.stringify(input) }),
