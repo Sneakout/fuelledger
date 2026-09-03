@@ -19,10 +19,12 @@ export async function createStation(organizationId: string, setup: StationSetup)
       const existingProduct = await tx.product.findUnique({ where: { organizationId_code: { organizationId, code: product.code } } });
       if (!existingProduct) return tx.product.create({ data: { organizationId, ...product } });
       const sameKind = existingProduct.category === product.category && existingProduct.unit === product.unit && existingProduct.isService === product.isService;
-      if (!sameKind) throw new AppError(409, 'PRODUCT_CONFIGURATION_CONFLICT', `${product.code} already exists in your catalog as a different type of product. Use a different product code for this petrol pump.`);
-      // A fuel product may already exist in the catalog before its first tank or nozzle is added.
-      // Enable the required tracking flags instead of making the owner repair catalog setup manually.
+      const usage = await tx.product.findUniqueOrThrow({ where: { id: existingProduct.id }, select: { _count: { select: { tanks: true, nozzles: true, sales: true, inventoryLedger: true, receiptLines: true, purchaseInvoiceLines: true } } } });
+      const isInUse = Object.values(usage._count).some(count => count > 0);
+      if (!sameKind && isInUse) throw new AppError(409, 'PRODUCT_CONFIGURATION_CONFLICT', `${product.code} already has operational records as a different product type. Use a different product code for this petrol pump.`);
+      // Starter catalog items such as MS and HSD are safely converted on their first pump setup.
       return tx.product.update({ where: { id: existingProduct.id }, data: {
+        ...(sameKind ? {} : { category: product.category, unit: product.unit, isService: product.isService, customCategoryId: null }),
         inventoryTracked: existingProduct.inventoryTracked || product.inventoryTracked,
         tankLinked: existingProduct.tankLinked || product.tankLinked,
         meterLinked: existingProduct.meterLinked || product.meterLinked,
