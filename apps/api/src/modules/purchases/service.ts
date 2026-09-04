@@ -424,7 +424,6 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
           where: {
             sourceType: 'SUPPLIER_PAYMENT',
             sourceId: openingPayment.id,
-            description: 'Supplier payment recorded with purchase invoice',
           },
         })
       : null;
@@ -521,7 +520,7 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
             createdById: openingPayment.createdById,
             journalDate: openingPayment.paidAt,
             reference: openingPaymentJournal.reference,
-            description: 'Supplier payment recorded with purchase invoice',
+            description: openingPaymentJournal.description,
             sourceType: 'SUPPLIER_PAYMENT',
             sourceId: openingPayment.id,
             lines: [
