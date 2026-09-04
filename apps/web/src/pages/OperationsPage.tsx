@@ -19,6 +19,13 @@ const captured = (value: string) =>
     dateStyle: "medium",
     timeStyle: "short",
   });
+const meterLabel = (
+  dispenser: { code: string; location: string | null },
+  nozzle: { code: string; product: { code: string } },
+) =>
+  `${dispenser.code} / ${nozzle.code} · ${nozzle.product.code}${
+    dispenser.location ? ` · ${dispenser.location}` : ""
+  }`;
 function Field({
   label,
   value,
@@ -125,7 +132,7 @@ export function OperationsPage() {
     const config = station.configurations[0];
     const last = station.lastClosing;
     setOpenTanks(
-      config?.tanks.map((t) => ({ id: t.id, value: Number(last?.tankReadings.find(reading=>reading.id===t.id)?.value??t.openingStock) })) ??
+      config?.tanks.map((t) => ({ id: t.id, value: Number(last?.tankReadings.find(reading=>reading.id===t.id)?.value??station.availableTankStock.find(reading=>reading.id===t.id)?.value??t.openingStock) })) ??
         [],
     );
     setOpenNozzles(
@@ -289,7 +296,7 @@ export function OperationsPage() {
               title="Closing meter readings"
               items={active.nozzleReadings.map((r) => ({
                 id: r.nozzleId,
-                label: `${r.nozzle.dispenser.code} / ${r.nozzle.code} · ${r.nozzle.product.code}`,
+                label: meterLabel(r.nozzle.dispenser, r.nozzle),
                 opening: Number(r.openingMeter),
               }))}
               values={closeNozzles}
@@ -403,7 +410,7 @@ export function OperationsPage() {
               config?.tanks.map((t) => ({
                 id: t.id,
                 label: `${t.code} · ${t.product.code}`,
-                opening: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.value??t.openingStock),
+                opening: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.value??selected?.availableTankStock.find(reading=>reading.id===t.id)?.value??t.openingStock),
               })) ?? []
             }
             values={openTanks}
@@ -416,7 +423,7 @@ export function OperationsPage() {
               config?.dispensers.flatMap((d) =>
                 d.nozzles.map((n) => ({
                   id: n.id,
-                  label: `${d.code} / ${n.code} · ${n.product.code}`,
+                  label: meterLabel(d, n),
                   opening: Number(selected?.lastClosing?.nozzleReadings.find(reading=>reading.id===n.id)?.value??n.openingMeter),
                 })),
               ) ?? []

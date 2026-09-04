@@ -28,7 +28,7 @@ const exact = (ids: string[], values: Array<{ id: string }>) =>
   ids.length === values.length &&
   ids.every((id) => values.some((value) => value.id === id));
 export async function bootstrap(organizationId: string, stationIds?: string[]) {
-  const [stations, users, shifts] = await Promise.all([
+  const [stations, users, shifts, tankInventory] = await Promise.all([
     prisma.station.findMany({
       where: {
         organizationId,
@@ -92,9 +92,28 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
       take: 8,
       include,
     }),
+    prisma.inventoryLedger.groupBy({
+      by: ["tankId"],
+      where: {
+        organizationId,
+        tankId: { not: null },
+        ...(stationIds ? { stationId: { in: stationIds } } : {}),
+      },
+      _sum: { quantityDelta: true },
+    }),
   ]);
+  const inventoryByTank = new Map(
+    tankInventory.map((row) => [row.tankId!, Number(row._sum.quantityDelta ?? 0)]),
+  );
   const shapedStations = stations.map(({ shifts: previous, ...station }) => ({
     ...station,
+    availableTankStock:
+      station.configurations[0]?.tanks.map((tank) => ({
+        id: tank.id,
+        value: new Prisma.Decimal(
+          Number(tank.openingStock) + (inventoryByTank.get(tank.id) ?? 0),
+        ),
+      })) ?? [],
     lastClosing: previous[0]
       ? {
           shiftId: previous[0].id,
@@ -163,17 +182,35 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
       nozzleReadings: { select: { nozzleId: true, closingMeter: true } },
     },
   });
+  const tankInventory = await prisma.inventoryLedger.groupBy({
+    by: ["tankId"],
+    where: {
+      organizationId,
+      stationId: station.id,
+      tankId: { in: tanks.map((tank) => tank.id) },
+    },
+    _sum: { quantityDelta: true },
+  });
+  const inventoryByTank = new Map(
+    tankInventory.map((row) => [
+      row.tankId!,
+      Number(row._sum.quantityDelta ?? 0),
+    ]),
+  );
   for (const reading of input.tankReadings) {
     const tank = tanks.find((item) => item.id === reading.id)!;
     const prior = previous?.tankReadings.find(
       (row) => row.tankId === reading.id,
     )?.closingDip;
-    const expected = Number(prior ?? tank.openingStock);
+    const expected =
+      prior !== null && prior !== undefined
+        ? Number(prior)
+        : Number(tank.openingStock) + (inventoryByTank.get(tank.id) ?? 0);
     if (Math.abs(reading.value - expected) > 0.001)
       throw new AppError(
         409,
         "OPENING_READING_MISMATCH",
-        `Tank ${tank.code} must open at ${expected.toLocaleString()} L, matching ${prior !== null && prior !== undefined ? `shift #${previous!.shiftNumber}'s closing reading` : "its configured opening stock"}. Refresh and try again.`,
+        `Tank ${tank.code} must open at ${expected.toLocaleString()} L, matching ${prior !== null && prior !== undefined ? `shift #${previous!.shiftNumber}'s closing reading` : "its available inventory"}. Refresh and try again.`,
       );
   }
   for (const reading of input.nozzleReadings) {

@@ -20,11 +20,13 @@ export const loginSchema = z.object({
 export const signupSchema=z.object({name:z.string().trim().min(2,'Enter your name'),organizationName:z.string().trim().min(2,'Enter your business name'),email:z.email('Enter a valid email address'),password:z.string().min(8,'Password must be at least 8 characters').regex(/[A-Z]/,'Include an uppercase letter').regex(/[0-9]/,'Include a number')});
 export const googleAuthSchema=z.object({credential:z.string().min(20)});
 export const demoAccessSchema=z.object({contact:z.string().trim().min(5).max(254)}).superRefine((value,context)=>{const email=z.email().safeParse(value.contact).success;const phone=/^\+?[0-9][0-9\s-]{7,18}$/.test(value.contact);if(!email&&!phone)context.addIssue({code:'custom',path:['contact'],message:'Enter a valid email address or mobile number'});});
+export const customerSubscriptionUpdateSchema=z.object({setupFeePaid:z.boolean(),lifetimeAccessPaid:z.boolean()}).superRefine((value,context)=>{if(value.lifetimeAccessPaid&&!value.setupFeePaid)context.addIssue({code:'custom',path:['setupFeePaid'],message:'Setup payment must be confirmed before lifetime access can be activated.'});});
 export type User = z.infer<typeof userSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type SignupInput=z.infer<typeof signupSchema>;
 export type GoogleAuthInput=z.infer<typeof googleAuthSchema>;
 export type DemoAccessInput=z.infer<typeof demoAccessSchema>;
+export type CustomerSubscriptionUpdateInput=z.infer<typeof customerSubscriptionUpdateSchema>;
 export type ApiError = { error: { code: string; message: string; requestId?: string; details?: unknown } };
 const whatsappNumber = z.preprocess(
   value => typeof value === 'string' ? value.replace(/[\s()-]/g, '') : value,

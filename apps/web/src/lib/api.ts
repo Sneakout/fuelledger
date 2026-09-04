@@ -226,6 +226,9 @@ export const api = {
     }),
   testWhatsApp: () => request<{ delivery: { status: string; reason?: string } }>('/notifications/test', { method: 'POST' }),
   demoLeads: () => request<DemoLeadsBootstrap>('/platform/demo-leads'),
+  platformCustomers: () => request<PlatformCustomersBootstrap>('/platform/customers'),
+  updateCustomerSubscription: (id: string, input: { setupFeePaid: boolean; lifetimeAccessPaid: boolean }) => request<{ customer: Pick<PlatformCustomer, 'id' | 'setupFeePaidAt' | 'lifetimeAccessPaidAt' | 'subscriptionUpdatedAt' | 'subscriptionUpdatedBy'> }>(`/platform/customers/${id}/subscription`, { method: 'PUT', body: JSON.stringify(input) }),
+  subscription: () => request<SubscriptionStatus>('/platform/subscription'),
 };
 export type NotificationSettings = {
   whatsappNumber: string | null;
@@ -267,6 +270,23 @@ export type DemoLeadsBootstrap = {
   leads: DemoLead[];
   summary: { sessions: number; uniqueContacts: number };
 };
+export type PlatformCustomer = {
+  id: string;
+  name: string;
+  createdAt: string;
+  setupFeePaidAt: string | null;
+  lifetimeAccessPaidAt: string | null;
+  subscriptionUpdatedAt: string | null;
+  subscriptionUpdatedBy: string | null;
+  owner: { name: string; email: string; lastLoginAt: string | null } | null;
+  petrolPumps: number;
+};
+export type PlatformCustomersBootstrap = { customers: PlatformCustomer[] };
+export type SubscriptionStatus = {
+  setupFeePaidAt: string | null;
+  lifetimeAccessPaidAt: string | null;
+  subscriptionUpdatedAt: string | null;
+};
 export type Reading = { id: string; value: number };
 export type ShiftOpenForm = {
   stationId: string;
@@ -288,6 +308,7 @@ export type ShiftStation = {
   id: string;
   name: string;
   code: string;
+  availableTankStock: Array<{ id: string; value: string }>;
   lastClosing: {
     shiftId: string;
     shiftNumber: number;
@@ -307,6 +328,7 @@ export type ShiftStation = {
     dispensers: Array<{
       id: string;
       code: string;
+      location: string | null;
       nozzles: Array<{
         id: string;
         code: string;
@@ -334,7 +356,7 @@ export type Shift = {
     nozzle: {
       code: string;
       product: { name: string; code: string };
-      dispenser: { code: string };
+      dispenser: { code: string; location: string | null };
     };
   }>;
   tankReadings: Array<{
@@ -350,7 +372,7 @@ export type Shift = {
     nozzle: {
       code: string;
       product: { name: string; code: string };
-      dispenser: { code: string };
+      dispenser: { code: string; location: string | null };
     };
   }>;
   summary: {

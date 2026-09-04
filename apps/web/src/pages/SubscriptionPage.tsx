@@ -14,7 +14,9 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../components/AuthProvider";
+import { api, type SubscriptionStatus } from "../lib/api";
 
 const included = [
   "Shift, nozzle and attendant management",
@@ -35,6 +37,8 @@ const money = (value: number) =>
 
 export function SubscriptionPage() {
   const { user } = useAuth();
+  const [status, setStatus] = useState<SubscriptionStatus | null>(null);
+  useEffect(() => { if (user?.role === "OWNER") void api.subscription().then(setStatus); }, [user?.role]);
   if (user?.role !== "OWNER")
     return (
       <main className="page">
@@ -74,7 +78,9 @@ export function SubscriptionPage() {
                 <h2>FuelLedger Complete</h2>
               </div>
             </div>
-            <span className="plan-status">Simple pricing</span>
+            <span className={`plan-status ${status?.lifetimeAccessPaidAt ? "active" : ""}`}>
+              {status?.lifetimeAccessPaidAt ? "Lifetime access active" : status?.setupFeePaidAt ? "Setup activated" : "Payment pending"}
+            </span>
           </header>
           <div className="price-choice">
             <div>
@@ -93,11 +99,10 @@ export function SubscriptionPage() {
           <div className="launch-offer">
             <BadgeCheck />
             <span>
-              <small>No recurring subscription</small>
-              <b>Pay once. Use for life.</b>
+              <small>{status?.lifetimeAccessPaidAt ? "Plan activated" : "No recurring subscription"}</small>
+              <b>{status?.lifetimeAccessPaidAt ? "FuelLedger Complete · Lifetime" : status?.setupFeePaidAt ? "Setup paid · First month active" : "Pay once. Use for life."}</b>
               <p>
-                The setup fee includes assisted onboarding and your first month
-                of full access.
+                {status?.lifetimeAccessPaidAt ? "Your lifetime access payment is confirmed. There are no recurring platform fees." : "The setup fee includes assisted onboarding and your first month of full access."}
               </p>
             </span>
           </div>
@@ -110,12 +115,12 @@ export function SubscriptionPage() {
             ))}
           </div>
           <footer>
-            <a
+            {status?.lifetimeAccessPaidAt ? <div className="subscription-contact active"><BadgeCheck /> Lifetime plan active</div> : <a
               className="primary subscription-contact"
               href="tel:+918977506454"
             >
               <Phone /> Contact us · 89775 06454
-            </a>
+            </a>}
             <p>
               Prices exclude applicable GST. No transaction fee is charged by
               FuelLedger.

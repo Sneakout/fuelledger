@@ -125,6 +125,10 @@ enum NotificationDeliveryStatus {
 model Organization {
   id        String   @id @default(cuid())
   name      String
+  setupFeePaidAt DateTime? @map("setup_fee_paid_at")
+  lifetimeAccessPaidAt DateTime? @map("lifetime_access_paid_at")
+  subscriptionUpdatedAt DateTime? @map("subscription_updated_at")
+  subscriptionUpdatedBy String? @map("subscription_updated_by")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   users     User[]
