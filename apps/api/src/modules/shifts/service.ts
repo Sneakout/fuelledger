@@ -408,16 +408,29 @@ export async function closeShift(
               },
             },
           },
-          tankMappings: { select: { tankId: true } },
+          tankMappings: {
+            where: {
+              tank: {
+                configurationId: shift.configurationId,
+                status: "ACTIVE",
+              },
+            },
+            select: { tankId: true, tank: { select: { productId: true } } },
+          },
         },
       });
       if (!nozzle)
         throw new AppError(409, "NOZZLE_NOT_FOUND", "A shift nozzle is no longer available.");
-      if (nozzle.tankMappings.length !== 1)
+      const compatibleTanks = nozzle.tankMappings.filter(
+        (mapping) => mapping.tank.productId === nozzle.productId,
+      );
+      if (compatibleTanks.length !== 1)
         throw new AppError(
           409,
           "NOZZLE_TANK_AMBIGUOUS",
-          `${opening.nozzle.dispenser.code} / ${opening.nozzle.code} must connect to exactly one tank before its sale can be calculated automatically.`,
+          compatibleTanks.length === 0
+            ? `${opening.nozzle.dispenser.code} / ${opening.nozzle.code} has no active ${nozzle.product.code} tank in this shift configuration. Refresh the shift setup and try again.`
+            : `${opening.nozzle.dispenser.code} / ${opening.nozzle.code} has more than one active ${nozzle.product.code} tank. Choose one source tank before closing.`,
         );
 
       const unitPrice =
@@ -426,7 +439,7 @@ export async function closeShift(
       const totalAmount = quantity.mul(unitPrice);
       const meterClosing = new Prisma.Decimal(reading.value);
       const meterOpening = meterClosing.sub(quantity);
-      const tankId = nozzle.tankMappings[0]!.tankId;
+      const tankId = compatibleTanks[0]!.tankId;
       const sale = await tx.sale.create({
         data: {
           organizationId,

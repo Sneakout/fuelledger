@@ -360,9 +360,15 @@ export function OperationsPage() {
                           type="number"
                           min="0"
                           step="0.01"
-                          value={closeCollections.find((item) => item.id === reading.nozzleId)?.value ?? 0}
+                          placeholder="0.00"
+                          value={closeCollections.find((item) => item.id === reading.nozzleId)?.value || ""}
                           onChange={(event) =>
-                            replace(closeCollections, reading.nozzleId, Number(event.target.value), setCloseCollections)
+                            replace(
+                              closeCollections,
+                              reading.nozzleId,
+                              event.target.value === "" ? 0 : Number(event.target.value),
+                              setCloseCollections,
+                            )
                           }
                         />
                       </label>
