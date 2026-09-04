@@ -716,7 +716,7 @@ export const reconciliationInputSchema = z
     creditAllocations: z
       .array(
         z.object({
-          paymentMethod: z.enum(["CREDIT", "FLEET"]),
+          paymentMethod: z.enum(paymentMethods),
           customerId: z.string().cuid(),
           vehicleId: z.string().cuid().nullable().optional(),
           amount: z.coerce.number().positive(),

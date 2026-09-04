@@ -24,7 +24,7 @@ const labels: Record<Method, string> = {
   UPI: "UPI",
   CARD: "Card",
   CREDIT: "Credit",
-  FLEET: "Fleet",
+  FLEET: "Fleet credit",
   OTHER: "Other",
 };
 const icons = {
@@ -47,7 +47,7 @@ type Row = {
   actualAmount: number;
 };
 type CreditAllocation = {
-  paymentMethod: "CREDIT" | "FLEET";
+  paymentMethod: Method;
   customerId: string;
   vehicleId: string;
   amount: number;
@@ -63,6 +63,10 @@ export function ReconciliationPage() {
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [customerMode, setCustomerMode] = useState<{
+    type: "CREDIT" | "FLEET";
+    paymentMethod: Method;
+  } | null>(null);
   const load = () =>
     api
       .reconciliationBootstrap()
@@ -154,7 +158,9 @@ export function ReconciliationPage() {
   const fullyAllocated =
     Math.abs(unallocated) < 0.01 &&
     customerAllocationComplete &&
-    creditAllocations.every((allocation) => allocation.customerId && allocation.amount > 0);
+    creditAllocations.every(
+      (allocation) => allocation.customerId && allocation.amount > 0,
+    );
   async function lock() {
     if (!shift || !fullyAllocated) return;
     setSaving(true);
@@ -378,6 +384,19 @@ export function ReconciliationPage() {
               customers={data.customers}
               locked={locked}
               onChange={setCreditAllocations}
+              onCreate={(method) =>
+                setCustomerMode({ type: method, paymentMethod: method })
+              }
+            />
+            <PaidFleetEditor
+              rows={rows}
+              allocations={creditAllocations}
+              customers={data.customers}
+              locked={locked}
+              onChange={setCreditAllocations}
+              onCreate={() =>
+                setCustomerMode({ type: "FLEET", paymentMethod: "CASH" })
+              }
             />
             <div className="allocation-total">
               <span>Shift total</span>
@@ -433,10 +452,522 @@ export function ReconciliationPage() {
           </section>
         )}
       </section>
+      {customerMode && (
+        <QuickCustomerModal
+          type={customerMode.type}
+          onClose={() => setCustomerMode(null)}
+          onCreated={async (customerId) => {
+            const result = await api.reconciliationBootstrap();
+            setData(result);
+            const required = Number(
+              rows.find(
+                (row) => row.paymentMethod === customerMode.paymentMethod,
+              )?.allocationAmount ?? 0,
+            );
+            const assigned = creditAllocations
+              .filter((row) => row.paymentMethod === customerMode.paymentMethod)
+              .reduce((sum, row) => sum + row.amount, 0);
+            setCreditAllocations([
+              ...creditAllocations,
+              {
+                paymentMethod: customerMode.paymentMethod,
+                customerId,
+                vehicleId: "",
+                amount: ["CREDIT", "FLEET"].includes(customerMode.paymentMethod) ? Math.max(0, required - assigned) : 0,
+              },
+            ]);
+            setCustomerMode(null);
+          }}
+        />
+      )}
     </main>
   );
 }
 
-function CreditAllocationEditor({rows,allocations,customers,locked,onChange}:{rows:Row[];allocations:CreditAllocation[];customers:ReconciliationBootstrap['customers'];locked:boolean;onChange:(rows:CreditAllocation[])=>void}) {
-  return <>{(['CREDIT','FLEET'] as const).map(method=>{const required=Number(rows.find(row=>row.paymentMethod===method)?.allocationAmount??0);if(required<=0&&!allocations.some(row=>row.paymentMethod===method))return null;const assigned=allocations.filter(row=>row.paymentMethod===method).reduce((sum,row)=>sum+Number(row.amount),0);const available=customers.filter(customer=>customer.type===method);return <section className="credit-allocation" key={method}><header><div><span className="eyebrow">{method==='CREDIT'?'Credit customers':'Fleet accounts'}</span><h3>Who owes this amount?</h3></div><strong className={Math.abs(required-assigned)<.01?'balanced':'unbalanced'}>{money(assigned)} of {money(required)} assigned</strong></header>{allocations.map((allocation,index)=>allocation.paymentMethod===method&&<div className="credit-allocation-row" key={`${method}-${index}`}><label className="field"><span>Customer</span><select disabled={locked} value={allocation.customerId} onChange={e=>onChange(allocations.map((row,i)=>i===index?{...row,customerId:e.target.value,vehicleId:''}:row))}><option value="">Choose customer</option>{available.map(customer=><option value={customer.id} key={customer.id}>{customer.name} · {money(customer.outstanding)} due</option>)}</select></label>{method==='FLEET'&&<label className="field"><span>Vehicle (optional)</span><select disabled={locked||!allocation.customerId} value={allocation.vehicleId} onChange={e=>onChange(allocations.map((row,i)=>i===index?{...row,vehicleId:e.target.value}:row))}><option value="">No vehicle</option>{available.find(customer=>customer.id===allocation.customerId)?.vehicles.map(vehicle=><option value={vehicle.id} key={vehicle.id}>{vehicle.number}{vehicle.label?` · ${vehicle.label}`:''}</option>)}</select></label>}<label className="field"><span>Amount (₹)</span><input disabled={locked} type="number" min="0.01" step="0.01" value={allocation.amount||''} placeholder="0.00" onChange={e=>onChange(allocations.map((row,i)=>i===index?{...row,amount:Number(e.target.value)}:row))}/></label>{!locked&&<button className="text-button" type="button" onClick={()=>onChange(allocations.filter((_,i)=>i!==index))}>Remove</button>}</div>)}{!locked&&<button className="secondary small" type="button" disabled={!available.length} onClick={()=>onChange([...allocations,{paymentMethod:method,customerId:'',vehicleId:'',amount:Math.max(0,required-assigned)}])}>Add {method==='CREDIT'?'customer':'fleet account'}</button>}{!available.length&&<p className="allocation-help">Create an active {method==='CREDIT'?'credit customer':'fleet account'} in Customers before locking this shift.</p>}</section>})}</>;
+function CreditAllocationEditor({
+  rows,
+  allocations,
+  customers,
+  locked,
+  onChange,
+  onCreate,
+}: {
+  rows: Row[];
+  allocations: CreditAllocation[];
+  customers: ReconciliationBootstrap["customers"];
+  locked: boolean;
+  onChange: (rows: CreditAllocation[]) => void;
+  onCreate: (type: "CREDIT" | "FLEET") => void;
+}) {
+  return (
+    <>
+      {(["CREDIT", "FLEET"] as const).map((method) => {
+        const required = Number(
+          rows.find((row) => row.paymentMethod === method)?.allocationAmount ??
+            0,
+        );
+        if (
+          required <= 0 &&
+          !allocations.some((row) => row.paymentMethod === method)
+        )
+          return null;
+        const assigned = allocations
+          .filter((row) => row.paymentMethod === method)
+          .reduce((sum, row) => sum + Number(row.amount), 0);
+        const available = customers.filter(
+          (customer) => customer.type === method,
+        );
+        return (
+          <section className="credit-allocation" key={method}>
+            <header>
+              <div>
+                <span className="eyebrow">
+                  {method === "CREDIT" ? "Credit customers" : "Fleet accounts"}
+                </span>
+                <h3>Who owes this amount?</h3>
+              </div>
+              <strong
+                className={
+                  Math.abs(required - assigned) < 0.01
+                    ? "balanced"
+                    : "unbalanced"
+                }
+              >
+                {money(assigned)} of {money(required)} assigned
+              </strong>
+            </header>
+            {allocations.map(
+              (allocation, index) =>
+                allocation.paymentMethod === method && (
+                  <div
+                    className="credit-allocation-row"
+                    key={`${method}-${index}`}
+                  >
+                    <label className="field">
+                      <span>Customer</span>
+                      <select
+                        disabled={locked}
+                        value={allocation.customerId}
+                        onChange={(e) =>
+                          onChange(
+                            allocations.map((row, i) =>
+                              i === index
+                                ? {
+                                    ...row,
+                                    customerId: e.target.value,
+                                    vehicleId: "",
+                                  }
+                                : row,
+                            ),
+                          )
+                        }
+                      >
+                        <option value="">Choose customer</option>
+                        {available.map((customer) => (
+                          <option value={customer.id} key={customer.id}>
+                            {customer.name} · {money(customer.outstanding)} due
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {method === "FLEET" && (
+                      <label className="field">
+                        <span>Vehicle (optional)</span>
+                        <select
+                          disabled={locked || !allocation.customerId}
+                          value={allocation.vehicleId}
+                          onChange={(e) =>
+                            onChange(
+                              allocations.map((row, i) =>
+                                i === index
+                                  ? { ...row, vehicleId: e.target.value }
+                                  : row,
+                              ),
+                            )
+                          }
+                        >
+                          <option value="">No vehicle</option>
+                          {available
+                            .find(
+                              (customer) =>
+                                customer.id === allocation.customerId,
+                            )
+                            ?.vehicles.map((vehicle) => (
+                              <option value={vehicle.id} key={vehicle.id}>
+                                {vehicle.number}
+                                {vehicle.label ? ` · ${vehicle.label}` : ""}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
+                    )}
+                    <label className="field">
+                      <span>Amount (₹)</span>
+                      <input
+                        disabled={locked}
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={allocation.amount || ""}
+                        placeholder="0.00"
+                        onChange={(e) =>
+                          onChange(
+                            allocations.map((row, i) =>
+                              i === index
+                                ? { ...row, amount: Number(e.target.value) }
+                                : row,
+                            ),
+                          )
+                        }
+                      />
+                    </label>
+                    {!locked && (
+                      <button
+                        className="text-button"
+                        type="button"
+                        onClick={() =>
+                          onChange(allocations.filter((_, i) => i !== index))
+                        }
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ),
+            )}
+            {!locked && (
+              <button
+                className="secondary small"
+                type="button"
+                onClick={() =>
+                  available.length
+                    ? onChange([
+                        ...allocations,
+                        {
+                          paymentMethod: method,
+                          customerId: "",
+                          vehicleId: "",
+                          amount: Math.max(0, required - assigned),
+                        },
+                      ])
+                    : onCreate(method)
+                }
+              >
+                Add {method === "CREDIT" ? "customer" : "fleet account"}
+              </button>
+            )}
+            {!locked && available.length > 0 && (
+              <button
+                className="text-button create-account-inline"
+                type="button"
+                onClick={() => onCreate(method)}
+              >
+                Create new {method === "CREDIT" ? "customer" : "fleet account"}
+              </button>
+            )}
+            {!available.length && (
+              <p className="allocation-help">
+                Create an account here to continue without leaving this shift.
+              </p>
+            )}
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+function PaidFleetEditor({
+  rows,
+  allocations,
+  customers,
+  locked,
+  onChange,
+  onCreate,
+}: {
+  rows: Row[];
+  allocations: CreditAllocation[];
+  customers: ReconciliationBootstrap["customers"];
+  locked: boolean;
+  onChange: (rows: CreditAllocation[]) => void;
+  onCreate: () => void;
+}) {
+  const paid = allocations.filter(
+    (row) => !["CREDIT", "FLEET"].includes(row.paymentMethod),
+  );
+  const fleet = customers.filter((row) => row.type === "FLEET");
+  if (!paid.length && locked) return null;
+  return (
+    <section className="credit-allocation">
+      <header>
+        <div>
+          <span className="eyebrow">Paid fleet purchases</span>
+          <h3>Link fleet customers who paid now</h3>
+        </div>
+        <small>No customer debt is created</small>
+      </header>
+      {allocations.map(
+        (allocation, index) =>
+          !["CREDIT", "FLEET"].includes(allocation.paymentMethod) && (
+            <div className="credit-allocation-row" key={`paid-${index}`}>
+              <label className="field">
+                <span>Fleet account</span>
+                <select
+                  disabled={locked}
+                  value={allocation.customerId}
+                  onChange={(e) =>
+                    onChange(
+                      allocations.map((row, i) =>
+                        i === index
+                          ? {
+                              ...row,
+                              customerId: e.target.value,
+                              vehicleId: "",
+                            }
+                          : row,
+                      ),
+                    )
+                  }
+                >
+                  <option value="">Choose account</option>
+                  {fleet.map((row) => (
+                    <option key={row.id} value={row.id}>
+                      {row.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Vehicle (optional)</span>
+                <select
+                  disabled={locked || !allocation.customerId}
+                  value={allocation.vehicleId}
+                  onChange={(e) =>
+                    onChange(
+                      allocations.map((row, i) =>
+                        i === index
+                          ? { ...row, vehicleId: e.target.value }
+                          : row,
+                      ),
+                    )
+                  }
+                >
+                  <option value="">No vehicle</option>
+                  {fleet
+                    .find((row) => row.id === allocation.customerId)
+                    ?.vehicles.map((vehicle) => (
+                      <option key={vehicle.id} value={vehicle.id}>
+                        {vehicle.number}
+                        {vehicle.label ? ` · ${vehicle.label}` : ""}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Paid by</span>
+                <select
+                  disabled={locked}
+                  value={allocation.paymentMethod}
+                  onChange={(e) =>
+                    onChange(
+                      allocations.map((row, i) =>
+                        i === index
+                          ? { ...row, paymentMethod: e.target.value as Method }
+                          : row,
+                      ),
+                    )
+                  }
+                >
+                  {(["CASH", "UPI", "CARD", "OTHER"] as const).map((method) => (
+                    <option key={method} value={method}>
+                      {labels[method]} ·{" "}
+                      {money(
+                        rows.find((row) => row.paymentMethod === method)
+                          ?.allocationAmount ?? 0,
+                      )}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>Amount (₹)</span>
+                <input
+                  disabled={locked}
+                  type="number"
+                  min=".01"
+                  value={allocation.amount || ""}
+                  onChange={(e) =>
+                    onChange(
+                      allocations.map((row, i) =>
+                        i === index
+                          ? { ...row, amount: Number(e.target.value) }
+                          : row,
+                      ),
+                    )
+                  }
+                />
+              </label>
+              {!locked && (
+                <button
+                  className="text-button"
+                  onClick={() =>
+                    onChange(allocations.filter((_, i) => i !== index))
+                  }
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          ),
+      )}
+      {!locked && (
+        <>
+          <button
+            className="secondary small"
+            type="button"
+            disabled={!fleet.length}
+            onClick={() =>
+              onChange([
+                ...allocations,
+                {
+                  paymentMethod: "CASH",
+                  customerId: "",
+                  vehicleId: "",
+                  amount: 0,
+                },
+              ])
+            }
+          >
+            Link paid fleet purchase
+          </button>
+          <button
+            className="text-button create-account-inline"
+            type="button"
+            onClick={onCreate}
+          >
+            Create fleet account
+          </button>
+        </>
+      )}
+    </section>
+  );
+}
+
+function QuickCustomerModal({
+  type,
+  onClose,
+  onCreated,
+}: {
+  type: "CREDIT" | "FLEET";
+  onClose: () => void;
+  onCreated: (id: string) => Promise<void>;
+}) {
+  const [form, setForm] = useState({
+    name: "",
+    code: "",
+    phone: "",
+    creditLimit: 50000,
+    creditDays: 15,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function submit() {
+    setSaving(true);
+    setError("");
+    try {
+      const result = await api.createCustomer({
+        ...form,
+        type,
+        email: "",
+        taxId: "",
+        billingAddress: "",
+        active: true,
+      });
+      await onCreated(result.customer.id);
+    } catch (e) {
+      setError(
+        e instanceof ApiRequestError
+          ? e.message
+          : "Unable to create the account.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="product-modal">
+      <section className="product-editor customer-modal quick-customer-modal">
+        <button className="modal-close" onClick={onClose}>
+          ×
+        </button>
+        <span className="eyebrow">
+          New {type === "CREDIT" ? "credit customer" : "fleet account"}
+        </span>
+        <h2>Create account</h2>
+        <p>Add it now and it will be selected automatically.</p>
+        {error && <div className="form-error">{error}</div>}
+        <div className="form-grid">
+          <label className="field">
+            <span>Name</span>
+            <input
+              autoFocus
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span>Account code</span>
+            <input
+              value={form.code}
+              onChange={(e) =>
+                setForm({ ...form, code: e.target.value.toUpperCase() })
+              }
+              placeholder="CUSTOMER-01"
+            />
+          </label>
+          <label className="field">
+            <span>Phone (optional)</span>
+            <input
+              value={form.phone}
+              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+            />
+          </label>
+          <label className="field">
+            <span>Credit limit (₹)</span>
+            <input
+              type="number"
+              min="0"
+              value={form.creditLimit}
+              onChange={(e) =>
+                setForm({ ...form, creditLimit: Number(e.target.value) })
+              }
+            />
+          </label>
+          <label className="field">
+            <span>Payment due in days</span>
+            <input
+              type="number"
+              min="0"
+              value={form.creditDays}
+              onChange={(e) =>
+                setForm({ ...form, creditDays: Number(e.target.value) })
+              }
+            />
+          </label>
+        </div>
+        <div className="editor-footer">
+          <button className="secondary" onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            className="primary small"
+            disabled={saving || !form.name.trim() || !form.code.trim()}
+            onClick={() => void submit()}
+          >
+            {saving ? "Creating…" : "Create & select"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
 }

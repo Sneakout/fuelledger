@@ -5,7 +5,7 @@ import { ApiRequestError, api, type OpenSaleShift, type Sale, type SalesBootstra
 
 const money = (value: string | number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(Number(value));
 const volume = (value: number) => value.toLocaleString('en-IN', { maximumFractionDigits: 3 });
-const paymentLabels = { CASH: 'Cash', UPI: 'UPI', CARD: 'Card', CREDIT: 'Credit', FLEET: 'Fleet', OTHER: 'Other' } as const;
+const paymentLabels = { CASH: 'Cash', UPI: 'UPI', CARD: 'Card', CREDIT: 'Credit', FLEET: 'Fleet credit', OTHER: 'Other' } as const;
 const paymentIcons = { CASH: Banknote, UPI: Smartphone, CARD: CreditCard, CREDIT: ReceiptText, FLEET: UsersRound, OTHER: CircleEllipsis } as const;
 
 export function SalesPage() {

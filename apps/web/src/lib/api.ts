@@ -823,7 +823,7 @@ export type ReconciliationShift = {
     collections: CollectionReconciliation[];
     creditAllocations: Array<{
       id: string;
-      paymentMethod: "CREDIT" | "FLEET";
+      paymentMethod: "CASH" | "UPI" | "CARD" | "CREDIT" | "FLEET" | "OTHER";
       amount: string;
       dueDate: string;
       customer: {

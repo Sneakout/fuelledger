@@ -189,11 +189,14 @@ export async function reconcile(
         "FLEET_CUSTOMER_REQUIRED",
         "Choose a fleet account for fleet sales.",
       );
-    if (allocation.paymentMethod === "CREDIT" && customer.type !== "CREDIT")
+    if (
+      !["CREDIT", "FLEET"].includes(allocation.paymentMethod) &&
+      customer.type !== "FLEET"
+    )
       throw new AppError(
         400,
-        "CREDIT_CUSTOMER_REQUIRED",
-        "Choose a credit customer for credit sales.",
+        "FLEET_CUSTOMER_REQUIRED",
+        "Only fleet accounts can be linked to paid fleet purchases.",
       );
     if (
       allocation.vehicleId &&
@@ -205,13 +208,32 @@ export async function reconcile(
         "Choose a vehicle belonging to the selected customer.",
       );
   }
+  for (const method of ["CASH", "UPI", "CARD", "OTHER"] as const) {
+    const tagged = input.creditAllocations
+      .filter((row) => row.paymentMethod === method)
+      .reduce((sum, row) => sum + row.amount, 0);
+    const collection = input.collections.find(
+      (row) => row.paymentMethod === method,
+    )!;
+    const allocated = (expected.get(method) ?? 0) + collection.adjustmentAmount;
+    if (tagged > allocated + 0.01)
+      throw new AppError(
+        400,
+        "FLEET_ALLOCATION_EXCEEDS_PAYMENT",
+        `Fleet purchases paid by ${method.toLowerCase()} cannot exceed that payment total.`,
+      );
+  }
   for (const customer of customers) {
     const current = customer.ledger.reduce(
       (sum, row) => sum + Number(row.amount),
       0,
     );
     const added = input.creditAllocations
-      .filter((row) => row.customerId === customer.id)
+      .filter(
+        (row) =>
+          row.customerId === customer.id &&
+          ["CREDIT", "FLEET"].includes(row.paymentMethod),
+      )
       .reduce((sum, row) => sum + row.amount, 0);
     if (current + added > Number(customer.creditLimit) + 0.01)
       throw new AppError(
@@ -274,20 +296,21 @@ export async function reconcile(
       const vehicle = allocation.vehicleId
         ? customer.vehicles.find((row) => row.id === allocation.vehicleId)
         : null;
-      await tx.customerLedgerEntry.create({
-        data: {
-          organizationId,
-          stationId: shift.station.id,
-          customerId: customer.id,
-          type: "SALE",
-          amount: new Prisma.Decimal(allocation.amount),
-          shiftCreditAllocationId: record.id,
-          description: `Shift #${shift.shiftNumber} ${allocation.paymentMethod.toLowerCase()} sale${vehicle ? ` · ${vehicle.number}` : ""}`,
-          dueDate,
-          occurredAt,
-          createdById: userId,
-        },
-      });
+      if (["CREDIT", "FLEET"].includes(allocation.paymentMethod))
+        await tx.customerLedgerEntry.create({
+          data: {
+            organizationId,
+            stationId: shift.station.id,
+            customerId: customer.id,
+            type: "SALE",
+            amount: new Prisma.Decimal(allocation.amount),
+            shiftCreditAllocationId: record.id,
+            description: `Shift #${shift.shiftNumber} ${allocation.paymentMethod.toLowerCase()} sale${vehicle ? ` · ${vehicle.number}` : ""}`,
+            dueDate,
+            occurredAt,
+            createdById: userId,
+          },
+        });
     }
     const reclassification = input.collections.filter(
       (collection) => Math.abs(collection.adjustmentAmount) > 0.005,
