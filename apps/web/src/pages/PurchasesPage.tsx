@@ -8,27 +8,52 @@ import {
   Truck,
   X,
 } from "lucide-react";
-import { api, ApiRequestError, type InvoicePricePreview, type PurchaseInvoice, type PurchasesBootstrap, type PurchaseStation } from "../lib/api";
+import {
+  api,
+  ApiRequestError,
+  type InvoicePricePreview,
+  type PurchaseInvoice,
+  type PurchasesBootstrap,
+  type PurchaseStation,
+} from "../lib/api";
 const money = (v: number | string) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(Number(v));
-export const invoiceBalanceDisplay = (invoice: Pick<PurchaseInvoice, "totalAmount" | "outstanding">) => {
+export const invoiceBalanceDisplay = (
+  invoice: Pick<PurchaseInvoice, "totalAmount" | "outstanding">,
+) => {
   const total = Number(invoice.totalAmount);
   const outstanding = Math.max(0, Number(invoice.outstanding));
   const paid = Math.max(0, total - outstanding);
   if (outstanding === 0) return { amount: total, detail: "Paid in full" };
-  if (paid > 0) return { amount: outstanding, detail: `${money(paid)} paid · ${money(total)} total` };
+  if (paid > 0)
+    return {
+      amount: outstanding,
+      detail: `${money(paid)} paid · ${money(total)} total`,
+    };
   return { amount: outstanding, detail: "Amount due" };
 };
-export const onlyCompatibleTankId = (stations: PurchaseStation[], stationId: string, productId: string) => {
+export const onlyCompatibleTankId = (
+  stations: PurchaseStation[],
+  stationId: string,
+  productId: string,
+) => {
   if (!productId) return "";
-  const tanks = stations.find((station) => station.id === stationId)?.configurations[0]?.tanks.filter((tank) => tank.productId === productId) ?? [];
+  const tanks =
+    stations
+      .find((station) => station.id === stationId)
+      ?.configurations[0]?.tanks.filter(
+        (tank) => tank.productId === productId,
+      ) ?? [];
   return tanks.length === 1 ? tanks[0]!.id : "";
 };
-export const dueDateFromInvoiceDate = (invoiceDate: string, paymentTerms: number) => {
+export const dueDateFromInvoiceDate = (
+  invoiceDate: string,
+  paymentTerms: number,
+) => {
   const date = new Date(`${invoiceDate}T00:00:00`);
   if (Number.isNaN(date.getTime())) return invoiceDate;
   date.setDate(date.getDate() + Math.max(0, Math.trunc(paymentTerms)));
@@ -75,7 +100,13 @@ const emptyLine = (): Line => ({
   taxRate: 0,
   hsnCode: "",
 });
-const supplierCodeFromName = (name: string) => name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30);
+const supplierCodeFromName = (name: string) =>
+  name
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 30);
 export function PurchasesPage() {
   const [data, setData] = useState<PurchasesBootstrap | null>(null),
     [mode, setMode] = useState<Mode>(null),
@@ -110,8 +141,9 @@ export function PurchasesPage() {
   const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(
     null,
   );
-  const [pricePreview, setPricePreview] =
-    useState<InvoicePricePreview | null>(null);
+  const [pricePreview, setPricePreview] = useState<InvoicePricePreview | null>(
+    null,
+  );
   const [payment, setPayment] = useState({
     stationId: "",
     invoiceId: "",
@@ -124,7 +156,9 @@ export function PurchasesPage() {
     setData(result);
     setInvoice((x) => {
       const supplierId = x.supplierId || result.suppliers[0]?.id || "";
-      const terms = result.suppliers.find((item) => item.id === supplierId)?.paymentTerms ?? 0;
+      const terms =
+        result.suppliers.find((item) => item.id === supplierId)?.paymentTerms ??
+        0;
       return {
         ...x,
         stationId: x.stationId || result.stations[0]?.id || "",
@@ -141,11 +175,7 @@ export function PurchasesPage() {
     void load().catch(() => setError("Unable to load purchases."));
   }, []);
   const subtotal = useMemo(
-    () =>
-      lines.reduce(
-        (sum, line) => sum + line.quantity * line.unitCost,
-        0,
-      ),
+    () => lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0),
     [lines],
   );
   const calculatedTax = useMemo(
@@ -166,11 +196,18 @@ export function PurchasesPage() {
   );
   async function saveSupplier() {
     const name = supplier.name.trim();
-    if (!name) { setError("Enter the supplier name before saving."); return; }
+    if (!name) {
+      setError("Enter the supplier name before saving.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
-      await api.createSupplier({ ...supplier, name, code: supplierCodeFromName(name) });
+      await api.createSupplier({
+        ...supplier,
+        name,
+        code: supplierCodeFromName(name),
+      });
       setMode(null);
       setSupplier({ ...supplier, name: "", code: "" });
       await load();
@@ -194,9 +231,7 @@ export function PurchasesPage() {
           notes: invoice.notes || undefined,
           refreshPrices: Boolean(pricePreview),
           markPaid: invoice.paidNow,
-          paymentMethod: invoice.paidNow
-            ? invoice.paymentMethod
-            : undefined,
+          paymentMethod: invoice.paidNow ? invoice.paymentMethod : undefined,
           paymentReferenceNo:
             invoice.paidNow && invoice.paymentReferenceNo
               ? invoice.paymentReferenceNo
@@ -243,7 +278,11 @@ export function PurchasesPage() {
         ...x,
         invoiceNumber: "",
         invoiceDate: today(),
-        dueDate: dueDateFromInvoiceDate(today(), data?.suppliers.find((item) => item.id === x.supplierId)?.paymentTerms ?? 0),
+        dueDate: dueDateFromInvoiceDate(
+          today(),
+          data?.suppliers.find((item) => item.id === x.supplierId)
+            ?.paymentTerms ?? 0,
+        ),
         taxAmount: 0,
         notes: "",
         paidNow: false,
@@ -300,8 +339,8 @@ export function PurchasesPage() {
     ) ?? 0;
   const editingOutstanding = Math.max(
     0,
-    (pricePreview?.totalAmount ??
-      Number(editingInvoice?.totalAmount ?? 0)) - editingPaid,
+    (pricePreview?.totalAmount ?? Number(editingInvoice?.totalAmount ?? 0)) -
+      editingPaid,
   );
   const displayedTax =
     mode === "edit-invoice"
@@ -388,85 +427,91 @@ export function PurchasesPage() {
             </div>
             {data.invoices.map((item) => {
               const balance = invoiceBalanceDisplay(item);
-              return <article key={item.id}>
-                <span className="invoice-icon">
-                  <FileText />
-                </span>
-                <div>
-                  <strong>
-                    {item.supplier.name} · {item.invoiceNumber}
-                  </strong>
-                  <small>
-                    {item.station.name} · Invoice{" "}
-                    {new Date(item.invoiceDate).toLocaleDateString("en-IN", {
-                      dateStyle: "medium",
-                    })}{" "}
-                    · Due{" "}
-                    {new Date(item.dueDate).toLocaleDateString("en-IN", {
-                      dateStyle: "medium",
-                    })}
-                  </small>
-                  <span className="invoice-tags">
-                    <i>{item.receipt ? "Stock received" : "Invoice only"}</i>
-                    {item.attachments.map((a) => (
-                      <a
-                        key={a.id}
-                        href={`/api/purchases/attachments/${a.id}`}
-                        target="_blank"
-                      >
-                        {a.fileName}
-                      </a>
-                    ))}
+              return (
+                <article key={item.id}>
+                  <span className="invoice-icon">
+                    <FileText />
                   </span>
-                </div>
-                <div className="invoice-balance">
-                  <b>{money(balance.amount)}</b>
-                  <small>{balance.detail}</small>
-                  <em className={item.status.toLowerCase()}>
-                    {item.outstanding === 0 ? "PAID" : item.overdue ? "OVERDUE" : item.status.replace("_", " ")}
-                  </em>
-                </div>
-                <div className="invoice-actions">
-                  {item.outstanding > 0 && (
-                  <button
-                    className="text-button"
-                    onClick={() => {
-                      setPayment({
-                        ...payment,
-                        invoiceId: item.id,
-                        stationId: item.station.id,
-                        amount: item.outstanding,
-                      });
-                      setMode("payment");
-                    }}
-                  >
-                    Pay
-                  </button>
-                  )}
-                  <button
-                    className="text-button"
-                    onClick={() => {
-                      setEditingInvoice(item);
-                      setPricePreview(null);
-                      setInvoice((current) => ({
-                        ...current,
-                        stationId: item.station.id,
-                        supplierId: item.supplier.id,
-                        invoiceNumber: item.invoiceNumber,
-                        invoiceDate: item.invoiceDate.slice(0, 10),
-                        dueDate: item.dueDate.slice(0, 10),
-                        notes: item.notes ?? "",
-                        receiveNow: Boolean(item.receipt),
-                        paidNow: false,
-                        paymentReferenceNo: "",
-                      }));
-                      setMode("edit-invoice");
-                    }}
-                  >
-                    View / Edit
-                  </button>
-                </div>
-              </article>;
+                  <div>
+                    <strong>
+                      {item.supplier.name} · {item.invoiceNumber}
+                    </strong>
+                    <small>
+                      {item.station.name} · Invoice{" "}
+                      {new Date(item.invoiceDate).toLocaleDateString("en-IN", {
+                        dateStyle: "medium",
+                      })}{" "}
+                      · Due{" "}
+                      {new Date(item.dueDate).toLocaleDateString("en-IN", {
+                        dateStyle: "medium",
+                      })}
+                    </small>
+                    <span className="invoice-tags">
+                      <i>{item.receipt ? "Stock received" : "Invoice only"}</i>
+                      {item.attachments.map((a) => (
+                        <a
+                          key={a.id}
+                          href={`/api/purchases/attachments/${a.id}`}
+                          target="_blank"
+                        >
+                          {a.fileName}
+                        </a>
+                      ))}
+                    </span>
+                  </div>
+                  <div className="invoice-balance">
+                    <b>{money(balance.amount)}</b>
+                    <small>{balance.detail}</small>
+                    <em className={item.status.toLowerCase()}>
+                      {item.outstanding === 0
+                        ? "PAID"
+                        : item.overdue
+                          ? "OVERDUE"
+                          : item.status.replace("_", " ")}
+                    </em>
+                  </div>
+                  <div className="invoice-actions">
+                    {item.outstanding > 0 && (
+                      <button
+                        className="text-button"
+                        onClick={() => {
+                          setPayment({
+                            ...payment,
+                            invoiceId: item.id,
+                            stationId: item.station.id,
+                            amount: item.outstanding,
+                          });
+                          setMode("payment");
+                        }}
+                      >
+                        Pay
+                      </button>
+                    )}
+                    <button
+                      className="text-button"
+                      onClick={() => {
+                        setEditingInvoice(item);
+                        setPricePreview(null);
+                        setInvoice((current) => ({
+                          ...current,
+                          stationId: item.station.id,
+                          supplierId: item.supplier.id,
+                          invoiceNumber: item.invoiceNumber,
+                          invoiceDate: item.invoiceDate.slice(0, 10),
+                          dueDate: item.dueDate.slice(0, 10),
+                          notes: item.notes ?? "",
+                          receiveNow: Boolean(item.receipt),
+                          paidNow: false,
+                          paymentReferenceNo: "",
+                        }));
+                        setMode("edit-invoice");
+                      }}
+                    >
+                      View / Edit
+                    </button>
+                  </div>
+                </article>
+              );
             })}
             {!data.invoices.length && (
               <p className="history-empty">No purchase invoices yet.</p>
@@ -511,7 +556,12 @@ export function PurchasesPage() {
                       }
                     />
                   </label>
-                  <div className="field"><span>Supplier code</span><div className="field-note">Generated automatically from the supplier name.</div></div>
+                  <div className="field">
+                    <span>Supplier code</span>
+                    <div className="field-note">
+                      Generated automatically from the supplier name.
+                    </div>
+                  </div>
                   <label className="field">
                     <span>Phone</span>
                     <input
@@ -611,10 +661,14 @@ export function PurchasesPage() {
             ) : (
               <>
                 <span className="eyebrow">
-                  {mode === "edit-invoice" ? "Edit purchase invoice" : "New purchase"}
+                  {mode === "edit-invoice"
+                    ? "Edit purchase invoice"
+                    : "New purchase"}
                 </span>
                 <h2>
-                  {mode === "edit-invoice" ? "Update invoice details" : "Purchase invoice"}
+                  {mode === "edit-invoice"
+                    ? "Update invoice details"
+                    : "Purchase invoice"}
                 </h2>
                 {mode === "edit-invoice" && (
                   <p className="invoice-edit-note">
@@ -631,8 +685,17 @@ export function PurchasesPage() {
                       disabled={mode === "edit-invoice"}
                       onChange={(e) => {
                         const supplierId = e.target.value;
-                        const terms = data.suppliers.find((item) => item.id === supplierId)?.paymentTerms ?? 0;
-                        setInvoice({ ...invoice, supplierId, dueDate: dueDateFromInvoiceDate(invoice.invoiceDate, terms) });
+                        const terms =
+                          data.suppliers.find((item) => item.id === supplierId)
+                            ?.paymentTerms ?? 0;
+                        setInvoice({
+                          ...invoice,
+                          supplierId,
+                          dueDate: dueDateFromInvoiceDate(
+                            invoice.invoiceDate,
+                            terms,
+                          ),
+                        });
                       }}
                     >
                       {data.suppliers.map((x) => (
@@ -650,7 +713,16 @@ export function PurchasesPage() {
                       onChange={(e) => {
                         const stationId = e.target.value;
                         setInvoice({ ...invoice, stationId });
-                        setLines((current) => current.map((line) => ({ ...line, tankId: onlyCompatibleTankId(data.stations, stationId, line.productId) })));
+                        setLines((current) =>
+                          current.map((line) => ({
+                            ...line,
+                            tankId: onlyCompatibleTankId(
+                              data.stations,
+                              stationId,
+                              line.productId,
+                            ),
+                          })),
+                        );
                       }}
                     >
                       {data.stations.map((x) => (
@@ -679,18 +751,21 @@ export function PurchasesPage() {
                       value={invoice.invoiceDate}
                       onChange={(e) => {
                         const invoiceDate = e.target.value;
-                        const terms = data.suppliers.find((item) => item.id === invoice.supplierId)?.paymentTerms ?? 0;
-                        setInvoice({ ...invoice, invoiceDate, dueDate: dueDateFromInvoiceDate(invoiceDate, terms) });
+                        const terms =
+                          data.suppliers.find(
+                            (item) => item.id === invoice.supplierId,
+                          )?.paymentTerms ?? 0;
+                        setInvoice({
+                          ...invoice,
+                          invoiceDate,
+                          dueDate: dueDateFromInvoiceDate(invoiceDate, terms),
+                        });
                       }}
                     />
                   </label>
                   <label className="field">
                     <span>Due date (calculated automatically)</span>
-                    <input
-                      type="date"
-                      value={invoice.dueDate}
-                      readOnly
-                    />
+                    <input type="date" value={invoice.dueDate} readOnly />
                   </label>
                   <label className="field">
                     <span>Supplier invoice total (optional override)</span>
@@ -698,9 +773,7 @@ export function PurchasesPage() {
                       type="number"
                       min="0"
                       disabled={mode === "edit-invoice"}
-                      placeholder={String(
-                        Math.round(subtotal + calculatedTax),
-                      )}
+                      placeholder={String(Math.round(subtotal + calculatedTax))}
                       value={invoice.invoiceTotal}
                       onChange={(e) =>
                         setInvoice({
@@ -763,7 +836,8 @@ export function PurchasesPage() {
                       <div className="invoice-price-preview">
                         {pricePreview.lines.map((line) => (
                           <small key={line.id}>
-                            {line.productName}: {line.quantity.toLocaleString("en-IN")} ×{" "}
+                            {line.productName}:{" "}
+                            {line.quantity.toLocaleString("en-IN")} ×{" "}
                             {money(line.previousUnitCost)}
                             {line.previousUnitCost !== line.unitCost && (
                               <> → {money(line.unitCost)}</>
@@ -774,192 +848,211 @@ export function PurchasesPage() {
                           Latest prices loaded. They will be applied only when
                           you save changes.
                         </b>
+                        {editingInvoice?.status === "PAID" && (
+                          <b>
+                            This cash-and-carry invoice will remain paid in
+                            full; its opening payment will update to the
+                            refreshed total.
+                          </b>
+                        )}
                       </div>
                     )}
                   </div>
                 ) : (
-                <div className="invoice-lines">
-                  <h3>Invoice lines</h3>
-                  {lines.map((line, index) => {
-                    const product = data.products.find(
-                      (x) => x.id === line.productId,
-                    );
-                    const tanks =
-                      data.stations
-                        .find((x) => x.id === invoice.stationId)
-                        ?.configurations[0]?.tanks.filter(
-                          (x) => x.productId === line.productId,
-                        ) ?? [];
-                    return (
-                      <div className="invoice-line" key={index}>
-                        <label className="invoice-line-field">
-                          <span>Product</span>
-                          <select
-                            aria-label={`Product ${index + 1}`}
-                            value={line.productId}
-                            onChange={(e) => {
-                              const productId = e.target.value;
-                              const p = data.products.find(
-                                (x) => x.id === productId,
-                              );
-                              setLines(
-                                lines.map((x, i) =>
-                                  i === index
-                                    ? {
-                                        ...x,
-                                        productId,
-                                        tankId: onlyCompatibleTankId(data.stations, invoice.stationId, productId),
-                                        description: p?.name ?? "",
-                                        unitCost: Number(p?.purchasePrice ?? 0),
-                                        hsnCode: p?.hsnCode ?? "",
-                                      }
-                                    : x,
-                                ),
-                              );
-                            }}
-                          >
-                            <option value="">Choose product</option>
-                            {data.products.map((x) => (
-                              <option key={x.id} value={x.id}>
-                                {x.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        {product?.tankLinked ? (
+                  <div className="invoice-lines">
+                    <h3>Invoice lines</h3>
+                    {lines.map((line, index) => {
+                      const product = data.products.find(
+                        (x) => x.id === line.productId,
+                      );
+                      const tanks =
+                        data.stations
+                          .find((x) => x.id === invoice.stationId)
+                          ?.configurations[0]?.tanks.filter(
+                            (x) => x.productId === line.productId,
+                          ) ?? [];
+                      return (
+                        <div className="invoice-line" key={index}>
                           <label className="invoice-line-field">
-                            <span>Tank</span>
+                            <span>Product</span>
                             <select
-                              aria-label={`Tank ${index + 1}`}
-                              value={line.tankId}
-                              onChange={(e) =>
+                              aria-label={`Product ${index + 1}`}
+                              value={line.productId}
+                              onChange={(e) => {
+                                const productId = e.target.value;
+                                const p = data.products.find(
+                                  (x) => x.id === productId,
+                                );
                                 setLines(
                                   lines.map((x, i) =>
                                     i === index
-                                      ? { ...x, tankId: e.target.value }
+                                      ? {
+                                          ...x,
+                                          productId,
+                                          tankId: onlyCompatibleTankId(
+                                            data.stations,
+                                            invoice.stationId,
+                                            productId,
+                                          ),
+                                          description: p?.name ?? "",
+                                          unitCost: Number(
+                                            p?.purchasePrice ?? 0,
+                                          ),
+                                          hsnCode: p?.hsnCode ?? "",
+                                        }
                                       : x,
                                   ),
-                                )
-                              }
+                                );
+                              }}
                             >
-                              <option value="">Tank</option>
-                              {tanks.map((x) => (
+                              <option value="">Choose product</option>
+                              {data.products.map((x) => (
                                 <option key={x.id} value={x.id}>
-                                  {x.code}
+                                  {x.name}
                                 </option>
                               ))}
                             </select>
                           </label>
-                        ) : (
-                          <span className="invoice-line-spacer" />
-                        )}
-                        <label className="invoice-line-field">
-                          <span>
+                          {product?.tankLinked ? (
+                            <label className="invoice-line-field">
+                              <span>Tank</span>
+                              <select
+                                aria-label={`Tank ${index + 1}`}
+                                value={line.tankId}
+                                onChange={(e) =>
+                                  setLines(
+                                    lines.map((x, i) =>
+                                      i === index
+                                        ? { ...x, tankId: e.target.value }
+                                        : x,
+                                    ),
+                                  )
+                                }
+                              >
+                                <option value="">Tank</option>
+                                {tanks.map((x) => (
+                                  <option key={x.id} value={x.id}>
+                                    {x.code}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          ) : (
+                            <span className="invoice-line-spacer" />
+                          )}
+                          <label className="invoice-line-field">
+                            <span>
+                              {product?.category === "FUEL"
+                                ? "Quantity (L)"
+                                : `Quantity (${product?.unit ?? "units"})`}
+                            </span>
+                            <input
+                              aria-label={`${product?.category === "FUEL" ? "Quantity in litres" : "Quantity"} ${index + 1}`}
+                              title={
+                                product?.category === "FUEL"
+                                  ? "Quantity (litres)"
+                                  : `Quantity (${product?.unit ?? "units"})`
+                              }
+                              placeholder={
+                                product?.category === "FUEL"
+                                  ? "Litres"
+                                  : "Quantity"
+                              }
+                              type="number"
+                              min=".001"
+                              step=".001"
+                              value={line.quantity}
+                              onChange={(e) =>
+                                setLines(
+                                  lines.map((x, i) =>
+                                    i === index
+                                      ? {
+                                          ...x,
+                                          quantity: Number(e.target.value),
+                                        }
+                                      : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="invoice-line-field">
+                            <span>
+                              {product?.category === "FUEL"
+                                ? "Rate / L (₹)"
+                                : "Rate / unit (₹)"}
+                            </span>
+                            <input
+                              aria-label={`Rate per ${product?.category === "FUEL" ? "litre" : "unit"} ${index + 1}`}
+                              title={
+                                product?.category === "FUEL"
+                                  ? "Purchase price (₹ per litre)"
+                                  : "Purchase price per unit"
+                              }
+                              placeholder="Rate"
+                              type="number"
+                              min="0"
+                              step=".01"
+                              value={line.unitCost}
+                              onChange={(e) =>
+                                setLines(
+                                  lines.map((x, i) =>
+                                    i === index
+                                      ? {
+                                          ...x,
+                                          unitCost: Number(e.target.value),
+                                        }
+                                      : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="invoice-line-field">
+                            <span>HSN code</span>
+                            <input
+                              aria-label={`HSN code ${index + 1}`}
+                              title="HSN code"
+                              placeholder="HSN code"
+                              value={line.hsnCode}
+                              onChange={(e) =>
+                                setLines(
+                                  lines.map((x, i) =>
+                                    i === index
+                                      ? { ...x, hsnCode: e.target.value }
+                                      : x,
+                                  ),
+                                )
+                              }
+                            />
+                          </label>
+                          {lines.length > 1 && (
+                            <button
+                              onClick={() =>
+                                setLines(lines.filter((_, i) => i !== index))
+                              }
+                            >
+                              ×
+                            </button>
+                          )}
+                          <small className="invoice-line-calculation">
                             {product?.category === "FUEL"
-                              ? "Quantity (L)"
-                              : `Quantity (${product?.unit ?? "units"})`}
-                          </span>
-                          <input
-                          aria-label={`${product?.category === "FUEL" ? "Quantity in litres" : "Quantity"} ${index + 1}`}
-                          title={
-                            product?.category === "FUEL"
-                              ? "Quantity (litres)"
-                              : `Quantity (${product?.unit ?? "units"})`
-                          }
-                          placeholder={
-                            product?.category === "FUEL"
-                              ? "Litres"
-                              : "Quantity"
-                          }
-                          type="number"
-                          min=".001"
-                          step=".001"
-                          value={line.quantity}
-                          onChange={(e) =>
-                            setLines(
-                              lines.map((x, i) =>
-                                i === index
-                                  ? { ...x, quantity: Number(e.target.value) }
-                                  : x,
-                              ),
-                            )
-                          }
-                          />
-                        </label>
-                        <label className="invoice-line-field">
-                          <span>
-                            {product?.category === "FUEL"
-                              ? "Rate / L (₹)"
-                              : "Rate / unit (₹)"}
-                          </span>
-                          <input
-                          aria-label={`Rate per ${product?.category === "FUEL" ? "litre" : "unit"} ${index + 1}`}
-                          title={
-                            product?.category === "FUEL"
-                              ? "Purchase price (₹ per litre)"
-                              : "Purchase price per unit"
-                          }
-                          placeholder="Rate"
-                          type="number"
-                          min="0"
-                          step=".01"
-                          value={line.unitCost}
-                          onChange={(e) =>
-                            setLines(
-                              lines.map((x, i) =>
-                                i === index
-                                  ? { ...x, unitCost: Number(e.target.value) }
-                                  : x,
-                              ),
-                            )
-                          }
-                          />
-                        </label>
-                        <label className="invoice-line-field">
-                          <span>HSN code</span>
-                          <input
-                          aria-label={`HSN code ${index + 1}`}
-                          title="HSN code"
-                          placeholder="HSN code"
-                          value={line.hsnCode}
-                          onChange={(e) =>
-                            setLines(
-                              lines.map((x, i) =>
-                                i === index
-                                  ? { ...x, hsnCode: e.target.value }
-                                  : x,
-                              ),
-                            )
-                          }
-                          />
-                        </label>
-                        {lines.length > 1 && (
-                          <button
-                            onClick={() =>
-                              setLines(lines.filter((_, i) => i !== index))
-                            }
-                          >
-                            ×
-                          </button>
-                        )}
-                        <small className="invoice-line-calculation">
-                          {product?.category === "FUEL"
-                            ? `${line.quantity.toLocaleString("en-IN")} L`
-                            : `${line.quantity.toLocaleString("en-IN")} ${product?.unit ?? "units"}`}
-                          {" × "}
-                          {money(line.unitCost)} ={" "}
-                          {money(line.quantity * line.unitCost)}
-                        </small>
-                      </div>
-                    );
-                  })}
-                  <button
-                    className="text-button"
-                    onClick={() => setLines([...lines, emptyLine()])}
-                  >
-                    <Plus size={14} /> Add line
-                  </button>
-                </div>
+                              ? `${line.quantity.toLocaleString("en-IN")} L`
+                              : `${line.quantity.toLocaleString("en-IN")} ${product?.unit ?? "units"}`}
+                            {" × "}
+                            {money(line.unitCost)} ={" "}
+                            {money(line.quantity * line.unitCost)}
+                          </small>
+                        </div>
+                      );
+                    })}
+                    <button
+                      className="text-button"
+                      onClick={() => setLines([...lines, emptyLine()])}
+                    >
+                      <Plus size={14} /> Add line
+                    </button>
+                  </div>
                 )}
                 <div className="invoice-options">
                   {mode !== "edit-invoice" && (
@@ -1004,9 +1097,11 @@ export function PurchasesPage() {
                                 })
                               }
                             >
-                              {["CASH", "UPI", "CARD", "OTHER"].map((method) => (
-                                <option key={method}>{method}</option>
-                              ))}
+                              {["CASH", "UPI", "CARD", "OTHER"].map(
+                                (method) => (
+                                  <option key={method}>{method}</option>
+                                ),
+                              )}
                             </select>
                           </label>
                           <label className="field">
@@ -1062,9 +1157,11 @@ export function PurchasesPage() {
                                 })
                               }
                             >
-                              {["CASH", "UPI", "CARD", "OTHER"].map((method) => (
-                                <option key={method}>{method}</option>
-                              ))}
+                              {["CASH", "UPI", "CARD", "OTHER"].map(
+                                (method) => (
+                                  <option key={method}>{method}</option>
+                                ),
+                              )}
                             </select>
                           </label>
                           <label className="field">
@@ -1093,18 +1190,16 @@ export function PurchasesPage() {
                           : subtotal,
                       )}
                     </span>
-                    {displayedTax > 0 && (
-                      <span>Tax {money(displayedTax)}</span>
-                    )}
+                    {displayedTax > 0 && <span>Tax {money(displayedTax)}</span>}
                     <strong>
                       Total{" "}
                       {money(
                         mode === "edit-invoice"
                           ? (pricePreview?.totalAmount ??
-                            Number(editingInvoice?.totalAmount ?? 0))
+                              Number(editingInvoice?.totalAmount ?? 0))
                           : invoice.invoiceTotal
-                          ? Number(invoice.invoiceTotal)
-                          : subtotal + calculatedTax,
+                            ? Number(invoice.invoiceTotal)
+                            : subtotal + calculatedTax,
                       )}
                     </strong>
                   </div>
