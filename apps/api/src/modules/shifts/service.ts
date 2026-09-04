@@ -424,12 +424,17 @@ export async function closeShift(
       const compatibleTanks = nozzle.tankMappings.filter(
         (mapping) => mapping.tank.productId === nozzle.productId,
       );
-      if (compatibleTanks.length !== 1)
+      const shiftProductTanks = shift.tankReadings
+        .filter((tankReading) => tankReading.tank.productId === nozzle.productId)
+        .map((tankReading) => ({ tankId: tankReading.tankId }));
+      const resolvedTanks =
+        compatibleTanks.length > 0 ? compatibleTanks : shiftProductTanks;
+      if (resolvedTanks.length !== 1)
         throw new AppError(
           409,
           "NOZZLE_TANK_AMBIGUOUS",
-          compatibleTanks.length === 0
-            ? `${opening.nozzle.dispenser.code} / ${opening.nozzle.code} has no active ${nozzle.product.code} tank in this shift configuration. Refresh the shift setup and try again.`
+          resolvedTanks.length === 0
+            ? `${opening.nozzle.dispenser.code} / ${opening.nozzle.code} has no ${nozzle.product.code} tank in the open shift. Review the shift setup and try again.`
             : `${opening.nozzle.dispenser.code} / ${opening.nozzle.code} has more than one active ${nozzle.product.code} tank. Choose one source tank before closing.`,
         );
 
@@ -439,7 +444,7 @@ export async function closeShift(
       const totalAmount = quantity.mul(unitPrice);
       const meterClosing = new Prisma.Decimal(reading.value);
       const meterOpening = meterClosing.sub(quantity);
-      const tankId = compatibleTanks[0]!.tankId;
+      const tankId = resolvedTanks[0]!.tankId;
       const sale = await tx.sale.create({
         data: {
           organizationId,
