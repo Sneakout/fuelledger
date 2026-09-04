@@ -1,4 +1,5 @@
 .nozzle-closing{width:100%;min-width:0;margin-top:18px;padding-top:18px;border-top:1px solid var(--line);container-type:inline-size}
+.shift-readings output{display:inline-flex;min-width:112px;justify-content:flex-end;color:var(--green);font-size:12px;font-weight:850;font-variant-numeric:tabular-nums}
 .nozzle-closing-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:18px;margin-bottom:14px}
 .nozzle-closing-heading h3{margin:0;font-size:14px}
 .nozzle-closing-heading p{margin:5px 0 0;color:var(--muted);font-size:9px;line-height:1.5}

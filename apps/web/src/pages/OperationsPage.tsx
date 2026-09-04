@@ -113,8 +113,10 @@ export function OperationsPage() {
         }),
       ]);
       setData(result);
-      const station = result.stations[0];
-      if (station && !stationId) selectStation(station, result);
+      const station =
+        result.stations.find((item) => item.id === stationId) ??
+        result.stations[0];
+      if (station) selectStation(station, result);
     } catch (item) {
       setLoadError(
         item instanceof ApiRequestError
@@ -577,17 +579,24 @@ function Readings({
           <label key={item.id}>
             <span>
               <strong>{item.label}</strong>
-              <small>{locked ? "Carried forward" : "Opening"}: {item.opening.toLocaleString()}</small>
+              <small>
+                {locked
+                  ? "Automatically from previous shift closing"
+                  : `Opening: ${item.opening.toLocaleString()}`}
+              </small>
             </span>
-            <input
-              type="number"
-              min="0"
-              value={value}
-              readOnly={locked}
-              onChange={(e) =>
-                onChange({ id: item.id, value: Number(e.target.value) })
-              }
-            />
+            {locked ? (
+              <output>{value.toLocaleString("en-IN")} L</output>
+            ) : (
+              <input
+                type="number"
+                min="0"
+                value={value}
+                onChange={(e) =>
+                  onChange({ id: item.id, value: Number(e.target.value) })
+                }
+              />
+            )}
           </label>
         );
       })}
