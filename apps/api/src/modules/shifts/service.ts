@@ -6,6 +6,7 @@ import type {
 import { Prisma } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
+import { collectionAccount, postJournal } from "../accounting/service.js";
 
 const include = {
   station: true,
@@ -367,19 +368,121 @@ export async function closeShift(
       meteredSales.find((sale) => sale.nozzleId === reading.id)?._sum
         .quantity ?? 0,
     );
-    if (Math.abs(meterMovement - recorded) > 0.001)
-      {
+    if (recorded - meterMovement > 0.001) {
       const assignment = shift.nozzleAssignments.find(
         (row) => row.nozzleId === reading.id,
       );
       throw new AppError(
         409,
         "METER_SALES_MISMATCH",
-        `${opening.nozzle.dispenser.code} / ${opening.nozzle.code}${assignment ? ` (${assignment.user.name})` : ""} moved ${meterMovement.toLocaleString()} L, but ${recorded.toLocaleString()} L of sales were recorded. Add the missing nozzle sales, then close the shift again.`,
+        `${opening.nozzle.dispenser.code} / ${opening.nozzle.code}${assignment ? ` (${assignment.user.name})` : ""} moved ${meterMovement.toLocaleString()} L, but ${recorded.toLocaleString()} L was already recorded. Correct the closing meter or the duplicate sale before closing.`,
       );
-      }
+    }
   }
   const closed = await prisma.$transaction(async (tx) => {
+    const closedAt = new Date();
+    for (const reading of input.nozzleReadings) {
+      const opening = shift.nozzleReadings.find(
+        (value) => value.nozzleId === reading.id,
+      )!;
+      const meterMovement = reading.value - Number(opening.openingMeter);
+      const recorded = Number(
+        meteredSales.find((sale) => sale.nozzleId === reading.id)?._sum
+          .quantity ?? 0,
+      );
+      const missingQuantity = meterMovement - recorded;
+      if (missingQuantity <= 0.001) continue;
+
+      const assignment = shift.nozzleAssignments.find(
+        (row) => row.nozzleId === reading.id,
+      )!;
+      const nozzle = await tx.nozzle.findUnique({
+        where: { id: reading.id },
+        include: {
+          product: {
+            include: {
+              sellingPriceHistory: {
+                where: { effectiveFrom: { lte: shift.openedAt } },
+                orderBy: { effectiveFrom: "desc" },
+                take: 1,
+              },
+            },
+          },
+          tankMappings: { select: { tankId: true } },
+        },
+      });
+      if (!nozzle)
+        throw new AppError(409, "NOZZLE_NOT_FOUND", "A shift nozzle is no longer available.");
+      if (nozzle.tankMappings.length !== 1)
+        throw new AppError(
+          409,
+          "NOZZLE_TANK_AMBIGUOUS",
+          `${opening.nozzle.dispenser.code} / ${opening.nozzle.code} must connect to exactly one tank before its sale can be calculated automatically.`,
+        );
+
+      const unitPrice =
+        nozzle.product.sellingPriceHistory[0]?.price ?? nozzle.product.sellingPrice;
+      const quantity = new Prisma.Decimal(missingQuantity);
+      const totalAmount = quantity.mul(unitPrice);
+      const meterClosing = new Prisma.Decimal(reading.value);
+      const meterOpening = meterClosing.sub(quantity);
+      const tankId = nozzle.tankMappings[0]!.tankId;
+      const sale = await tx.sale.create({
+        data: {
+          organizationId,
+          stationId: shift.stationId,
+          shiftId: shift.id,
+          productId: nozzle.productId,
+          employeeId: assignment.userId,
+          tankId,
+          nozzleId: nozzle.id,
+          kind: "METERED",
+          paymentMethod: "OTHER",
+          quantity,
+          unitPrice,
+          totalAmount,
+          meterOpening,
+          meterClosing,
+          notes: "Automatically calculated from shift closing meter; payment method pending reconciliation.",
+          occurredAt: closedAt,
+        },
+      });
+      if (nozzle.product.inventoryTracked)
+        await tx.inventoryLedger.create({
+          data: {
+            organizationId,
+            stationId: shift.stationId,
+            productId: nozzle.productId,
+            tankId,
+            type: "SALE",
+            quantityDelta: quantity.neg(),
+            unitCost: nozzle.product.purchasePrice,
+            saleId: sale.id,
+            occurredAt: closedAt,
+            createdById: assignment.userId,
+          },
+        });
+      await postJournal(tx, {
+        organizationId,
+        stationId: shift.stationId,
+        createdById: assignment.userId,
+        journalDate: closedAt,
+        reference: `SALE-${sale.id.slice(-8)}`,
+        description: `${nozzle.product.name} sale · automatically calculated at shift close`,
+        sourceType: "SALE",
+        sourceId: sale.id,
+        lines: [
+          { account: collectionAccount("OTHER"), debit: totalAmount },
+          { account: "4000", credit: totalAmount },
+          ...(nozzle.product.inventoryTracked
+            ? [
+                { account: "5000", debit: quantity.mul(nozzle.product.purchasePrice) },
+                { account: "1200", credit: quantity.mul(nozzle.product.purchasePrice) },
+              ]
+            : []),
+        ],
+      });
+    }
     await Promise.all(
       input.tankReadings.map((reading) =>
         tx.shiftTankReading.update({
@@ -411,7 +514,7 @@ export async function closeShift(
       data: {
         status: "RECONCILIATION_REQUIRED",
         closingCash: new Prisma.Decimal(input.closingCash),
-        closedAt: new Date(),
+        closedAt,
         notes: input.notes || shift.notes,
       },
       include,

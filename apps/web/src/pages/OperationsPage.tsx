@@ -303,34 +303,73 @@ export function OperationsPage() {
                 replace(closeTanks, v.id, v.value, setCloseTanks)
               }
             />
-            <Readings
-              title="Closing meter readings"
-              items={active.nozzleReadings.map((r) => ({
-                id: r.nozzleId,
-                label: meterLabel(r.nozzle.dispenser, r.nozzle),
-                opening: Number(r.openingMeter),
-              }))}
-              values={closeNozzles}
-              onChange={(v) =>
-                replace(closeNozzles, v.id, v.value, setCloseNozzles)
-              }
-            />
-            <div className="staff-collections">
-              <div className="staff-collections-heading">
-                <h3>Collections handed over by staff</h3>
-                <strong>{money(closeCollections.reduce((sum, item) => sum + item.value, 0))}</strong>
+            <div className="nozzle-closing">
+              <div className="nozzle-closing-heading">
+                <div>
+                  <h3>Nozzle closing & staff collection</h3>
+                  <p>
+                    Enter the closing meter and money handed over. Fuel sales are
+                    calculated and added to Sales automatically.
+                  </p>
+                </div>
+                <span>
+                  Total handed over
+                  <strong>{money(closeCollections.reduce((sum, item) => sum + item.value, 0))}</strong>
+                </span>
               </div>
-              <p>Enter the total money handed over for each assigned nozzle. This is kept separate from physical closing cash for reconciliation.</p>
-              {active.nozzleAssignments.map((assignment) => {
-                const nozzle = active.nozzleReadings.find((reading) => reading.nozzleId === assignment.nozzleId)?.nozzle;
-                return <label key={assignment.nozzleId} className="staff-collection-row">
-                  <span>
-                    <b>{nozzle ? meterLabel(nozzle.dispenser, nozzle) : "Assigned nozzle"}</b>
-                    <small>Responsible staff · {assignment.user.name}</small>
-                  </span>
-                  <span className="money-input"><i>₹</i><input type="number" min="0" value={closeCollections.find((item) => item.id === assignment.nozzleId)?.value ?? 0} onChange={(event) => replace(closeCollections, assignment.nozzleId, Number(event.target.value), setCloseCollections)} /></span>
-                </label>;
-              })}
+              <div className="nozzle-closing-table">
+                <div className="nozzle-closing-head" aria-hidden="true">
+                  <span>Nozzle & product</span>
+                  <span>Attendant</span>
+                  <span>Opening meter (L)</span>
+                  <span>Closing meter (L)</span>
+                  <span>Collection (₹)</span>
+                </div>
+                {active.nozzleReadings.map((reading) => {
+                  const assignment = active.nozzleAssignments.find(
+                    (item) => item.nozzleId === reading.nozzleId,
+                  );
+                  return (
+                    <div className="nozzle-closing-row" key={reading.nozzleId}>
+                      <span className="nozzle-identity">
+                        <b>{meterLabel(reading.nozzle.dispenser, reading.nozzle)}</b>
+                        <small>{reading.nozzle.product.name}</small>
+                      </span>
+                      <span className="nozzle-attendant" data-label="Attendant">
+                        {assignment?.user.name ?? "Not assigned"}
+                      </span>
+                      <span className="opening-meter" data-label="Opening meter (L)">
+                        {Number(reading.openingMeter).toLocaleString("en-IN")}
+                      </span>
+                      <label data-label="Closing meter (L)">
+                        <input
+                          aria-label={`Closing meter in litres for ${reading.nozzle.code}`}
+                          type="number"
+                          min={Number(reading.openingMeter)}
+                          step="0.001"
+                          value={closeNozzles.find((item) => item.id === reading.nozzleId)?.value ?? 0}
+                          onChange={(event) =>
+                            replace(closeNozzles, reading.nozzleId, Number(event.target.value), setCloseNozzles)
+                          }
+                        />
+                      </label>
+                      <label className="collection-field" data-label="Collection (₹)">
+                        <i>₹</i>
+                        <input
+                          aria-label={`Collection in rupees from ${assignment?.user.name ?? reading.nozzle.code}`}
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={closeCollections.find((item) => item.id === reading.nozzleId)?.value ?? 0}
+                          onChange={(event) =>
+                            replace(closeCollections, reading.nozzleId, Number(event.target.value), setCloseCollections)
+                          }
+                        />
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
             <label className="field">
               <span>Close note (optional)</span>
