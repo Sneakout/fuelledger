@@ -454,6 +454,7 @@ model ShiftNozzleAssignment {
   shiftId String @map("shift_id")
   nozzleId String @map("nozzle_id")
   userId String @map("user_id")
+  collectionAmount Decimal? @db.Decimal(14, 2) @map("collection_amount")
   shift Shift @relation(fields:[shiftId],references:[id],onDelete:Restrict)
   nozzle Nozzle @relation(fields:[nozzleId],references:[id],onDelete:Restrict)
   user User @relation(fields:[userId],references:[id],onDelete:Restrict)
@@ -487,10 +488,22 @@ model Nozzle {
   tankMappings   NozzleTank[]
   shiftReadings  ShiftNozzleReading[]
   shiftAssignments ShiftNozzleAssignment[]
+  attendantAssignment NozzleAttendantAssignment?
   sales          Sale[]
 
   @@unique([dispenserId, code])
   @@map("nozzles")
+}
+
+model NozzleAttendantAssignment {
+  nozzleId String @id @map("nozzle_id")
+  userId String @map("user_id")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  nozzle Nozzle @relation(fields:[nozzleId],references:[id],onDelete:Restrict)
+  user User @relation(fields:[userId],references:[id],onDelete:Restrict)
+
+  @@index([userId])
+  @@map("nozzle_attendant_assignments")
 }
 
 model NozzleTank {
@@ -954,6 +967,7 @@ model User {
   shiftsManaged  Shift[] @relation("shift_manager")
   shiftAssignments ShiftUser[]
   nozzleAssignments ShiftNozzleAssignment[]
+  defaultNozzleAssignments NozzleAttendantAssignment[]
   sales            Sale[]
   inventoryEntries InventoryLedger[]
   purchaseReceipts PurchaseReceipt[]

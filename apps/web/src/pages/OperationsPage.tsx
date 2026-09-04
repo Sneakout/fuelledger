@@ -94,6 +94,7 @@ export function OperationsPage() {
     [closeCash, setCloseCash] = useState(0),
     [closeTanks, setCloseTanks] = useState<Reading[]>([]),
     [closeNozzles, setCloseNozzles] = useState<Reading[]>([]),
+    [closeCollections, setCloseCollections] = useState<Reading[]>([]),
     [notes, setNotes] = useState(""),
     [error, setError] = useState(""),
     [loadError, setLoadError] = useState(""),
@@ -143,13 +144,13 @@ export function OperationsPage() {
     const manager =
       source?.users.find((u) => u.role === "MANAGER") ?? source?.users[0];
     if (manager) {
+      const configuredAssignments = config?.dispensers.flatMap((d) =>
+        d.nozzles.map((n) => ({ nozzleId: n.id, userId: n.attendantAssignment?.userId ?? manager.id })),
+      ) ?? [];
+      const assignedAttendants = [...new Set(configuredAssignments.map(row => row.userId))];
       setManagerId(manager.id);
-      setUserIds([manager.id]);
-      setNozzleAssignments(
-        config?.dispensers.flatMap((d) =>
-          d.nozzles.map((n) => ({ nozzleId: n.id, userId: manager.id })),
-        ) ?? [],
-      );
+      setUserIds([...new Set([manager.id, ...assignedAttendants])]);
+      setNozzleAssignments(configuredAssignments);
     }
   };
   const active = useMemo(
@@ -170,6 +171,12 @@ export function OperationsPage() {
         active.nozzleReadings.map((r) => ({
           id: r.nozzleId,
           value: Number(r.openingMeter),
+        })),
+      );
+      setCloseCollections(
+        active.nozzleAssignments.map((assignment) => ({
+          id: assignment.nozzleId,
+          value: Number(assignment.collectionAmount ?? 0),
         })),
       );
       setCloseCash(Number(active.openingCash));
@@ -219,6 +226,10 @@ export function OperationsPage() {
         closingCash: closeCash,
         tankReadings: closeTanks,
         nozzleReadings: closeNozzles,
+        nozzleCollections: closeCollections.map((item) => ({
+          nozzleId: item.id,
+          amount: item.value,
+        })),
         notes,
       });
       setNotes("");
@@ -304,6 +315,23 @@ export function OperationsPage() {
                 replace(closeNozzles, v.id, v.value, setCloseNozzles)
               }
             />
+            <div className="staff-collections">
+              <div className="staff-collections-heading">
+                <h3>Collections handed over by staff</h3>
+                <strong>{money(closeCollections.reduce((sum, item) => sum + item.value, 0))}</strong>
+              </div>
+              <p>Enter the total money handed over for each assigned nozzle. This is kept separate from physical closing cash for reconciliation.</p>
+              {active.nozzleAssignments.map((assignment) => {
+                const nozzle = active.nozzleReadings.find((reading) => reading.nozzleId === assignment.nozzleId)?.nozzle;
+                return <label key={assignment.nozzleId} className="staff-collection-row">
+                  <span>
+                    <b>{nozzle ? meterLabel(nozzle.dispenser, nozzle) : "Assigned nozzle"}</b>
+                    <small>Responsible staff · {assignment.user.name}</small>
+                  </span>
+                  <span className="money-input"><i>₹</i><input type="number" min="0" value={closeCollections.find((item) => item.id === assignment.nozzleId)?.value ?? 0} onChange={(event) => replace(closeCollections, assignment.nozzleId, Number(event.target.value), setCloseCollections)} /></span>
+                </label>;
+              })}
+            </div>
             <label className="field">
               <span>Close note (optional)</span>
               <input value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -320,6 +348,7 @@ export function OperationsPage() {
             shift={active}
             closingCash={closeCash}
             closeNozzles={closeNozzles}
+            staffCollections={closeCollections.reduce((sum, item) => sum + item.value, 0)}
           />
         </section>
       </main>
@@ -525,10 +554,12 @@ function ShiftSummary({
   shift,
   closingCash,
   closeNozzles,
+  staffCollections,
 }: {
   shift: Shift;
   closingCash: number;
   closeNozzles: Reading[];
+  staffCollections: number;
 }) {
   const volume = shift.nozzleReadings.reduce(
     (sum, r) =>
@@ -557,6 +588,10 @@ function ShiftSummary({
         <strong>
           {volume.toLocaleString(undefined, { maximumFractionDigits: 3 })} L
         </strong>
+      </div>
+      <div>
+        <span>Staff collections handed over</span>
+        <strong>{money(staffCollections)}</strong>
       </div>
       <div>
         <span>Readings</span>

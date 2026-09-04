@@ -46,7 +46,7 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
               include: {
                 nozzles: {
                   where: { status: "ACTIVE" },
-                  include: { product: true },
+                  include: { product: true, attendantAssignment: { select: { userId: true } } },
                 },
               },
             },
@@ -331,12 +331,16 @@ export async function closeShift(
     !exact(
       input.nozzleReadings.map((reading) => reading.id),
       shift.nozzleReadings.map((reading) => ({ id: reading.nozzleId })),
+    ) ||
+    !exact(
+      input.nozzleCollections.map((collection) => collection.nozzleId),
+      shift.nozzleAssignments.map((assignment) => ({ id: assignment.nozzleId })),
     )
   )
     throw new AppError(
       400,
       "READINGS_INCOMPLETE",
-      "Enter one closing reading for every active tank and nozzle.",
+      "Enter one closing reading and staff collection for every active nozzle.",
     );
   for (const reading of input.nozzleReadings) {
     const opening = shift.nozzleReadings.find(
@@ -364,11 +368,16 @@ export async function closeShift(
         .quantity ?? 0,
     );
     if (Math.abs(meterMovement - recorded) > 0.001)
+      {
+      const assignment = shift.nozzleAssignments.find(
+        (row) => row.nozzleId === reading.id,
+      );
       throw new AppError(
         409,
         "METER_SALES_MISMATCH",
-        `Nozzle ${opening.nozzle.code} moved ${meterMovement.toLocaleString()} L, but ${recorded.toLocaleString()} L of metered sales were recorded. Record or correct the sales before closing the shift.`,
+        `${opening.nozzle.dispenser.code} / ${opening.nozzle.code}${assignment ? ` (${assignment.user.name})` : ""} moved ${meterMovement.toLocaleString()} L, but ${recorded.toLocaleString()} L of sales were recorded. Add the missing nozzle sales, then close the shift again.`,
       );
+      }
   }
   const closed = await prisma.$transaction(async (tx) => {
     await Promise.all(
@@ -384,6 +393,16 @@ export async function closeShift(
         tx.shiftNozzleReading.update({
           where: { shiftId_nozzleId: { shiftId: id, nozzleId: reading.id } },
           data: { closingMeter: new Prisma.Decimal(reading.value) },
+        }),
+      ),
+    );
+    await Promise.all(
+      input.nozzleCollections.map((collection) =>
+        tx.shiftNozzleAssignment.update({
+          where: {
+            shiftId_nozzleId: { shiftId: id, nozzleId: collection.nozzleId },
+          },
+          data: { collectionAmount: new Prisma.Decimal(collection.amount) },
         }),
       ),
     );

@@ -1,0 +1,13 @@
+.staff-collections{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.staff-collections-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.staff-collections-heading h3{margin:0;font-size:13px}
+.staff-collections-heading strong{color:var(--green);font-size:14px}
+.staff-collections>p{margin:5px 0 10px;color:var(--muted);font-size:9px;line-height:1.5}
+.staff-collection-row{display:grid;grid-template-columns:1fr 145px;align-items:center;gap:12px;padding:10px 0;border-top:1px solid #edf2ef}
+.staff-collection-row>span:first-child{display:flex;flex-direction:column;gap:3px}
+.staff-collection-row b{font-size:10px}
+.staff-collection-row small{color:var(--muted);font-size:9px}
+.money-input{display:flex;align-items:center;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden}
+.money-input i{padding-left:11px;color:var(--green);font-style:normal;font-weight:800}
+.money-input input{width:100%;height:39px;border:0;padding:0 10px;font:inherit;outline:0}
+@media(max-width:600px){.staff-collection-row{grid-template-columns:1fr}.money-input{width:100%}}

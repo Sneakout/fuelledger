@@ -158,7 +158,7 @@ export type DensityReadingInput = z.infer<typeof densityReadingInputSchema>;
 
 const reading = z.object({ id: z.string().cuid(), value: z.coerce.number().min(0) });
 export const openShiftSchema = z.object({ stationId: z.string().cuid(), managerId: z.string().cuid(), userIds: z.array(z.string().cuid()).min(1), nozzleAssignments:z.array(z.object({nozzleId:z.string().cuid(),userId:z.string().cuid()})), openingCash: z.coerce.number().min(0), tankReadings: z.array(reading), nozzleReadings: z.array(reading), notes: z.string().max(500).optional() });
-export const closeShiftSchema = z.object({ closingCash: z.coerce.number().min(0), tankReadings: z.array(reading), nozzleReadings: z.array(reading), notes: z.string().max(500).optional() });
+export const closeShiftSchema = z.object({ closingCash: z.coerce.number().min(0), tankReadings: z.array(reading), nozzleReadings: z.array(reading), nozzleCollections:z.array(z.object({nozzleId:z.string().cuid(),amount:z.coerce.number().min(0)})), notes: z.string().max(500).optional() });
 export type OpenShiftInput = z.infer<typeof openShiftSchema>; export type CloseShiftInput = z.infer<typeof closeShiftSchema>;
 
 export const paymentMethods = ['CASH', 'UPI', 'CARD', 'CREDIT', 'FLEET', 'OTHER'] as const;

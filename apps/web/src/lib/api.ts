@@ -1,5 +1,34 @@
-import type { ApiError, ChangePasswordInput, CustomerInput, CustomerReceiptInput, DemoAccessInput, DensityReadingInput, ExpenseCategoryInput, ExpenseInput, GoogleAuthInput, InventoryAdjustmentInput, LoginInput, ManagerInput, OwnerNotificationSettingsInput, PurchaseInvoiceInput, PurchaseInvoiceUpdateInput, ReceiptInput, ReconciliationInput, SaleInput, SignupInput, StationAccessInput, StationEquipmentInput, StationProfileInput, StationSetup, SupplierInput, SupplierPaymentInput, TankReadingInput, User, VehicleInput } from '@fuelledger/shared';
-const API_URL = import.meta.env.VITE_API_URL ?? '/api';
+import type {
+  ApiError,
+  ChangePasswordInput,
+  CustomerInput,
+  CustomerReceiptInput,
+  DemoAccessInput,
+  DensityReadingInput,
+  ExpenseCategoryInput,
+  ExpenseInput,
+  GoogleAuthInput,
+  InventoryAdjustmentInput,
+  LoginInput,
+  ManagerInput,
+  OwnerNotificationSettingsInput,
+  PurchaseInvoiceInput,
+  PurchaseInvoiceUpdateInput,
+  ReceiptInput,
+  ReconciliationInput,
+  SaleInput,
+  SignupInput,
+  StationAccessInput,
+  StationEquipmentInput,
+  StationProfileInput,
+  StationSetup,
+  SupplierInput,
+  SupplierPaymentInput,
+  TankReadingInput,
+  User,
+  VehicleInput,
+} from "@fuelledger/shared";
+const API_URL = import.meta.env.VITE_API_URL ?? "/api";
 export class ApiRequestError extends Error {
   constructor(
     message: string,
@@ -13,222 +42,295 @@ export class ApiRequestError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...init?.headers },
   });
   if (response.status === 204) return undefined as T;
-  const contentType = response.headers.get('content-type') ?? '';
-  if (!contentType.includes('application/json')) {
-    throw new ApiRequestError(response.ok ? 'The server returned an invalid response.' : 'FuelLedger could not connect to its server. Please try again shortly.', response.ok ? 'INVALID_SERVER_RESPONSE' : 'SERVER_UNAVAILABLE');
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("application/json")) {
+    throw new ApiRequestError(
+      response.ok
+        ? "The server returned an invalid response."
+        : "FuelLedger could not connect to its server. Please try again shortly.",
+      response.ok ? "INVALID_SERVER_RESPONSE" : "SERVER_UNAVAILABLE",
+    );
   }
   const body = (await response.json()) as T | ApiError;
   if (!response.ok) {
     const apiError = body as ApiError;
-    throw new ApiRequestError(apiError.error?.message ?? 'Something went wrong.', apiError.error?.code ?? 'REQUEST_FAILED', apiError.error?.requestId, apiError.error?.details);
+    throw new ApiRequestError(
+      apiError.error?.message ?? "Something went wrong.",
+      apiError.error?.code ?? "REQUEST_FAILED",
+      apiError.error?.requestId,
+      apiError.error?.details,
+    );
   }
   return body as T;
 }
 export const api = {
   login: (input: LoginInput) =>
-    request<{ user: User }>('/auth/login', {
-      method: 'POST',
+    request<{ user: User }>("/auth/login", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   signup: (input: SignupInput) =>
-    request<{ user: User }>('/auth/signup', {
-      method: 'POST',
+    request<{ user: User }>("/auth/signup", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   googleAuth: (input: GoogleAuthInput) =>
-    request<{ user: User }>('/auth/google', {
-      method: 'POST',
+    request<{ user: User }>("/auth/google", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   startDemo: (input: DemoAccessInput) =>
-    request<{ user: User }>('/auth/demo', {
-      method: 'POST',
+    request<{ user: User }>("/auth/demo", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
-  me: () => request<{ user: User }>('/auth/me'),
-  logout: () => request<void>('/auth/logout', { method: 'POST' }),
+  me: () => request<{ user: User }>("/auth/me"),
+  logout: () => request<void>("/auth/logout", { method: "POST" }),
   changePassword: (input: ChangePasswordInput) =>
-    request<{ ok: boolean }>('/auth/change-password', {
-      method: 'POST',
+    request<{ ok: boolean }>("/auth/change-password", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
-  stations: () => request<{ stations: StationSummary[] }>('/stations'),
+  stations: () => request<{ stations: StationSummary[] }>("/stations"),
   createStation: (setup: StationSetup) =>
-    request<{ station: StationSummary }>('/stations', {
-      method: 'POST',
+    request<{ station: StationSummary }>("/stations", {
+      method: "POST",
       body: JSON.stringify(setup),
     }),
-  stationSetupDraft: (id: string) => request<{ draft: { setup: StationSetup; updatedAt: string } | null }>(`/stations/${id}/draft`),
-  saveStationSetupDraft: (id: string, setup: StationSetup) => request<{ draft: { setup: StationSetup; updatedAt: string } }>(`/stations/${id}/draft`, { method: 'PUT', body: JSON.stringify({ setup }) }),
+  stationSetupDraft: (id: string) =>
+    request<{ draft: { setup: StationSetup; updatedAt: string } | null }>(
+      `/stations/${id}/draft`,
+    ),
+  saveStationSetupDraft: (id: string, setup: StationSetup) =>
+    request<{ draft: { setup: StationSetup; updatedAt: string } }>(
+      `/stations/${id}/draft`,
+      { method: "PUT", body: JSON.stringify({ setup }) },
+    ),
   updateStation: (id: string, profile: StationProfileInput) =>
     request<{ station: StationSummary }>(`/stations/${id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(profile),
     }),
-  stationEquipment: (id: string) => request<StationEquipment>(`/stations/${id}/equipment`),
+  stationEquipment: (id: string) =>
+    request<StationEquipment>(`/stations/${id}/equipment`),
   updateStationEquipment: (id: string, input: StationEquipmentInput) =>
     request<{ station: StationSummary }>(`/stations/${id}/equipment`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(input),
     }),
-  catalog: () => request<Catalog>('/products'),
+  catalog: () => request<Catalog>("/products"),
   createProduct: (input: ProductForm) =>
-    request<{ product: CatalogProduct }>('/products', {
-      method: 'POST',
+    request<{ product: CatalogProduct }>("/products", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   updateProduct: (id: string, input: ProductForm) =>
     request<{ product: CatalogProduct }>(`/products/${id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(input),
     }),
   createCategory: (input: { name: string; code: string }) =>
-    request<{ category: CatalogCategory }>('/products/categories', {
-      method: 'POST',
+    request<{ category: CatalogCategory }>("/products/categories", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   createTaxCategory: (input: { name: string; rate: number }) =>
-    request<{ taxCategory: CatalogTaxCategory }>('/products/tax-categories', {
-      method: 'POST',
+    request<{ taxCategory: CatalogTaxCategory }>("/products/tax-categories", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
-  shiftBootstrap: () => request<ShiftBootstrap>('/shifts/bootstrap'),
+  shiftBootstrap: () => request<ShiftBootstrap>("/shifts/bootstrap"),
   openShift: (input: ShiftOpenForm) =>
-    request<{ shift: Shift }>('/shifts/open', {
-      method: 'POST',
+    request<{ shift: Shift }>("/shifts/open", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   closeShift: (id: string, input: ShiftCloseForm) =>
     request<{ shift: Shift }>(`/shifts/${id}/close`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(input),
     }),
-  salesBootstrap: () => request<SalesBootstrap>('/sales/bootstrap'),
+  salesBootstrap: () => request<SalesBootstrap>("/sales/bootstrap"),
   createSale: (input: SaleForm) =>
-    request<{ sale: Sale }>('/sales', {
-      method: 'POST',
+    request<{ sale: Sale }>("/sales", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
-  inventoryBootstrap: () => request<InventoryBootstrap>('/inventory/bootstrap'),
+  inventoryBootstrap: () => request<InventoryBootstrap>("/inventory/bootstrap"),
   createReceipt: (input: ReceiptForm) =>
-    request<{ receipt: unknown }>('/inventory/receipts', {
-      method: 'POST',
+    request<{ receipt: unknown }>("/inventory/receipts", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   createAdjustment: (input: AdjustmentForm) =>
-    request<{ entry: unknown }>('/inventory/adjustments', {
-      method: 'POST',
+    request<{ entry: unknown }>("/inventory/adjustments", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   recordTankReading: (input: TankReadingForm) =>
-    request<{ reading: unknown }>('/inventory/tank-readings', {
-      method: 'POST',
+    request<{ reading: unknown }>("/inventory/tank-readings", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   recordDensity: (input: DensityReadingInput) =>
-    request<{ reading: unknown }>('/inventory/density-readings', {
-      method: 'POST',
+    request<{ reading: unknown }>("/inventory/density-readings", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
-  reconciliationBootstrap: () => request<ReconciliationBootstrap>('/reconciliation/bootstrap'),
+  reconciliationBootstrap: () =>
+    request<ReconciliationBootstrap>("/reconciliation/bootstrap"),
   reconcileShift: (id: string, input: ReconciliationForm) =>
     request<{ shift: ReconciliationShift }>(`/reconciliation/shifts/${id}`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(input),
     }),
-  customersBootstrap: () => request<CustomersBootstrap>('/customers/bootstrap'),
+  customersBootstrap: () => request<CustomersBootstrap>("/customers/bootstrap"),
   createCustomer: (input: CustomerInput) =>
-    request<{ customer: Customer }>('/customers', {
-      method: 'POST',
+    request<{ customer: Customer }>("/customers", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   updateCustomer: (id: string, input: CustomerInput) =>
     request<{ customer: Customer }>(`/customers/${id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(input),
     }),
   addVehicle: (id: string, input: VehicleInput) =>
     request<{ vehicle: CustomerVehicle }>(`/customers/${id}/vehicles`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(input),
     }),
   receiveCustomerPayment: (id: string, input: CustomerReceiptInput) =>
     request<{ receipt: unknown }>(`/customers/${id}/receipts`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(input),
     }),
-  purchasesBootstrap: () => request<PurchasesBootstrap>('/purchases/bootstrap'),
+  purchasesBootstrap: () => request<PurchasesBootstrap>("/purchases/bootstrap"),
   createSupplier: (input: SupplierInput) =>
-    request<{ supplier: Supplier }>('/purchases/suppliers', {
-      method: 'POST',
+    request<{ supplier: Supplier }>("/purchases/suppliers", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   createPurchaseInvoice: (input: PurchaseInvoiceInput) =>
-    request<{ invoice: PurchaseInvoice }>('/purchases/invoices', {
-      method: 'POST',
+    request<{ invoice: PurchaseInvoice }>("/purchases/invoices", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   updatePurchaseInvoice: (id: string, input: PurchaseInvoiceUpdateInput) =>
     request<{ invoice: PurchaseInvoice }>(`/purchases/invoices/${id}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(input),
     }),
-  purchaseInvoicePricePreview: (id: string) => request<InvoicePricePreview>(`/purchases/invoices/${id}/price-preview`),
+  purchaseInvoicePricePreview: (id: string) =>
+    request<InvoicePricePreview>(`/purchases/invoices/${id}/price-preview`),
   paySupplierInvoice: (input: SupplierPaymentInput) =>
-    request<{ payment: unknown }>('/purchases/payments', {
-      method: 'POST',
+    request<{ payment: unknown }>("/purchases/payments", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   createExpenseCategory: (input: ExpenseCategoryInput) =>
-    request<{ category: ExpenseCategory }>('/purchases/expense-categories', {
-      method: 'POST',
+    request<{ category: ExpenseCategory }>("/purchases/expense-categories", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   createExpense: (input: ExpenseInput) =>
-    request<{ expense: Expense }>('/purchases/expenses', {
-      method: 'POST',
+    request<{ expense: Expense }>("/purchases/expenses", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
-  accountingBootstrap: (stationId?: string) => request<AccountingBootstrap>(`/accounting/bootstrap${stationId ? `?stationId=${encodeURIComponent(stationId)}` : ''}`),
-  reportsBootstrap: (filter: { startDate: string; endDate: string; stationId?: string }) => request<ReportsBootstrap>(`/reports/bootstrap?${new URLSearchParams(Object.entries(filter).filter(([, value]) => value) as string[][]).toString()}`),
-  dashboardBootstrap: (stationId?: string) => request<DashboardBootstrap>(`/dashboard/bootstrap${stationId ? `?stationId=${encodeURIComponent(stationId)}` : ''}`),
-  stationContext: () => request<StationContextData>('/access/context'),
-  accessBootstrap: () => request<AccessBootstrap>('/access'),
+  accountingBootstrap: (stationId?: string) =>
+    request<AccountingBootstrap>(
+      `/accounting/bootstrap${stationId ? `?stationId=${encodeURIComponent(stationId)}` : ""}`,
+    ),
+  reportsBootstrap: (filter: {
+    startDate: string;
+    endDate: string;
+    stationId?: string;
+  }) =>
+    request<ReportsBootstrap>(
+      `/reports/bootstrap?${new URLSearchParams(Object.entries(filter).filter(([, value]) => value) as string[][]).toString()}`,
+    ),
+  dashboardBootstrap: (stationId?: string) =>
+    request<DashboardBootstrap>(
+      `/dashboard/bootstrap${stationId ? `?stationId=${encodeURIComponent(stationId)}` : ""}`,
+    ),
+  stationContext: () => request<StationContextData>("/access/context"),
+  accessBootstrap: () => request<AccessBootstrap>("/access"),
   createStaff: (input: { name: string; stationIds: string[] }) =>
-    request<{ user: unknown }>('/access/users', {
-      method: 'POST',
+    request<{ user: unknown }>("/access/users", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   createManager: (input: ManagerInput) =>
-    request<{ user: unknown }>('/access/managers', {
-      method: 'POST',
+    request<{ user: unknown }>("/access/managers", {
+      method: "POST",
       body: JSON.stringify(input),
     }),
   deactivateStaff: (userId: string) =>
     request<{ id: string; active: boolean }>(`/access/users/${userId}`, {
-      method: 'DELETE',
+      method: "DELETE",
     }),
-  updateStationAccess: (userId: string, input: StationAccessInput) => request<{ userId: string; stationIds: string[] }>(`/access/users/${userId}`, { method: 'PUT', body: JSON.stringify(input) }),
-  updateNozzleCustody: (shiftId: string, assignments: Array<{ nozzleId: string; userId: string }>) =>
+  updateStationAccess: (userId: string, input: StationAccessInput) =>
+    request<{ userId: string; stationIds: string[] }>(
+      `/access/users/${userId}`,
+      { method: "PUT", body: JSON.stringify(input) },
+    ),
+  updateNozzleCustody: (
+    shiftId: string,
+    assignments: Array<{ nozzleId: string; userId: string }>,
+  ) =>
     request<{ shift: Shift }>(`/shifts/${shiftId}/nozzle-assignments`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify({ assignments }),
     }),
-  notificationSettings: () => request<NotificationBootstrap>('/notifications'),
+  updateDefaultNozzleAssignments: (
+    stationId: string,
+    assignments: Array<{ nozzleId: string; userId: string }>,
+  ) =>
+    request<{
+      stationId: string;
+      assignments: Array<{ nozzleId: string; userId: string }>;
+      openShiftUpdated: boolean;
+    }>(`/access/stations/${stationId}/nozzle-assignments`, {
+      method: "PUT",
+      body: JSON.stringify({ assignments }),
+    }),
+  notificationSettings: () => request<NotificationBootstrap>("/notifications"),
   updateNotificationSettings: (input: OwnerNotificationSettingsInput) =>
-    request<{ settings: NotificationSettings }>('/notifications', {
-      method: 'PUT',
+    request<{ settings: NotificationSettings }>("/notifications", {
+      method: "PUT",
       body: JSON.stringify(input),
     }),
-  testWhatsApp: () => request<{ delivery: { status: string; reason?: string } }>('/notifications/test', { method: 'POST' }),
-  demoLeads: () => request<DemoLeadsBootstrap>('/platform/demo-leads'),
-  platformCustomers: () => request<PlatformCustomersBootstrap>('/platform/customers'),
-  updateCustomerSubscription: (id: string, input: { setupFeePaid: boolean; lifetimeAccessPaid: boolean }) => request<{ customer: Pick<PlatformCustomer, 'id' | 'setupFeePaidAt' | 'lifetimeAccessPaidAt' | 'subscriptionUpdatedAt' | 'subscriptionUpdatedBy'> }>(`/platform/customers/${id}/subscription`, { method: 'PUT', body: JSON.stringify(input) }),
-  subscription: () => request<SubscriptionStatus>('/platform/subscription'),
+  testWhatsApp: () =>
+    request<{ delivery: { status: string; reason?: string } }>(
+      "/notifications/test",
+      { method: "POST" },
+    ),
+  demoLeads: () => request<DemoLeadsBootstrap>("/platform/demo-leads"),
+  platformCustomers: () =>
+    request<PlatformCustomersBootstrap>("/platform/customers"),
+  updateCustomerSubscription: (
+    id: string,
+    input: { setupFeePaid: boolean; lifetimeAccessPaid: boolean },
+  ) =>
+    request<{
+      customer: Pick<
+        PlatformCustomer,
+        | "id"
+        | "setupFeePaidAt"
+        | "lifetimeAccessPaidAt"
+        | "subscriptionUpdatedAt"
+        | "subscriptionUpdatedBy"
+      >;
+    }>(`/platform/customers/${id}/subscription`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  subscription: () => request<SubscriptionStatus>("/platform/subscription"),
 };
 export type NotificationSettings = {
   whatsappNumber: string | null;
@@ -250,7 +352,7 @@ export type NotificationDelivery = {
   station: { name: string; code: string } | null;
   destination: string;
   message: string;
-  status: 'PENDING' | 'SENT' | 'FAILED';
+  status: "PENDING" | "SENT" | "FAILED";
   errorMessage: string | null;
   sentAt: string | null;
   createdAt: string;
@@ -302,6 +404,7 @@ export type ShiftCloseForm = {
   closingCash: number;
   tankReadings: Reading[];
   nozzleReadings: Reading[];
+  nozzleCollections: Array<{ nozzleId: string; amount: number }>;
   notes?: string;
 };
 export type ShiftStation = {
@@ -334,6 +437,7 @@ export type ShiftStation = {
         code: string;
         openingMeter: string;
         product: { name: string; code: string };
+        attendantAssignment: { userId: string } | null;
       }>;
     }>;
   }>;
@@ -353,6 +457,7 @@ export type Shift = {
     nozzleId: string;
     userId: string;
     user: { id: string; name: string; role: string };
+    collectionAmount: string | null;
     nozzle: {
       code: string;
       product: { name: string; code: string };
@@ -423,7 +528,15 @@ export type CatalogProduct = {
   taxCategory: CatalogTaxCategory | null;
   customCategory: CatalogCategory | null;
 };
-export type ProductForm = Omit<CatalogProduct, 'id' | 'purchasePrice' | 'sellingPrice' | 'sellingPriceHistory' | 'taxCategory' | 'customCategory'> & {
+export type ProductForm = Omit<
+  CatalogProduct,
+  | "id"
+  | "purchasePrice"
+  | "sellingPrice"
+  | "sellingPriceHistory"
+  | "taxCategory"
+  | "customCategory"
+> & {
   purchasePrice: number;
   sellingPrice: number;
   sellingPriceEffectiveFrom?: string;
@@ -451,18 +564,18 @@ export type StationSummary = {
     tanks: Array<{
       id: string;
       code: string;
-      status: 'ACTIVE' | 'INACTIVE';
+      status: "ACTIVE" | "INACTIVE";
       product: { name: string; code: string };
       openingStock: string;
     }>;
     dispensers: Array<{
       id: string;
       code: string;
-      status: 'ACTIVE' | 'INACTIVE';
+      status: "ACTIVE" | "INACTIVE";
       nozzles: Array<{
         id: string;
         code: string;
-        status: 'ACTIVE' | 'INACTIVE';
+        status: "ACTIVE" | "INACTIVE";
       }>;
     }>;
   }>;
@@ -478,22 +591,22 @@ export type StationEquipment = {
       nominalCapacity: string;
       workingCapacity: string;
       openingStock: string;
-      tankType: 'UNDERGROUND' | 'ABOVE_GROUND';
-      dipMethod: 'MANUAL' | 'ATG';
-      status: 'ACTIVE' | 'INACTIVE';
+      tankType: "UNDERGROUND" | "ABOVE_GROUND";
+      dipMethod: "MANUAL" | "ATG";
+      status: "ACTIVE" | "INACTIVE";
       product: { id: string; name: string; code: string };
     }>;
     dispensers: Array<{
       id: string;
       code: string;
       location: string | null;
-      status: 'ACTIVE' | 'INACTIVE';
+      status: "ACTIVE" | "INACTIVE";
       nozzles: Array<{
         id: string;
         code: string;
         productId: string;
         openingMeter: string;
-        status: 'ACTIVE' | 'INACTIVE';
+        status: "ACTIVE" | "INACTIVE";
         product: { id: string; name: string; code: string };
         tankMappings: Array<{ tank: { id: string; code: string } }>;
       }>;
@@ -731,7 +844,7 @@ export type Customer = {
   id: string;
   name: string;
   code: string;
-  type: 'CREDIT' | 'FLEET';
+  type: "CREDIT" | "FLEET";
   phone: string | null;
   email: string | null;
   taxId: string | null;
@@ -1043,7 +1156,7 @@ export type DashboardBootstrap = {
   };
   actions: Array<{
     id: string;
-    severity: 'HIGH' | 'MEDIUM';
+    severity: "HIGH" | "MEDIUM";
     title: string;
     detail: string;
     href: string;
@@ -1057,7 +1170,7 @@ export type DashboardBootstrap = {
     openShifts: number;
     pendingReconciliations: number;
     stockAlerts: number;
-    status: 'ATTENTION' | 'RUNNING' | 'CALM';
+    status: "ATTENTION" | "RUNNING" | "CALM";
   }>;
   tankStocks: Array<{
     id: string;
@@ -1074,7 +1187,7 @@ export type DashboardBootstrap = {
     densityRecordedAt: string | null;
     physicalStock: number | null;
     physicalReadingAt: string | null;
-    status: 'EMPTY' | 'LOW' | 'HEALTHY';
+    status: "EMPTY" | "LOW" | "HEALTHY";
   }>;
 };
 export type AccessStation = {
@@ -1084,6 +1197,19 @@ export type AccessStation = {
   city: string;
   state: string;
   active?: boolean;
+  configurations?: Array<{
+    dispensers: Array<{
+      id: string;
+      code: string;
+      location: string | null;
+      nozzles: Array<{
+        id: string;
+        code: string;
+        product: { code: string; name: string };
+        attendantAssignment: { userId: string } | null;
+      }>;
+    }>;
+  }>;
 };
 export type StationContextData = {
   allStations: boolean;
