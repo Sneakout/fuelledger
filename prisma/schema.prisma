@@ -578,6 +578,7 @@ model Customer {
   sales          Sale[]
   receipts       CustomerReceipt[]
   ledger         CustomerLedgerEntry[]
+  shiftCreditAllocations ShiftCreditAllocation[]
 
   @@unique([organizationId, code])
   @@index([organizationId, active])
@@ -593,6 +594,7 @@ model Vehicle {
   createdAt  DateTime @default(now()) @map("created_at")
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
   sales      Sale[]
+  shiftCreditAllocations ShiftCreditAllocation[]
 
   @@unique([customerId, number])
   @@map("vehicles")
@@ -629,6 +631,7 @@ model CustomerLedgerEntry {
   amount         Decimal            @db.Decimal(14, 2)
   saleId         String?            @unique @map("sale_id")
   receiptId      String?            @unique @map("receipt_id")
+  shiftCreditAllocationId String?   @unique @map("shift_credit_allocation_id")
   description    String
   dueDate        DateTime?          @map("due_date")
   occurredAt     DateTime           @default(now()) @map("occurred_at")
@@ -638,6 +641,7 @@ model CustomerLedgerEntry {
   customer       Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
   sale           Sale?              @relation(fields: [saleId], references: [id], onDelete: Restrict)
   receipt        CustomerReceipt?   @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  shiftCreditAllocation ShiftCreditAllocation? @relation(fields: [shiftCreditAllocationId], references: [id], onDelete: Restrict)
   createdBy      User               @relation(fields: [createdById], references: [id], onDelete: Restrict)
 
   @@index([customerId, occurredAt])
@@ -931,8 +935,28 @@ model ShiftReconciliation {
   shift          Shift                         @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   reconciledBy   User                          @relation("reconciled_by", fields: [reconciledById], references: [id], onDelete: Restrict)
   collections    ShiftCollectionReconciliation[]
+  creditAllocations ShiftCreditAllocation[]
 
   @@map("shift_reconciliations")
+}
+
+model ShiftCreditAllocation {
+  id               String              @id @default(cuid())
+  reconciliationId String              @map("reconciliation_id")
+  customerId       String              @map("customer_id")
+  vehicleId        String?             @map("vehicle_id")
+  paymentMethod    PaymentMethod       @map("payment_method")
+  amount           Decimal             @db.Decimal(14, 2)
+  dueDate          DateTime            @map("due_date")
+  createdAt        DateTime            @default(now()) @map("created_at")
+  reconciliation   ShiftReconciliation @relation(fields: [reconciliationId], references: [id], onDelete: Restrict)
+  customer         Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  vehicle          Vehicle?            @relation(fields: [vehicleId], references: [id], onDelete: Restrict)
+  ledgerEntry      CustomerLedgerEntry?
+
+  @@index([reconciliationId, paymentMethod])
+  @@index([customerId, dueDate])
+  @@map("shift_credit_allocations")
 }
 
 model ShiftCollectionReconciliation {

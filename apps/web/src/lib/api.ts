@@ -488,7 +488,12 @@ export type Shift = {
 };
 export type ShiftBootstrap = {
   stations: ShiftStation[];
-  users: Array<{ id: string; name: string; role: string; stationIds: string[] }>;
+  users: Array<{
+    id: string;
+    name: string;
+    role: string;
+    stationIds: string[];
+  }>;
   shifts: Shift[];
 };
 export type CatalogCategory = {
@@ -805,6 +810,9 @@ export type ReconciliationShift = {
   station: { id: string; name: string; code: string };
   manager: { id: string; name: string; role: string };
   expected: Record<string, number>;
+  allocatedExpected: Record<string, number>;
+  autoUnallocated: number;
+  salesTotal: number;
   suggestedActual: Record<string, number>;
   reconciliation: {
     id: string;
@@ -813,6 +821,19 @@ export type ReconciliationShift = {
     notes: string | null;
     reconciledBy: { id: string; name: string; role: string };
     collections: CollectionReconciliation[];
+    creditAllocations: Array<{
+      id: string;
+      paymentMethod: "CREDIT" | "FLEET";
+      amount: string;
+      dueDate: string;
+      customer: {
+        id: string;
+        name: string;
+        code: string;
+        type: "CREDIT" | "FLEET";
+      };
+      vehicle: { id: string; number: string; label: string | null } | null;
+    }>;
   } | null;
   totals: {
     expected: number;
@@ -821,7 +842,20 @@ export type ReconciliationShift = {
     variance: number;
   } | null;
 };
-export type ReconciliationBootstrap = { shifts: ReconciliationShift[] };
+export type ReconciliationCustomer = {
+  id: string;
+  name: string;
+  code: string;
+  type: "CREDIT" | "FLEET";
+  creditLimit: string;
+  creditDays: number;
+  outstanding: number;
+  vehicles: Array<{ id: string; number: string; label: string | null }>;
+};
+export type ReconciliationBootstrap = {
+  shifts: ReconciliationShift[];
+  customers: ReconciliationCustomer[];
+};
 export type ReconciliationForm = ReconciliationInput;
 export type CustomerVehicle = {
   id: string;
