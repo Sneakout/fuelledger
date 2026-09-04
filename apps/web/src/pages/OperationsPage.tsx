@@ -354,7 +354,6 @@ export function OperationsPage() {
                         />
                       </label>
                       <label className="collection-field" data-label="Collection (₹)">
-                        <i>₹</i>
                         <input
                           aria-label={`Collection in rupees from ${assignment?.user.name ?? reading.nozzle.code}`}
                           type="number"
