@@ -51,13 +51,13 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
   const stockKey = (stationId: string, productId: string) => `${stationId}:${productId}`;
   for (const tank of tanks) {
     const itemKey = stockKey(tank.configuration.station.id, tank.productId);
-    add(stock, itemKey, () => ({ key: itemKey, product: tank.product.name, code: tank.product.code, unit: tank.product.unit, station: tank.configuration.station.name, quantity: 0, value: 0, purchasePrice: number(tank.product.purchasePrice) }), row => { row.quantity += number(tank.openingStock); });
+    add(stock, itemKey, () => ({ key: itemKey, product: tank.product.name, code: tank.product.code, unit: tank.product.unit, station: tank.configuration.station.name, quantity: 0, value: 0, purchasePrice: number(tank.product.purchasePrice) }), row => { row.quantity += number(tank.openingStock); row.value+=number(tank.openingStock)*number(tank.product.purchasePrice); });
   }
   for (const entry of inventoryEntries) {
     const itemKey = stockKey(entry.stationId, entry.productId);
-    add(stock, itemKey, () => ({ key: itemKey, product: entry.product.name, code: entry.product.code, unit: entry.product.unit, station: entry.station.name, quantity: 0, value: 0, purchasePrice: number(entry.product.purchasePrice) }), row => { row.quantity += number(entry.quantityDelta); });
+    add(stock, itemKey, () => ({ key: itemKey, product: entry.product.name, code: entry.product.code, unit: entry.product.unit, station: entry.station.name, quantity: 0, value: 0, purchasePrice: number(entry.product.purchasePrice) }), row => { const quantity=number(entry.quantityDelta),unitCost=number(entry.unitCost??entry.product.purchasePrice);row.quantity+=quantity;row.value+=quantity*unitCost; });
   }
-  const inventory = [...stock.values()].map(row => ({ ...row, value: row.quantity * row.purchasePrice })).sort((a, b) => b.value - a.value);
+  const inventory = [...stock.values()].sort((a, b) => b.value - a.value);
 
   const today = new Date(); today.setHours(0, 0, 0, 0);
   const customerAgeing = customers.map(customer => {

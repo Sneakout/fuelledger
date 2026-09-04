@@ -123,13 +123,14 @@ export function OperationsPage() {
   const selectStation = (station: ShiftStation, source = data) => {
     setStationId(station.id);
     const config = station.configurations[0];
+    const last = station.lastClosing;
     setOpenTanks(
-      config?.tanks.map((t) => ({ id: t.id, value: Number(t.openingStock) })) ??
+      config?.tanks.map((t) => ({ id: t.id, value: Number(last?.tankReadings.find(reading=>reading.id===t.id)?.value??t.openingStock) })) ??
         [],
     );
     setOpenNozzles(
       config?.dispensers.flatMap((d) =>
-        d.nozzles.map((n) => ({ id: n.id, value: Number(n.openingMeter) })),
+        d.nozzles.map((n) => ({ id: n.id, value: Number(last?.nozzleReadings.find(reading=>reading.id===n.id)?.value??n.openingMeter) })),
       ) ?? [],
     );
     const manager =
@@ -402,11 +403,12 @@ export function OperationsPage() {
               config?.tanks.map((t) => ({
                 id: t.id,
                 label: `${t.code} · ${t.product.code}`,
-                opening: Number(t.openingStock),
+                opening: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.value??t.openingStock),
               })) ?? []
             }
             values={openTanks}
             onChange={(v) => replace(openTanks, v.id, v.value, setOpenTanks)}
+            locked
           />
           <Readings
             title="Opening meter readings"
@@ -415,7 +417,7 @@ export function OperationsPage() {
                 d.nozzles.map((n) => ({
                   id: n.id,
                   label: `${d.code} / ${n.code} · ${n.product.code}`,
-                  opening: Number(n.openingMeter),
+                  opening: Number(selected?.lastClosing?.nozzleReadings.find(reading=>reading.id===n.id)?.value??n.openingMeter),
                 })),
               ) ?? []
             }
@@ -423,6 +425,7 @@ export function OperationsPage() {
             onChange={(v) =>
               replace(openNozzles, v.id, v.value, setOpenNozzles)
             }
+            locked
           />
           <label className="field">
             <span>Opening note (optional)</span>
@@ -477,11 +480,13 @@ function Readings({
   items,
   values,
   onChange,
+  locked = false,
 }: {
   title: string;
   items: Array<{ id: string; label: string; opening: number }>;
   values: Reading[];
   onChange(value: Reading): void;
+  locked?: boolean;
 }) {
   return (
     <section className="shift-readings">
@@ -492,12 +497,13 @@ function Readings({
           <label key={item.id}>
             <span>
               <strong>{item.label}</strong>
-              <small>Opening: {item.opening.toLocaleString()}</small>
+              <small>{locked ? "Carried forward" : "Opening"}: {item.opening.toLocaleString()}</small>
             </span>
             <input
               type="number"
               min="0"
               value={value}
+              readOnly={locked}
               onChange={(e) =>
                 onChange({ id: item.id, value: Number(e.target.value) })
               }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { invoiceBalanceDisplay, onlyCompatibleTankId } from "./PurchasesPage";
+import { dueDateFromInvoiceDate, invoiceBalanceDisplay, onlyCompatibleTankId } from "./PurchasesPage";
 
 describe("purchase invoice balance display", () => {
   it("shows the full paid amount instead of zero outstanding", () => {
@@ -46,5 +46,15 @@ describe("purchase invoice tank selection", () => {
 
   it("leaves the tank empty when the station or product has no tank", () => {
     expect(onlyCompatibleTankId(stations, "station-1", "DEF")).toBe("");
+  });
+});
+
+describe("purchase invoice due date", () => {
+  it("calculates credit terms from the invoice date", () => {
+    expect(dueDateFromInvoiceDate("2026-09-04", 30)).toBe("2026-10-04");
+  });
+
+  it("handles month-end and leap-year boundaries", () => {
+    expect(dueDateFromInvoiceDate("2028-02-28", 2)).toBe("2028-03-01");
   });
 });

@@ -28,6 +28,15 @@ export const onlyCompatibleTankId = (stations: PurchaseStation[], stationId: str
   const tanks = stations.find((station) => station.id === stationId)?.configurations[0]?.tanks.filter((tank) => tank.productId === productId) ?? [];
   return tanks.length === 1 ? tanks[0]!.id : "";
 };
+export const dueDateFromInvoiceDate = (invoiceDate: string, paymentTerms: number) => {
+  const date = new Date(`${invoiceDate}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return invoiceDate;
+  date.setDate(date.getDate() + Math.max(0, Math.trunc(paymentTerms)));
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 const iso = (date: string) => new Date(`${date}T00:00:00`).toISOString();
 const today = () => new Date().toISOString().slice(0, 10);
 async function attachment(file: File | null) {
@@ -113,11 +122,16 @@ export function PurchasesPage() {
   const load = async () => {
     const result = await api.purchasesBootstrap();
     setData(result);
-    setInvoice((x) => ({
-      ...x,
-      stationId: x.stationId || result.stations[0]?.id || "",
-      supplierId: x.supplierId || result.suppliers[0]?.id || "",
-    }));
+    setInvoice((x) => {
+      const supplierId = x.supplierId || result.suppliers[0]?.id || "";
+      const terms = result.suppliers.find((item) => item.id === supplierId)?.paymentTerms ?? 0;
+      return {
+        ...x,
+        stationId: x.stationId || result.stations[0]?.id || "",
+        supplierId,
+        dueDate: dueDateFromInvoiceDate(x.invoiceDate, terms),
+      };
+    });
     setPayment((x) => ({
       ...x,
       stationId: x.stationId || result.stations[0]?.id || "",
@@ -228,6 +242,8 @@ export function PurchasesPage() {
       setInvoice((x) => ({
         ...x,
         invoiceNumber: "",
+        invoiceDate: today(),
+        dueDate: dueDateFromInvoiceDate(today(), data?.suppliers.find((item) => item.id === x.supplierId)?.paymentTerms ?? 0),
         taxAmount: 0,
         notes: "",
         paidNow: false,
@@ -381,7 +397,11 @@ export function PurchasesPage() {
                     {item.supplier.name} · {item.invoiceNumber}
                   </strong>
                   <small>
-                    {item.station.name} · Due{" "}
+                    {item.station.name} · Invoice{" "}
+                    {new Date(item.invoiceDate).toLocaleDateString("en-IN", {
+                      dateStyle: "medium",
+                    })}{" "}
+                    · Due{" "}
                     {new Date(item.dueDate).toLocaleDateString("en-IN", {
                       dateStyle: "medium",
                     })}
@@ -609,9 +629,11 @@ export function PurchasesPage() {
                     <select
                       value={invoice.supplierId}
                       disabled={mode === "edit-invoice"}
-                      onChange={(e) =>
-                        setInvoice({ ...invoice, supplierId: e.target.value })
-                      }
+                      onChange={(e) => {
+                        const supplierId = e.target.value;
+                        const terms = data.suppliers.find((item) => item.id === supplierId)?.paymentTerms ?? 0;
+                        setInvoice({ ...invoice, supplierId, dueDate: dueDateFromInvoiceDate(invoice.invoiceDate, terms) });
+                      }}
                     >
                       {data.suppliers.map((x) => (
                         <option key={x.id} value={x.id}>
@@ -655,19 +677,19 @@ export function PurchasesPage() {
                     <input
                       type="date"
                       value={invoice.invoiceDate}
-                      onChange={(e) =>
-                        setInvoice({ ...invoice, invoiceDate: e.target.value })
-                      }
+                      onChange={(e) => {
+                        const invoiceDate = e.target.value;
+                        const terms = data.suppliers.find((item) => item.id === invoice.supplierId)?.paymentTerms ?? 0;
+                        setInvoice({ ...invoice, invoiceDate, dueDate: dueDateFromInvoiceDate(invoiceDate, terms) });
+                      }}
                     />
                   </label>
                   <label className="field">
-                    <span>Due date</span>
+                    <span>Due date (calculated automatically)</span>
                     <input
                       type="date"
                       value={invoice.dueDate}
-                      onChange={(e) =>
-                        setInvoice({ ...invoice, dueDate: e.target.value })
-                      }
+                      readOnly
                     />
                   </label>
                   <label className="field">
