@@ -143,8 +143,14 @@ export function OperationsPage() {
         d.nozzles.map((n) => ({ id: n.id, value: Number(last?.nozzleReadings.find(reading=>reading.id===n.id)?.value??n.openingMeter) })),
       ) ?? [],
     );
+    const stationUsers =
+      source?.users.filter(
+        (user) =>
+          user.role === "OWNER" || user.stationIds.includes(station.id),
+      ) ?? [];
     const manager =
-      source?.users.find((u) => u.role === "MANAGER") ?? source?.users[0];
+      stationUsers.find((user) => user.role === "MANAGER") ??
+      stationUsers.find((user) => user.role === "OWNER");
     if (manager) {
       const configuredAssignments = config?.dispensers.flatMap((d) =>
         d.nozzles.map((n) => ({ nozzleId: n.id, userId: n.attendantAssignment?.userId ?? manager.id })),
@@ -161,6 +167,11 @@ export function OperationsPage() {
   );
   const selected = data?.stations.find((s) => s.id === stationId);
   const config = selected?.configurations[0];
+  const stationUsers =
+    data?.users.filter(
+      (user) => user.role === "OWNER" || user.stationIds.includes(stationId),
+    ) ?? [];
+  const attendants = stationUsers.filter((user) => user.role === "STAFF");
   useEffect(() => {
     if (active) {
       setCloseTanks(
@@ -191,9 +202,29 @@ export function OperationsPage() {
     setter: (items: Reading[]) => void,
   ) =>
     setter(items.map((item) => (item.id === id ? { ...item, value } : item)));
+  const assignAttendant = (nozzleId: string, userId: string) => {
+    setNozzleAssignments((current) =>
+      current.map((assignment) =>
+        assignment.nozzleId === nozzleId
+          ? { ...assignment, userId }
+          : assignment,
+      ),
+    );
+    if (userId)
+      setUserIds((current) =>
+        current.includes(userId) ? current : [...current, userId],
+      );
+  };
   async function open() {
     if (!stationId || !managerId) {
       setError("Choose a station and manager.");
+      return;
+    }
+    if (
+      !nozzleAssignments.length ||
+      nozzleAssignments.some((assignment) => !assignment.userId)
+    ) {
+      setError("Assign an attendant to every active nozzle before opening the shift.");
       return;
     }
     setSaving(true);
@@ -447,11 +478,13 @@ export function OperationsPage() {
                 value={managerId}
                 onChange={(e) => setManagerId(e.target.value)}
               >
-                {data.users.map((u) => (
+                {stationUsers
+                  .filter((user) => ["OWNER", "MANAGER"].includes(user.role))
+                  .map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name} · {u.role.toLowerCase()}
                   </option>
-                ))}
+                  ))}
               </select>
             </label>
           </div>
@@ -460,25 +493,6 @@ export function OperationsPage() {
             value={openingCash}
             onChange={setOpeningCash}
           />
-          <div className="team-picker">
-            <span>Shift team</span>
-            {data.users.map((user) => (
-              <label key={user.id}>
-                <input
-                  type="checkbox"
-                  checked={userIds.includes(user.id)}
-                  onChange={(e) =>
-                    setUserIds((current) =>
-                      e.target.checked
-                        ? [...current, user.id]
-                        : current.filter((id) => id !== user.id),
-                    )
-                  }
-                />
-                {user.name}
-              </label>
-            ))}
-          </div>
           <Readings
             title="Opening tank readings"
             items={
@@ -492,23 +506,57 @@ export function OperationsPage() {
             onChange={(v) => replace(openTanks, v.id, v.value, setOpenTanks)}
             locked
           />
-          <Readings
-            title="Opening meter readings"
-            items={
-              config?.dispensers.flatMap((d) =>
-                d.nozzles.map((n) => ({
-                  id: n.id,
-                  label: meterLabel(d, n),
-                  opening: Number(selected?.lastClosing?.nozzleReadings.find(reading=>reading.id===n.id)?.value??n.openingMeter),
-                })),
-              ) ?? []
-            }
-            values={openNozzles}
-            onChange={(v) =>
-              replace(openNozzles, v.id, v.value, setOpenNozzles)
-            }
-            locked
-          />
+          <section className="opening-nozzle-table">
+            <h3>Opening meter readings & attendants</h3>
+            <div className="opening-nozzle-head" aria-hidden="true">
+              <span>Nozzle & product</span>
+              <span>Assigned attendant</span>
+              <span>Opening meter (L)</span>
+            </div>
+            {config?.dispensers.flatMap((dispenser) =>
+              dispenser.nozzles.map((nozzle) => {
+                const reading = openNozzles.find((item) => item.id === nozzle.id);
+                const assignment = nozzleAssignments.find(
+                  (item) => item.nozzleId === nozzle.id,
+                );
+                return (
+                  <div className="opening-nozzle-row" key={nozzle.id}>
+                    <span>
+                      <b>{meterLabel(dispenser, nozzle)}</b>
+                      <small>{nozzle.product.name}</small>
+                    </span>
+                    <label>
+                      <small>Assigned attendant</small>
+                      <select
+                        value={assignment?.userId ?? ""}
+                        onChange={(event) =>
+                          assignAttendant(nozzle.id, event.target.value)
+                        }
+                      >
+                        <option value="">Choose attendant</option>
+                        {attendants.map((attendant) => (
+                          <option key={attendant.id} value={attendant.id}>
+                            {attendant.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <span className="opening-nozzle-value">
+                      <small>Opening meter (L)</small>
+                      <output>
+                        {(reading?.value ?? 0).toLocaleString("en-IN")} L
+                      </output>
+                    </span>
+                  </div>
+                );
+              }),
+            )}
+            {!attendants.length && (
+              <p className="opening-nozzle-help">
+                Add attendants in Staff & access to make them available here.
+              </p>
+            )}
+          </section>
           <label className="field">
             <span>Opening note (optional)</span>
             <input value={notes} onChange={(e) => setNotes(e.target.value)} />

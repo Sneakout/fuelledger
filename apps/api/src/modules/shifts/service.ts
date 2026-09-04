@@ -80,7 +80,12 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
             }
           : {}),
       },
-      select: { id: true, name: true, role: true },
+      select: {
+        id: true,
+        name: true,
+        role: true,
+        stationAccess: { select: { stationId: true } },
+      },
     }),
     prisma.shift.findMany({
       where: {
@@ -129,7 +134,16 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
         }
       : null,
   }));
-  return { stations: shapedStations, users, shifts: shifts.map(summary) };
+  return {
+    stations: shapedStations,
+    users: users.map((user) => ({
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      stationIds: user.stationAccess.map((access) => access.stationId),
+    })),
+    shifts: shifts.map(summary),
+  };
 }
 export async function openShift(organizationId: string, input: OpenShiftInput) {
   const station = await prisma.station.findFirst({

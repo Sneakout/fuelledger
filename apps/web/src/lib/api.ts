@@ -488,7 +488,7 @@ export type Shift = {
 };
 export type ShiftBootstrap = {
   stations: ShiftStation[];
-  users: Array<{ id: string; name: string; role: string }>;
+  users: Array<{ id: string; name: string; role: string; stationIds: string[] }>;
   shifts: Shift[];
 };
 export type CatalogCategory = {
