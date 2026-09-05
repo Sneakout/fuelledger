@@ -2,6 +2,7 @@ import type { ExpenseCategoryInput, ExpenseInput, PurchaseInvoiceInput, Purchase
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
+import { defaultExpenseCategories } from '../../lib/default-expense-categories.js';
 import { collectionAccount, postJournal } from '../accounting/service.js';
 
 const invoiceInclude = {
@@ -44,6 +45,7 @@ const calculatedDueDate = (invoiceDate: string | Date, paymentTerms: number) => 
   return dueDate;
 };
 export async function bootstrap(organizationId: string, stationIds?: string[]) {
+  await prisma.expenseCategory.createMany({ data: defaultExpenseCategories.map(category => ({ organizationId, ...category })), skipDuplicates: true });
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const [suppliers, invoices, stations, products, categories, expenses] = await Promise.all([
@@ -94,6 +96,10 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
         unit: true,
         hsnCode: true,
         purchasePrice: true,
+        purchasePriceHistory: {
+          orderBy: { effectiveFrom: 'desc' },
+          select: { id: true, price: true, effectiveFrom: true, createdAt: true },
+        },
         tankLinked: true,
         taxCategory: { select: { rate: true } },
       },
@@ -339,12 +345,23 @@ type InvoiceForPricing = {
     quantity: Prisma.Decimal;
     unitCost: Prisma.Decimal;
     taxRate: Prisma.Decimal;
-    product: { id: string; name: string; purchasePrice: Prisma.Decimal } | null;
+    product: {
+      id: string;
+      name: string;
+      purchasePrice: Prisma.Decimal;
+      purchasePriceHistory: Array<{ price: Prisma.Decimal; effectiveFrom: Date }>;
+    } | null;
   }>;
 };
-const priceShape = (invoice: InvoiceForPricing) => {
+const purchasePriceAt = (
+  product: NonNullable<InvoiceForPricing['lines'][number]['product']>,
+  invoiceDate: Date,
+) =>
+  product.purchasePriceHistory.find((row) => row.effectiveFrom <= invoiceDate)?.price ??
+  product.purchasePrice;
+const priceShape = (invoice: InvoiceForPricing, invoiceDate: Date) => {
   const lines = invoice.lines.map((line) => {
-    const unitCost = line.product?.purchasePrice ?? line.unitCost;
+    const unitCost = line.product ? purchasePriceAt(line.product, invoiceDate) : line.unitCost;
     const lineTotal = Number(line.quantity) * Number(unitCost);
     const tax = (lineTotal * Number(line.taxRate)) / 100;
     return {
@@ -362,7 +379,7 @@ const priceShape = (invoice: InvoiceForPricing) => {
   const taxAmount = lines.reduce((sum, line) => sum + line.tax, 0);
   return { lines, subtotal, taxAmount, totalAmount: subtotal + taxAmount };
 };
-export async function invoicePricePreview(organizationId: string, id: string, stationIds?: string[]) {
+export async function invoicePricePreview(organizationId: string, id: string, stationIds?: string[], requestedInvoiceDate?: string) {
   const invoice = await prisma.purchaseInvoice.findFirst({
     where: {
       id,
@@ -372,13 +389,22 @@ export async function invoicePricePreview(organizationId: string, id: string, st
     include: {
       lines: {
         include: {
-          product: { select: { id: true, name: true, purchasePrice: true } },
+          product: {
+            select: {
+              id: true,
+              name: true,
+              purchasePrice: true,
+              purchasePriceHistory: { orderBy: { effectiveFrom: 'desc' } },
+            },
+          },
         },
       },
     },
   });
   if (!invoice) throw new AppError(404, 'INVOICE_NOT_FOUND', 'This purchase invoice was not found.');
-  return priceShape(invoice);
+  const invoiceDate = requestedInvoiceDate ? new Date(requestedInvoiceDate) : invoice.invoiceDate;
+  if (Number.isNaN(invoiceDate.getTime())) throw new AppError(400, 'INVOICE_DATE_INVALID', 'Choose a valid invoice date before checking prices.');
+  return priceShape(invoice, invoiceDate);
 }
 export async function updateInvoice(organizationId: string, userId: string, id: string, input: PurchaseInvoiceUpdateInput, stationIds?: string[]) {
   const invoice = await prisma.purchaseInvoice.findFirst({
@@ -393,14 +419,21 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
       receipt: true,
       lines: {
         include: {
-          product: { select: { id: true, name: true, purchasePrice: true } },
+          product: {
+            select: {
+              id: true,
+              name: true,
+              purchasePrice: true,
+              purchasePriceHistory: { orderBy: { effectiveFrom: 'desc' } },
+            },
+          },
         },
       },
     },
   });
   if (!invoice) throw new AppError(404, 'INVOICE_NOT_FOUND', 'This purchase invoice was not found.');
   const pricing = input.refreshPrices
-    ? priceShape(invoice)
+    ? priceShape(invoice, new Date(input.invoiceDate))
     : {
         lines: invoice.lines.map((line) => ({
           id: line.id,

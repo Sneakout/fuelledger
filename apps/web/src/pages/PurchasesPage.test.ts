@@ -3,6 +3,7 @@ import {
   dueDateFromInvoiceDate,
   invoiceBalanceDisplay,
   onlyCompatibleTankId,
+  purchasePriceForDate,
 } from "./PurchasesPage";
 
 describe("purchase invoice balance display", () => {
@@ -72,5 +73,41 @@ describe("purchase invoice due date", () => {
 
   it("handles month-end and leap-year boundaries", () => {
     expect(dueDateFromInvoiceDate("2028-02-28", 2)).toBe("2028-03-01");
+  });
+});
+
+describe("effective-dated purchase price", () => {
+  const product = {
+    id: "HSD",
+    name: "High Speed Diesel",
+    code: "HSD",
+    category: "FUEL",
+    unit: "L",
+    hsnCode: null,
+    purchasePrice: "105",
+    tankLinked: true,
+    taxCategory: null,
+    purchasePriceHistory: [
+      {
+        id: "new",
+        price: "105",
+        effectiveFrom: "2026-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        id: "old",
+        price: "101.02",
+        effectiveFrom: "2025-12-01T00:00:00.000Z",
+        createdAt: "2025-12-01T00:00:00.000Z",
+      },
+    ],
+  };
+
+  it("uses the price in force on a past invoice date", () => {
+    expect(purchasePriceForDate(product, "2025-12-28")).toBe(101.02);
+  });
+
+  it("uses the newer price once its effective date is reached", () => {
+    expect(purchasePriceForDate(product, "2026-01-01")).toBe(105);
   });
 });

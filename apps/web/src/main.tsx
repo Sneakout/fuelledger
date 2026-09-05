@@ -4,6 +4,7 @@ import './login-demo-link.css';
 import './subscription.css';
 import './growth-desk.css';
 import './shift-collections.css';
+import './density-entry.css';
 import './reconciliation-allocation.css';
 import './leads.css';
 import './notifications.css';

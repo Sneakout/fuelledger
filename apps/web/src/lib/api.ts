@@ -225,8 +225,10 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
-  purchaseInvoicePricePreview: (id: string) =>
-    request<InvoicePricePreview>(`/purchases/invoices/${id}/price-preview`),
+  purchaseInvoicePricePreview: (id: string, invoiceDate?: string) =>
+    request<InvoicePricePreview>(
+      `/purchases/invoices/${id}/price-preview${invoiceDate ? `?invoiceDate=${encodeURIComponent(invoiceDate)}` : ""}`,
+    ),
   paySupplierInvoice: (input: SupplierPaymentInput) =>
     request<{ payment: unknown }>("/purchases/payments", {
       method: "POST",
@@ -516,6 +518,12 @@ export type CatalogProduct = {
   category: string;
   unit: string;
   purchasePrice: string;
+  purchasePriceHistory: Array<{
+    id: string;
+    price: string;
+    effectiveFrom: string;
+    createdAt: string;
+  }>;
   sellingPrice: string;
   sellingPriceHistory: Array<{
     id: string;
@@ -539,11 +547,13 @@ export type ProductForm = Omit<
   | "purchasePrice"
   | "sellingPrice"
   | "sellingPriceHistory"
+  | "purchasePriceHistory"
   | "taxCategory"
   | "customCategory"
 > & {
   purchasePrice: number;
   sellingPrice: number;
+  purchasePriceEffectiveFrom?: string;
   sellingPriceEffectiveFrom?: string;
 };
 export type Catalog = {
@@ -921,6 +931,12 @@ export type PurchaseProduct = {
   unit: string;
   hsnCode: string | null;
   purchasePrice: string;
+  purchasePriceHistory: Array<{
+    id: string;
+    price: string;
+    effectiveFrom: string;
+    createdAt: string;
+  }>;
   tankLinked: boolean;
   taxCategory: { rate: string } | null;
 };

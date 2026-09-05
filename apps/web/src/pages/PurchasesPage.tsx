@@ -64,6 +64,17 @@ export const dueDateFromInvoiceDate = (
 };
 const iso = (date: string) => new Date(`${date}T00:00:00`).toISOString();
 const today = () => new Date().toISOString().slice(0, 10);
+export const purchasePriceForDate = (
+  product: PurchasesBootstrap["products"][number] | undefined,
+  invoiceDate: string,
+) => {
+  if (!product) return 0;
+  const at = new Date(`${invoiceDate}T23:59:59.999`);
+  const historical = product.purchasePriceHistory.find(
+    (entry) => new Date(entry.effectiveFrom) <= at,
+  );
+  return Number(historical?.price ?? product.purchasePrice);
+};
 async function attachment(file: File | null) {
   if (!file) return null;
   if (file.size > 500000)
@@ -760,6 +771,37 @@ export function PurchasesPage() {
                           invoiceDate,
                           dueDate: dueDateFromInvoiceDate(invoiceDate, terms),
                         });
+                        if (mode === "invoice") {
+                          setLines((current) =>
+                            current.map((line) => ({
+                              ...line,
+                              unitCost: purchasePriceForDate(
+                                data.products.find(
+                                  (item) => item.id === line.productId,
+                                ),
+                                invoiceDate,
+                              ),
+                            })),
+                          );
+                        }
+                        if (mode === "edit-invoice" && editingInvoice) {
+                          setSaving(true);
+                          setError("");
+                          void api
+                            .purchaseInvoicePricePreview(
+                              editingInvoice.id,
+                              invoiceDate,
+                            )
+                            .then(setPricePreview)
+                            .catch((item) =>
+                              setError(
+                                item instanceof ApiRequestError
+                                  ? item.message
+                                  : "Unable to check prices for this invoice date.",
+                              ),
+                            )
+                            .finally(() => setSaving(false));
+                        }
                       }}
                     />
                   </label>
@@ -818,7 +860,10 @@ export function PurchasesPage() {
                         setSaving(true);
                         setError("");
                         void api
-                          .purchaseInvoicePricePreview(editingInvoice.id)
+                          .purchaseInvoicePricePreview(
+                            editingInvoice.id,
+                            invoice.invoiceDate,
+                          )
                           .then(setPricePreview)
                           .catch((e) =>
                             setError(
@@ -845,8 +890,8 @@ export function PurchasesPage() {
                           </small>
                         ))}
                         <b>
-                          Latest prices loaded. They will be applied only when
-                          you save changes.
+                          Prices for the selected invoice date are loaded. They
+                          will be applied only when you save changes.
                         </b>
                         {editingInvoice?.status === "PAID" && (
                           <b>
@@ -895,8 +940,9 @@ export function PurchasesPage() {
                                             productId,
                                           ),
                                           description: p?.name ?? "",
-                                          unitCost: Number(
-                                            p?.purchasePrice ?? 0,
+                                          unitCost: purchasePriceForDate(
+                                            p,
+                                            invoice.invoiceDate,
                                           ),
                                           hsnCode: p?.hsnCode ?? "",
                                         }

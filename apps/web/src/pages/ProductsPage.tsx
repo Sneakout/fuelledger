@@ -168,10 +168,14 @@ export function ProductsPage() {
     const currentPrice = editing
       ? Number(catalog?.products.find((product) => product.id === editing)?.sellingPrice)
       : undefined;
+    const currentPurchasePrice = editing ? Number(catalog?.products.find((product) => product.id === editing)?.purchasePrice) : undefined;
     const payload = {
       ...form,
       purchasePrice,
       sellingPrice,
+      ...(!editing || purchasePrice !== currentPurchasePrice
+        ? { purchasePriceEffectiveFrom: effectiveIso(priceEffectiveDate) }
+        : {}),
       ...(!editing || sellingPrice !== currentPrice
         ? { sellingPriceEffectiveFrom: effectiveIso(priceEffectiveDate) }
         : {}),
@@ -523,7 +527,7 @@ export function ProductsPage() {
                 }
               />
               <Field
-                label="Selling price effective from"
+                label="Prices effective from"
                 type="date"
                 value={priceEffectiveDate}
                 onChange={setPriceEffectiveDate}

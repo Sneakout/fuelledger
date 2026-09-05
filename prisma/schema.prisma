@@ -282,6 +282,7 @@ model Product {
   receiptLines      ReceiptLine[]
   purchaseInvoiceLines PurchaseInvoiceLine[]
   sellingPriceHistory ProductSellingPrice[]
+  purchasePriceHistory ProductPurchasePrice[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -299,6 +300,19 @@ model ProductSellingPrice {
   @@unique([productId, effectiveFrom])
   @@index([productId, effectiveFrom])
   @@map("product_selling_prices")
+}
+
+model ProductPurchasePrice {
+  id            String   @id @default(cuid())
+  productId     String   @map("product_id")
+  price         Decimal  @db.Decimal(12, 2)
+  effectiveFrom DateTime @map("effective_from")
+  createdAt     DateTime @default(now()) @map("created_at")
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([productId, effectiveFrom])
+  @@index([productId, effectiveFrom])
+  @@map("product_purchase_prices")
 }
 
 model ProductCategorySetting {

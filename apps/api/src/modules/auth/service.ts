@@ -12,6 +12,7 @@ import type {
 import { env, isPlatformAdminEmail } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
+import { defaultExpenseCategories } from "../../lib/default-expense-categories.js";
 
 export async function login(
   input: LoginInput,
@@ -63,6 +64,7 @@ export async function signup(input: SignupInput, userAgent?: string) {
         postalCode: "0000",
       },
     });
+    await tx.expenseCategory.createMany({data:defaultExpenseCategories.map(category=>({organizationId:organization.id,...category})),skipDuplicates:true});
     return tx.user.create({
       data: {
         organizationId: organization.id,
@@ -118,6 +120,7 @@ export async function googleAuth(input: GoogleAuthInput, userAgent?: string) {
           postalCode: "0000",
         },
       });
+      await tx.expenseCategory.createMany({data:defaultExpenseCategories.map(category=>({organizationId:organization.id,...category})),skipDuplicates:true});
       return tx.user.create({
         data: {
           organizationId: organization.id,

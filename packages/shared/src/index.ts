@@ -511,6 +511,7 @@ export const productInputSchema = z
     customCategoryId: z.string().cuid().nullable().optional(),
     unit: z.enum(units),
     purchasePrice: z.coerce.number().min(0),
+    purchasePriceEffectiveFrom: z.string().datetime().optional(),
     sellingPrice: z.coerce.number().min(0),
     sellingPriceEffectiveFrom: z.string().datetime().optional(),
     taxCategoryId: z.string().cuid().nullable().optional(),
