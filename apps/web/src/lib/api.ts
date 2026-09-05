@@ -724,6 +724,7 @@ export type InventoryProduct = {
   name: string;
   code: string;
   unit: string;
+  category: string;
   tankLinked: boolean;
 };
 export type InventoryStation = {

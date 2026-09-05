@@ -9,7 +9,7 @@ const tankInclude = { product: { select: { id: true, name: true, code: true, uni
 export async function bootstrap(organizationId: string,stationIds?:string[]) {
   const [stations, products, ledger, receipts] = await Promise.all([
     prisma.station.findMany({ where: { organizationId, active: true,...(stationIds?{id:{in:stationIds}}:{}) }, include: { configurations: { where: { active: true }, take: 1, include: { tanks: { where: { status: 'ACTIVE' }, include: tankInclude } } } } }),
-    prisma.product.findMany({ where: { organizationId, active: true, inventoryTracked: true }, select: { id: true, name: true, code: true, unit: true, tankLinked: true } }),
+    prisma.product.findMany({ where: { organizationId, active: true, inventoryTracked: true }, select: { id: true, name: true, code: true, unit: true, category: true, tankLinked: true } }),
     prisma.inventoryLedger.findMany({ where: { organizationId,...(stationIds?{stationId:{in:stationIds}}:{}) }, orderBy: { occurredAt: 'desc' }, take: 80, include: { product: { select: { name: true, code: true, unit: true } }, station: { select: { name: true, code: true } }, tank: { select: { code: true } } } }),
     prisma.purchaseReceipt.findMany({ where: { organizationId,...(stationIds?{stationId:{in:stationIds}}:{}) }, orderBy: { receivedAt: 'desc' }, take: 20, include: { station: { select: { name: true } }, lines: { include: { product: { select: { name: true, code: true, unit: true } }, tank: { select: { code: true } } } } } }),
   ]);

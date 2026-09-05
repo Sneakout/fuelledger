@@ -70,6 +70,7 @@ function Field({
 }
 export function ProductsPage() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [catalogFilter, setCatalogFilter] = useState<"ALL" | "FUEL" | "LUBRICANTS">("ALL");
   const [form, setForm] = useState<ProductForm | null>(null);
   const [priceInputs, setPriceInputs] = useState({
     purchasePrice: "",
@@ -259,6 +260,22 @@ export function ProductsPage() {
     });
   };
   const editingProduct = catalog?.products.find((product) => product.id === editing);
+  const visibleProducts = catalog?.products.filter((product) =>
+    catalogFilter === "ALL"
+      ? true
+      : catalogFilter === "FUEL"
+        ? ["FUEL", "DEF"].includes(product.category)
+        : product.category === "LUBRICANTS",
+  ) ?? [];
+  const addLubricant = () => {
+    setCatalogFilter("LUBRICANTS");
+    setForm({ ...blank(), category: "LUBRICANTS", unit: "PIECE" });
+    setPriceInputs({ purchasePrice: "0", sellingPrice: "0" });
+    setPriceEffectiveDate(today());
+    setEditing(null);
+    setError("");
+    setFieldErrors({});
+  };
   if (!catalog)
     return (
       <main className="page">
@@ -279,18 +296,23 @@ export function ProductsPage() {
             source of revenue.
           </p>
         </div>
-        <button
-          className="primary small"
-          onClick={() => {
-            setForm(blank());
-            setPriceInputs({ purchasePrice: "0", sellingPrice: "0" });
-            setEditing(null);
-            setError("");
-            setFieldErrors({});
-          }}
-        >
-          <CirclePlus size={17} /> Add product
-        </button>
+        <div className="heading-actions">
+          <button className="secondary small" onClick={addLubricant}>
+            <CirclePlus size={17} /> Add lubricant
+          </button>
+          <button
+            className="primary small"
+            onClick={() => {
+              setForm(blank());
+              setPriceInputs({ purchasePrice: "0", sellingPrice: "0" });
+              setEditing(null);
+              setError("");
+              setFieldErrors({});
+            }}
+          >
+            <CirclePlus size={17} /> Add product
+          </button>
+        </div>
       </div>
       {error && !form && <div className="form-error">{error}</div>}
       <section className="catalog-stats">
@@ -313,13 +335,18 @@ export function ProductsPage() {
           <span>Active</span>
         </div>
       </section>
+      <div className="catalog-filters" aria-label="Product type">
+        <button className={catalogFilter === "ALL" ? "selected" : ""} onClick={() => setCatalogFilter("ALL")}>All</button>
+        <button className={catalogFilter === "FUEL" ? "selected" : ""} onClick={() => setCatalogFilter("FUEL")}>Fuel & DEF</button>
+        <button className={catalogFilter === "LUBRICANTS" ? "selected" : ""} onClick={() => setCatalogFilter("LUBRICANTS")}>Lubricants</button>
+      </div>
       <section className="catalog-layout">
         <article className="catalog-table">
           <div className="catalog-table-head">
             <strong>Catalog</strong>
             <span>Purchase → Selling price</span>
           </div>
-          {catalog.products.map((product) => (
+          {visibleProducts.map((product) => (
             <div className="catalog-item" key={product.id}>
               <span className="product-icon">
                 <Package size={17} />
@@ -352,6 +379,7 @@ export function ProductsPage() {
               </button>
             </div>
           ))}
+          {!visibleProducts.length && <p className="catalog-empty">No products in this section yet.</p>}
         </article>
         <aside className="catalog-aside">
           <section>
