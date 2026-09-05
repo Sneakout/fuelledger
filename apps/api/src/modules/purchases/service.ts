@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { defaultExpenseCategories } from '../../lib/default-expense-categories.js';
+import { effectivePriceAt } from '../../lib/effective-price.js';
 import { collectionAccount, postJournal } from '../accounting/service.js';
 
 const invoiceInclude = {
@@ -145,7 +146,14 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
     suppliers,
     invoices: shaped,
     stations,
-    products,
+    products: products.map((product) => ({
+      ...product,
+      purchasePrice: effectivePriceAt(
+        product.purchasePrice,
+        product.purchasePriceHistory,
+        new Date(),
+      ),
+    })),
     categories,
     expenses,
     summary: {
@@ -206,7 +214,7 @@ export async function createInvoice(organizationId: string, userId: string, inpu
       },
     }),
   ]);
-  if (!station) throw new AppError(404, 'STATION_NOT_FOUND', 'Choose an active station.');
+  if (!station) throw new AppError(404, 'STATION_NOT_FOUND', 'Choose an active fuel station.');
   if (!supplier) throw new AppError(404, 'SUPPLIER_NOT_FOUND', 'Choose an active supplier.');
   if (input.receiveNow && products.length !== new Set(input.lines.map((x) => x.productId)).size) throw new AppError(400, 'PRODUCT_NOT_INVENTORIED', 'Every received invoice line needs an active inventory product.');
   const subtotal = input.lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0);
@@ -727,7 +735,7 @@ export async function payInvoice(organizationId: string, userId: string, input: 
         include: { payments: true },
       });
       if (!invoice) throw new AppError(404, 'INVOICE_NOT_PAYABLE', 'Choose an open purchase invoice.');
-      if (invoice.stationId !== input.stationId) throw new AppError(400, 'PAYMENT_STATION_MISMATCH', 'The payment station must match the purchase invoice station.');
+      if (invoice.stationId !== input.stationId) throw new AppError(400, 'PAYMENT_STATION_MISMATCH', 'The payment fuel station must match the purchase invoice fuel station.');
       const remaining = outstanding(invoice);
       if (input.amount > remaining + 0.001) throw new AppError(400, 'PAYMENT_EXCEEDS_DUE', 'Payment cannot exceed the invoice outstanding.');
       const payment = await tx.supplierPayment.create({
@@ -778,7 +786,7 @@ export async function createExpense(organizationId: string, userId: string, inpu
       where: { id: input.categoryId, organizationId, active: true },
     }),
   ]);
-  if (!station || !category) throw new AppError(404, 'EXPENSE_CONTEXT_INVALID', 'Choose an active station and expense category.');
+  if (!station || !category) throw new AppError(404, 'EXPENSE_CONTEXT_INVALID', 'Choose an active fuel station and expense category.');
   return prisma.$transaction(async (tx) => {
     const expense = await tx.expense.create({
       data: {

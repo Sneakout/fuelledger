@@ -15,4 +15,4 @@ vi.mock('../lib/api', () => ({
   }) },
 }));
 
-describe('ReportsPage',()=>{it('shows operational and financial reporting together',async()=>{render(<ReportsPage/>);expect(await screen.findByRole('heading',{name:'Clear answers from trusted station data'})).toBeInTheDocument();expect((await screen.findAllByText('₹1,020')).length).toBeGreaterThan(0);expect(screen.getByRole('heading',{name:'Posted profit & loss'})).toBeInTheDocument();});});
+describe('ReportsPage',()=>{it('shows operational and financial reporting together',async()=>{render(<ReportsPage/>);expect(await screen.findByRole('heading',{name:'Clear answers from trusted fuel station data'})).toBeInTheDocument();expect((await screen.findAllByText('₹1,020')).length).toBeGreaterThan(0);expect(screen.getByRole('heading',{name:'Posted profit & loss'})).toBeInTheDocument();});});

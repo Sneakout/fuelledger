@@ -760,7 +760,7 @@ export function PurchasesPage() {
                     </select>
                   </label>
                   <label className="field">
-                    <span>Station</span>
+                    <span>Fuel station</span>
                     <select
                       value={invoice.stationId}
                       disabled={mode === "edit-invoice"}

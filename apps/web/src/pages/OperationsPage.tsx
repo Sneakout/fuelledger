@@ -217,7 +217,7 @@ export function OperationsPage() {
   };
   async function open() {
     if (!stationId || !managerId) {
-      setError("Choose a station and manager.");
+      setError("Choose a fuel station and manager.");
       return;
     }
     if (
@@ -455,7 +455,7 @@ export function OperationsPage() {
           </p>
           <div className="form-grid compact">
             <label className="field">
-              <span>Station</span>
+              <span>Fuel station</span>
               <select
                 value={stationId}
                 onChange={(e) => {
@@ -576,7 +576,7 @@ export function OperationsPage() {
           <span className="eyebrow">Simple by design</span>
           <h2>A calm start. A clear finish.</h2>
           <p>
-            Pick the station and people, confirm cash and readings, then open.
+            Pick the fuel station and people, confirm cash and readings, then open.
             At close, enter the final readings and FuelLedger makes the summary.
           </p>
         </article>

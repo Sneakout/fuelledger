@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { effectivePriceAt } from '../../lib/effective-price.js';
 
 type ReportFilter = { startDate: string; endDate: string; stationId?: string | undefined; permittedStationIds?: string[] | undefined };
 
@@ -26,8 +27,8 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
     }),
     prisma.purchaseInvoice.findMany({ where: { organizationId, ...stationWhere, invoiceDate: period, status: { not: 'VOID' } }, select: { totalAmount: true } }),
     prisma.purchaseInvoice.findMany({ where: { organizationId, ...stationWhere, status: { in: ['OPEN', 'PART_PAID'] } }, include: { payments: { select: { amount: true } }, supplier: { select: { name: true, code: true } }, station: { select: { name: true, code: true } } }, orderBy: { dueDate: 'asc' } }),
-    prisma.inventoryLedger.findMany({ where: { organizationId, ...stationWhere }, include: { product: { select: { id: true, name: true, code: true, unit: true, purchasePrice: true } }, station: { select: { id: true, name: true, code: true } } } }),
-    prisma.tank.findMany({ where: { configuration: { active: true, station: { organizationId, ...(stationIds ? { id:{in:stationIds} } : {}) } } }, include: { product: { select: { id: true, name: true, code: true, unit: true, purchasePrice: true } }, configuration: { include: { station: { select: { id: true, name: true, code: true } } } } } }),
+    prisma.inventoryLedger.findMany({ where: { organizationId, ...stationWhere }, include: { product: { select: { id: true, name: true, code: true, unit: true, purchasePrice: true, purchasePriceHistory:{where:{effectiveFrom:{lte:new Date()}},orderBy:{effectiveFrom:'desc'},take:1} } }, station: { select: { id: true, name: true, code: true } } } }),
+    prisma.tank.findMany({ where: { configuration: { active: true, station: { organizationId, ...(stationIds ? { id:{in:stationIds} } : {}) } } }, include: { product: { select: { id: true, name: true, code: true, unit: true, purchasePrice: true, purchasePriceHistory:{where:{effectiveFrom:{lte:new Date()}},orderBy:{effectiveFrom:'desc'},take:1} } }, configuration: { include: { station: { select: { id: true, name: true, code: true } } } } } }),
     prisma.customer.findMany({ where: { organizationId, active: true }, include: { ledger: { where: stationIds ? { stationId:{in:stationIds} } : {}, select: { amount: true, dueDate: true } } }, orderBy: { name: 'asc' } }),
     prisma.journalLine.findMany({ where: { journal: { organizationId, ...stationWhere, journalDate: period } }, include: { account: { select: { code: true, name: true, type: true } } } }),
   ]);
@@ -51,11 +52,13 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
   const stockKey = (stationId: string, productId: string) => `${stationId}:${productId}`;
   for (const tank of tanks) {
     const itemKey = stockKey(tank.configuration.station.id, tank.productId);
-    add(stock, itemKey, () => ({ key: itemKey, product: tank.product.name, code: tank.product.code, unit: tank.product.unit, station: tank.configuration.station.name, quantity: 0, value: 0, purchasePrice: number(tank.product.purchasePrice) }), row => { row.quantity += number(tank.openingStock); row.value+=number(tank.openingStock)*number(tank.product.purchasePrice); });
+    const purchasePrice=effectivePriceAt(tank.product.purchasePrice,tank.product.purchasePriceHistory);
+    add(stock, itemKey, () => ({ key: itemKey, product: tank.product.name, code: tank.product.code, unit: tank.product.unit, station: tank.configuration.station.name, quantity: 0, value: 0, purchasePrice: number(purchasePrice) }), row => { row.quantity += number(tank.openingStock); row.value+=number(tank.openingStock)*number(purchasePrice); });
   }
   for (const entry of inventoryEntries) {
     const itemKey = stockKey(entry.stationId, entry.productId);
-    add(stock, itemKey, () => ({ key: itemKey, product: entry.product.name, code: entry.product.code, unit: entry.product.unit, station: entry.station.name, quantity: 0, value: 0, purchasePrice: number(entry.product.purchasePrice) }), row => { const quantity=number(entry.quantityDelta),unitCost=number(entry.unitCost??entry.product.purchasePrice);row.quantity+=quantity;row.value+=quantity*unitCost; });
+    const purchasePrice=effectivePriceAt(entry.product.purchasePrice,entry.product.purchasePriceHistory);
+    add(stock, itemKey, () => ({ key: itemKey, product: entry.product.name, code: entry.product.code, unit: entry.product.unit, station: entry.station.name, quantity: 0, value: 0, purchasePrice: number(purchasePrice) }), row => { const quantity=number(entry.quantityDelta),unitCost=number(entry.unitCost??purchasePrice);row.quantity+=quantity;row.value+=quantity*unitCost; });
   }
   const inventory = [...stock.values()].sort((a, b) => b.value - a.value);
 

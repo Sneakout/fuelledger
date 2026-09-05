@@ -160,7 +160,7 @@ export function LoginPage() {
           </h2>
           <p>
             {mode === "signup"
-              ? "You’ll be the owner and can build your first station next."
+              ? "You’ll be the owner and can build your first fuel station next."
               : "Use your FuelLedger account to continue."}
           </p>
           {error && (

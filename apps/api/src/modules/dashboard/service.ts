@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js';
+import { effectivePriceAt } from '../../lib/effective-price.js';
 import { buildReport } from '../reports/service.js';
 
 const isoDate=(date:Date)=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -17,7 +18,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
     prisma.tank.findMany({
       where:{status:'ACTIVE',configuration:{active:true,station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})}}},
       include:{
-        product:{select:{name:true,code:true,unit:true,sellingPrice:true}},
+        product:{select:{name:true,code:true,unit:true,sellingPrice:true,sellingPriceHistory:{where:{effectiveFrom:{lte:now}},orderBy:{effectiveFrom:'desc'},take:1}}},
         configuration:{select:{station:{select:{id:true,name:true,code:true}}}},
         inventoryLedger:{select:{quantityDelta:true}},
         physicalReadings:{orderBy:{recordedAt:'desc'},take:1,select:{physicalStock:true,recordedAt:true}},
@@ -47,7 +48,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
     const latestReading=tank.physicalReadings[0],latestDensity=tank.densityReadings[0];
     return{
       id:tank.id,code:tank.code,product:tank.product.name,productCode:tank.product.code,unit:tank.product.unit,
-      station:tank.configuration.station,bookStock,workingCapacity,fillPercent,sellingPrice:number(tank.product.sellingPrice),density:latestDensity?number(latestDensity.density):null,densityRecordedAt:latestDensity?.recordedAt.toISOString()??null,
+      station:tank.configuration.station,bookStock,workingCapacity,fillPercent,sellingPrice:number(effectivePriceAt(tank.product.sellingPrice,tank.product.sellingPriceHistory,now)),density:latestDensity?number(latestDensity.density):null,densityRecordedAt:latestDensity?.recordedAt.toISOString()??null,
       physicalStock:latestReading?number(latestReading.physicalStock):null,
       physicalReadingAt:latestReading?.recordedAt.toISOString()??null,
       status:bookStock<=0?'EMPTY':fillPercent<=20?'LOW':'HEALTHY' as 'EMPTY'|'LOW'|'HEALTHY',

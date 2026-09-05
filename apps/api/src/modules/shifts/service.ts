@@ -5,6 +5,7 @@ import type {
 } from "@fuelledger/shared";
 import { Prisma } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
+import { effectivePriceAt } from "../../lib/effective-price.js";
 import { prisma } from "../../lib/prisma.js";
 import { collectionAccount, postJournal } from "../accounting/service.js";
 
@@ -163,13 +164,13 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
     },
   });
   if (!station)
-    throw new AppError(404, "STATION_NOT_FOUND", "Choose an active station.");
+    throw new AppError(404, "STATION_NOT_FOUND", "Choose an active fuel station.");
   const config = station.configurations[0];
   if (!config)
     throw new AppError(
       400,
       "STATION_NOT_CONFIGURED",
-      "This station needs an active configuration first.",
+      "This fuel station needs an active configuration first.",
     );
   const tanks = config.tanks;
   const nozzles = config.dispensers.flatMap((dispenser) => dispenser.nozzles);
@@ -420,6 +421,11 @@ export async function closeShift(
                 orderBy: { effectiveFrom: "desc" },
                 take: 1,
               },
+              purchasePriceHistory: {
+                where: { effectiveFrom: { lte: closedAt } },
+                orderBy: { effectiveFrom: "desc" },
+                take: 1,
+              },
             },
           },
           tankMappings: {
@@ -454,6 +460,11 @@ export async function closeShift(
 
       const unitPrice =
         nozzle.product.sellingPriceHistory[0]?.price ?? nozzle.product.sellingPrice;
+      const purchasePrice = effectivePriceAt(
+        nozzle.product.purchasePrice,
+        nozzle.product.purchasePriceHistory,
+        closedAt,
+      );
       const quantity = new Prisma.Decimal(missingQuantity);
       const totalAmount = quantity.mul(unitPrice);
       const meterClosing = new Prisma.Decimal(reading.value);
@@ -488,7 +499,7 @@ export async function closeShift(
             tankId,
             type: "SALE",
             quantityDelta: quantity.neg(),
-            unitCost: nozzle.product.purchasePrice,
+            unitCost: purchasePrice,
             saleId: sale.id,
             occurredAt: closedAt,
             createdById: assignment.userId,
@@ -508,8 +519,8 @@ export async function closeShift(
           { account: "4000", credit: totalAmount },
           ...(nozzle.product.inventoryTracked
             ? [
-                { account: "5000", debit: quantity.mul(nozzle.product.purchasePrice) },
-                { account: "1200", credit: quantity.mul(nozzle.product.purchasePrice) },
+                { account: "5000", debit: quantity.mul(purchasePrice) },
+                { account: "1200", credit: quantity.mul(purchasePrice) },
               ]
             : []),
         ],

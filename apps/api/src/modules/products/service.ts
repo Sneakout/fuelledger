@@ -2,10 +2,10 @@ import type { ProductInput } from '@fuelledger/shared';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
+import { effectivePriceAt } from '../../lib/effective-price.js';
 
 const productInclude = { taxCategory: true, customCategory: true, sellingPriceHistory:{orderBy:{effectiveFrom:'desc' as const}},purchasePriceHistory:{orderBy:{effectiveFrom:'desc' as const}} };
-const effectivePrice=(product:{sellingPrice:Prisma.Decimal;sellingPriceHistory:Array<{price:Prisma.Decimal;effectiveFrom:Date}>},at=new Date())=>product.sellingPriceHistory.find(row=>row.effectiveFrom<=at)?.price??product.sellingPrice;
-const shapeProduct=<T extends {sellingPrice:Prisma.Decimal;sellingPriceHistory:Array<{price:Prisma.Decimal;effectiveFrom:Date}>}>(product:T)=>({...product,sellingPrice:effectivePrice(product)});
+const shapeProduct=<T extends {sellingPrice:Prisma.Decimal;purchasePrice:Prisma.Decimal;sellingPriceHistory:Array<{price:Prisma.Decimal;effectiveFrom:Date}>;purchasePriceHistory:Array<{price:Prisma.Decimal;effectiveFrom:Date}>}>(product:T)=>({...product,sellingPrice:effectivePriceAt(product.sellingPrice,product.sellingPriceHistory),purchasePrice:effectivePriceAt(product.purchasePrice,product.purchasePriceHistory)});
 async function assertReferences(organizationId: string, input: ProductInput) {
   if (input.taxCategoryId) { const tax = await prisma.taxCategory.findFirst({ where: { id: input.taxCategoryId, organizationId, active: true } }); if (!tax) throw new AppError(400, 'TAX_CATEGORY_INVALID', 'Choose an active tax category from this organization.'); }
   if (input.customCategoryId) { const category = await prisma.productCategorySetting.findFirst({ where: { id: input.customCategoryId, organizationId, active: true } }); if (!category) throw new AppError(400, 'CATEGORY_INVALID', 'Choose an active custom category from this organization.'); }
@@ -16,8 +16,8 @@ export async function updateProduct(organizationId:string,id:string,input:Produc
   const now=new Date();
   const existing=await prisma.product.findFirst({where:{id,organizationId},include:{_count:{select:{tanks:true,nozzles:true}},sellingPriceHistory:{where:{effectiveFrom:{lte:now}},orderBy:{effectiveFrom:'desc'},take:1}}});
   if(!existing)throw new AppError(404,'PRODUCT_NOT_FOUND','This product was not found.');
-  if(existing._count.tanks&&(!input.tankLinked||!input.inventoryTracked))throw new AppError(409,'PRODUCT_IN_USE','This product is assigned to station tanks and must remain inventory- and tank-linked.');
-  if(existing._count.nozzles&&(!input.meterLinked||!input.inventoryTracked))throw new AppError(409,'PRODUCT_IN_USE','This product is assigned to station nozzles and must remain inventory- and meter-linked.');
+  if(existing._count.tanks&&(!input.tankLinked||!input.inventoryTracked))throw new AppError(409,'PRODUCT_IN_USE','This product is assigned to fuel station tanks and must remain inventory- and tank-linked.');
+  if(existing._count.nozzles&&(!input.meterLinked||!input.inventoryTracked))throw new AppError(409,'PRODUCT_IN_USE','This product is assigned to fuel station nozzles and must remain inventory- and meter-linked.');
   if(existing.code!==input.code&&await prisma.product.findFirst({where:{organizationId,code:input.code,NOT:{id}}}))throw new AppError(409,'PRODUCT_CODE_EXISTS','A product already uses this SKU/code.');
   await assertReferences(organizationId,input);
   const{sellingPriceEffectiveFrom,purchasePriceEffectiveFrom,...values}=input;
@@ -27,8 +27,9 @@ export async function updateProduct(organizationId:string,id:string,input:Produc
   return prisma.$transaction(async tx=>{
     if(priceChanged||sellingPriceEffectiveFrom)await tx.productSellingPrice.upsert({where:{productId_effectiveFrom:{productId:id,effectiveFrom}},update:{price:new Prisma.Decimal(input.sellingPrice)},create:{productId:id,effectiveFrom,price:new Prisma.Decimal(input.sellingPrice)}});
     if(purchasePriceChanged||purchasePriceEffectiveFrom){const purchaseEffectiveFrom=purchasePriceEffectiveFrom?new Date(purchasePriceEffectiveFrom):effectiveFrom;await tx.productPurchasePrice.upsert({where:{productId_effectiveFrom:{productId:id,effectiveFrom:purchaseEffectiveFrom}},update:{price:new Prisma.Decimal(input.purchasePrice)},create:{productId:id,effectiveFrom:purchaseEffectiveFrom,price:new Prisma.Decimal(input.purchasePrice)}})}
+    const currentSellingPrice=await tx.productSellingPrice.findFirst({where:{productId:id,effectiveFrom:{lte:now}},orderBy:{effectiveFrom:'desc'},select:{price:true}});
     const currentPurchasePrice=await tx.productPurchasePrice.findFirst({where:{productId:id,effectiveFrom:{lte:now}},orderBy:{effectiveFrom:'desc'},select:{price:true}});
-    const product=await tx.product.update({where:{id},data:{...values,hsnCode:input.hsnCode||null,customCategoryId:input.customCategoryId??null,taxCategoryId:input.taxCategoryId??null,purchasePrice:currentPurchasePrice?.price??new Prisma.Decimal(input.purchasePrice),...(effectiveFrom<=now?{sellingPrice:new Prisma.Decimal(input.sellingPrice)}:{})},include:productInclude});
+    const product=await tx.product.update({where:{id},data:{...values,hsnCode:input.hsnCode||null,customCategoryId:input.customCategoryId??null,taxCategoryId:input.taxCategoryId??null,purchasePrice:currentPurchasePrice?.price??new Prisma.Decimal(input.purchasePrice),sellingPrice:currentSellingPrice?.price??new Prisma.Decimal(input.sellingPrice)},include:productInclude});
     return shapeProduct(product);
   });
 }

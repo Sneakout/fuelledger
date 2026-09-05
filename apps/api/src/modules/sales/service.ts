@@ -2,11 +2,11 @@ import type { SaleInput } from '@fuelledger/shared';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
+import { effectivePriceAt } from '../../lib/effective-price.js';
 import { collectionAccount, postJournal } from '../accounting/service.js';
 import { notifyLowStock } from '../notifications/service.js';
 
 const saleInclude = { station: { select: { id: true, name: true, code: true } }, shift: { select: { id: true, shiftNumber: true, status: true } }, product: { select: { id: true, name: true, code: true, unit: true, meterLinked: true, isService: true } }, employee: { select: { id: true, name: true, role: true } }, tank: { select: { id: true, code: true } }, nozzle: { select: { id: true, code: true, dispenser: { select: { code: true } } } }, customer: { select: { id: true, name: true, code: true, type: true } }, vehicle: { select: { id: true, number: true, label: true } } } as const;
-const sellingPriceAt=(product:{sellingPrice:Prisma.Decimal;sellingPriceHistory:Array<{price:Prisma.Decimal;effectiveFrom:Date}>},at=new Date())=>product.sellingPriceHistory.find(row=>row.effectiveFrom<=at)?.price??product.sellingPrice;
 
 export async function bootstrap(organizationId: string,stationIds?:string[]) {
   const [openShifts, products, employees, sales, customers] = await Promise.all([
@@ -23,30 +23,30 @@ export async function bootstrap(organizationId: string,stationIds?:string[]) {
     prisma.sale.findMany({ where: { organizationId,...(stationIds?{stationId:{in:stationIds}}:{}) }, take: 100, orderBy: { occurredAt: 'desc' }, include: saleInclude }),
     prisma.customer.findMany({ where: { organizationId, active: true }, orderBy: { name: 'asc' }, select: { id: true, name: true, code: true, type: true, creditLimit: true, vehicles: { where: { active: true }, orderBy: { number: 'asc' }, select: { id: true, number: true, label: true } }, ledger: { select: { amount: true } } } }),
   ]);
-  return { openShifts, products:products.map(product=>({...product,sellingPrice:sellingPriceAt(product)})), employees, sales, customers: customers.map(customer => ({ ...customer, outstanding: customer.ledger.reduce((sum, row) => sum + Number(row.amount), 0), ledger: undefined })) };
+  return { openShifts, products:products.map(product=>({...product,sellingPrice:effectivePriceAt(product.sellingPrice,product.sellingPriceHistory)})), employees, sales, customers: customers.map(customer => ({ ...customer, outstanding: customer.ledger.reduce((sum, row) => sum + Number(row.amount), 0), ledger: undefined })) };
 }
 
 export async function createSale(organizationId: string, input: SaleInput) {
   const [shift, product] = await Promise.all([
     prisma.shift.findFirst({ where: { id: input.shiftId, stationId: input.stationId, status: 'OPEN', station: { organizationId } }, include: { users: true, nozzleReadings: true, nozzleAssignments:true } }),
-    prisma.product.findFirst({ where: { id: input.productId, organizationId, active: true },include:{sellingPriceHistory:{where:{effectiveFrom:{lte:new Date()}},orderBy:{effectiveFrom:'desc'},take:1}} }),
+    prisma.product.findFirst({ where: { id: input.productId, organizationId, active: true },include:{sellingPriceHistory:{where:{effectiveFrom:{lte:new Date()}},orderBy:{effectiveFrom:'desc'},take:1},purchasePriceHistory:{where:{effectiveFrom:{lte:new Date()}},orderBy:{effectiveFrom:'desc'},take:1}} }),
   ]);
-  if (!shift) throw new AppError(409, 'SHIFT_NOT_OPEN', 'Choose an open shift for this station.');
+  if (!shift) throw new AppError(409, 'SHIFT_NOT_OPEN', 'Choose an open shift for this fuel station.');
   if (!product) throw new AppError(404, 'PRODUCT_NOT_FOUND', 'Choose an active product.');
-  const applicablePrice=sellingPriceAt(product);if(Math.abs(input.unitPrice-Number(applicablePrice))>.005)throw new AppError(409,'SELLING_PRICE_CHANGED',`The current price is ${Number(applicablePrice).toLocaleString('en-IN',{style:'currency',currency:'INR'})} per ${product.unit.toLowerCase()}. Refresh before recording this sale.`);
+  const applicablePrice=effectivePriceAt(product.sellingPrice,product.sellingPriceHistory);const applicablePurchasePrice=effectivePriceAt(product.purchasePrice,product.purchasePriceHistory);if(Math.abs(input.unitPrice-Number(applicablePrice))>.005)throw new AppError(409,'SELLING_PRICE_CHANGED',`The current price is ${Number(applicablePrice).toLocaleString('en-IN',{style:'currency',currency:'INR'})} per ${product.unit.toLowerCase()}. Refresh before recording this sale.`);
   const permittedEmployees = new Set([shift.managerId, ...shift.users.map(user => user.userId)]);
   if (!permittedEmployees.has(input.employeeId)) throw new AppError(400, 'EMPLOYEE_NOT_ON_SHIFT', 'Choose a team member assigned to this shift.');
   if (['CREDIT', 'FLEET'].includes(input.paymentMethod) && !input.customerId) throw new AppError(400, 'CUSTOMER_REQUIRED', 'Choose a customer account for this payment type.');
   const metered = product.meterLinked;
   if (metered) {
-    const sale = await createMeteredSale(organizationId, input, shift, {...product,sellingPrice:applicablePrice});
+    const sale = await createMeteredSale(organizationId, input, shift, {...product,sellingPrice:applicablePrice,purchasePrice:applicablePurchasePrice});
     if (sale.tank?.id) await notifyLowStock(organizationId, sale.tank.id).catch(() => undefined);
     return sale;
   }
   if (input.tankId || input.nozzleId || input.meterOpening !== null && input.meterOpening !== undefined || input.meterClosing !== null && input.meterClosing !== undefined) throw new AppError(400, 'EQUIPMENT_NOT_APPLICABLE', 'This product is not sold from a meter. Record the quantity directly.');
   const quantity = input.quantity;
   if (!quantity) throw new AppError(400, 'QUANTITY_REQUIRED', 'Enter a quantity for this sale.');
-  const sale = await persistSale({ organizationId, input, kind: product.isService ? 'SERVICE' : 'PRODUCT', quantity, product:{...product,sellingPrice:applicablePrice} });
+  const sale = await persistSale({ organizationId, input, kind: product.isService ? 'SERVICE' : 'PRODUCT', quantity, product:{...product,sellingPrice:applicablePrice,purchasePrice:applicablePurchasePrice} });
   if (sale.tank?.id) await notifyLowStock(organizationId, sale.tank.id).catch(() => undefined);
   return sale;
 }
