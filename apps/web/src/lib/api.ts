@@ -986,6 +986,14 @@ export type PurchaseInvoice = {
   receipt: { id: string; receivedAt: string } | null;
   attachments: AttachmentMeta[];
   createdBy: { name: string };
+  corrections: Array<{
+    id: string;
+    reason: string;
+    previousTotal: string;
+    correctedTotal: string;
+    correctedAt: string;
+    correctedBy: { name: string };
+  }>;
 };
 export type InvoicePricePreview = {
   lines: Array<{

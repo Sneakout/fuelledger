@@ -871,6 +871,16 @@ export const purchaseInvoiceUpdateSchema = z
     markPaid: z.boolean().optional().default(false),
     paymentMethod: z.enum(settlementMethods).optional(),
     paymentReferenceNo: z.string().trim().max(80).optional(),
+    correctionReason: z.string().trim().min(5).max(300).optional(),
+    lines: z
+      .array(
+        z.object({
+          id: z.string().cuid(),
+          quantity: z.coerce.number().positive(),
+        }),
+      )
+      .min(1)
+      .optional(),
   })
   .superRefine((invoice, context) => {
     if (new Date(invoice.dueDate) < new Date(invoice.invoiceDate))
@@ -884,6 +894,12 @@ export const purchaseInvoiceUpdateSchema = z
         code: "custom",
         message: "Choose how this invoice was paid.",
         path: ["paymentMethod"],
+      });
+    if (invoice.lines && !invoice.correctionReason)
+      context.addIssue({
+        code: "custom",
+        message: "Explain why the invoice quantity is being corrected.",
+        path: ["correctionReason"],
       });
   });
 export const supplierPaymentInputSchema = z.object({

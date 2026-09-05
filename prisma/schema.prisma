@@ -732,10 +732,28 @@ model PurchaseInvoice {
   payments SupplierPayment[]
   receipt PurchaseReceipt?
   attachments Attachment[]
+  corrections PurchaseInvoiceCorrection[]
 
   @@unique([supplierId, invoiceNumber])
   @@index([organizationId, dueDate, status])
   @@map("purchase_invoices")
+}
+
+model PurchaseInvoiceCorrection {
+  id String @id @default(cuid())
+  invoiceId String @map("invoice_id")
+  reason String
+  beforeLines Json @map("before_lines")
+  afterLines Json @map("after_lines")
+  previousTotal Decimal @db.Decimal(14, 2) @map("previous_total")
+  correctedTotal Decimal @db.Decimal(14, 2) @map("corrected_total")
+  correctedById String @map("corrected_by_id")
+  correctedAt DateTime @default(now()) @map("corrected_at")
+  invoice PurchaseInvoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  correctedBy User @relation(fields: [correctedById], references: [id], onDelete: Restrict)
+
+  @@index([invoiceId, correctedAt])
+  @@map("purchase_invoice_corrections")
 }
 
 model PurchaseInvoiceLine {
@@ -1015,6 +1033,7 @@ model User {
   customerReceipts CustomerReceipt[]
   customerLedger   CustomerLedgerEntry[]
   purchaseInvoices PurchaseInvoice[]
+  purchaseInvoiceCorrections PurchaseInvoiceCorrection[]
   supplierPayments SupplierPayment[]
   expenses         Expense[]
   journals         Journal[]

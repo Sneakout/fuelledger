@@ -155,6 +155,10 @@ export function PurchasesPage() {
   const [pricePreview, setPricePreview] = useState<InvoicePricePreview | null>(
     null,
   );
+  const [editQuantities, setEditQuantities] = useState<Record<string, string>>(
+    {},
+  );
+  const [correctionReason, setCorrectionReason] = useState("");
   const [payment, setPayment] = useState({
     stationId: "",
     invoiceId: "",
@@ -205,6 +209,22 @@ export function PurchasesPage() {
       }, 0),
     [data, lines],
   );
+  const correctionPreview = useMemo(() => {
+    if (!editingInvoice) return null;
+    const changed = editingInvoice.lines.some(
+      (line) => Number(editQuantities[line.id]) !== Number(line.quantity),
+    );
+    if (!changed) return null;
+    return editingInvoice.lines.reduce((total, line) => {
+      const quantity = Number(editQuantities[line.id]);
+      const unitCost = purchasePriceForDate(
+        line.product ?? undefined,
+        invoice.invoiceDate,
+      );
+      const subtotal = quantity * unitCost;
+      return total + subtotal + (subtotal * Number(line.taxRate)) / 100;
+    }, 0);
+  }, [editQuantities, editingInvoice, invoice.invoiceDate]);
   async function saveSupplier() {
     const name = supplier.name.trim();
     if (!name) {
@@ -235,6 +255,9 @@ export function PurchasesPage() {
     setError("");
     try {
       if (editingInvoice) {
+        const quantityChanged = editingInvoice.lines.some(
+          (line) => Number(editQuantities[line.id]) !== Number(line.quantity),
+        );
         await api.updatePurchaseInvoice(editingInvoice.id, {
           invoiceNumber: invoice.invoiceNumber,
           invoiceDate: iso(invoice.invoiceDate),
@@ -247,6 +270,15 @@ export function PurchasesPage() {
             invoice.paidNow && invoice.paymentReferenceNo
               ? invoice.paymentReferenceNo
               : undefined,
+          ...(quantityChanged
+            ? {
+                correctionReason,
+                lines: editingInvoice.lines.map((line) => ({
+                  id: line.id,
+                  quantity: Number(editQuantities[line.id]),
+                })),
+              }
+            : {}),
         });
         setMode(null);
         setEditingInvoice(null);
@@ -503,6 +535,15 @@ export function PurchasesPage() {
                       onClick={() => {
                         setEditingInvoice(item);
                         setPricePreview(null);
+                        setEditQuantities(
+                          Object.fromEntries(
+                            item.lines.map((line) => [
+                              line.id,
+                              String(Number(line.quantity)),
+                            ]),
+                          ),
+                        );
+                        setCorrectionReason("");
                         setInvoice((current) => ({
                           ...current,
                           stationId: item.station.id,
@@ -845,7 +886,8 @@ export function PurchasesPage() {
                       </span>
                       <strong>
                         {money(
-                          pricePreview?.totalAmount ??
+                          correctionPreview ??
+                            pricePreview?.totalAmount ??
                             editingInvoice?.totalAmount ??
                             0,
                         )}
@@ -877,6 +919,63 @@ export function PurchasesPage() {
                     >
                       Refresh prices
                     </button>
+                    <div className="invoice-correction-lines">
+                      <div className="invoice-correction-heading">
+                        <b>Correct invoice quantities</b>
+                        <span>Rates are checked against the invoice date.</span>
+                      </div>
+                      {editingInvoice?.lines.map((line) => (
+                        <div className="invoice-correction-line" key={line.id}>
+                          <span>
+                            <b>{line.product?.name ?? line.description}</b>
+                            <small>
+                              Saved: {Number(line.quantity).toLocaleString("en-IN")} {line.product?.unit ?? "units"}
+                            </small>
+                          </span>
+                          <label>
+                            <span>Correct quantity ({line.product?.unit ?? "units"})</span>
+                            <input
+                              type="number"
+                              min="0.001"
+                              step="0.001"
+                              value={editQuantities[line.id] ?? ""}
+                              onChange={(event) =>
+                                setEditQuantities((current) => ({
+                                  ...current,
+                                  [line.id]: event.target.value,
+                                }))
+                              }
+                            />
+                          </label>
+                        </div>
+                      ))}
+                      {correctionPreview !== null && (
+                        <div className="invoice-correction-total">
+                          <span>Corrected invoice total</span>
+                          <strong>{money(correctionPreview)}</strong>
+                        </div>
+                      )}
+                      {editingInvoice?.lines.some(
+                        (line) =>
+                          Number(editQuantities[line.id]) !== Number(line.quantity),
+                      ) && (
+                        <label className="field invoice-correction-reason">
+                          <span>Reason for correction</span>
+                          <textarea
+                            required
+                            maxLength={300}
+                            value={correctionReason}
+                            onChange={(event) =>
+                              setCorrectionReason(event.target.value)
+                            }
+                            placeholder="For example: Supplier invoice quantity was entered as 10,000 L instead of 20,000 L"
+                          />
+                          <small>
+                            This reason and the before-and-after values are kept in the audit history.
+                          </small>
+                        </label>
+                      )}
+                    </div>
                     {pricePreview && (
                       <div className="invoice-price-preview">
                         {pricePreview.lines.map((line) => (
@@ -900,6 +999,16 @@ export function PurchasesPage() {
                             refreshed total.
                           </b>
                         )}
+                      </div>
+                    )}
+                    {!!editingInvoice?.corrections.length && (
+                      <div className="invoice-correction-history">
+                        <b>Correction history</b>
+                        {editingInvoice.corrections.map((correction) => (
+                          <small key={correction.id}>
+                            {new Date(correction.correctedAt).toLocaleString("en-IN")} · {correction.correctedBy.name} · {correction.reason} · {money(correction.previousTotal)} → {money(correction.correctedTotal)}
+                          </small>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -1241,7 +1350,8 @@ export function PurchasesPage() {
                       Total{" "}
                       {money(
                         mode === "edit-invoice"
-                          ? (pricePreview?.totalAmount ??
+                          ? (correctionPreview ??
+                              pricePreview?.totalAmount ??
                               Number(editingInvoice?.totalAmount ?? 0))
                           : invoice.invoiceTotal
                             ? Number(invoice.invoiceTotal)
@@ -1262,7 +1372,9 @@ export function PurchasesPage() {
                     {saving
                       ? "Saving…"
                       : mode === "edit-invoice"
-                        ? "Save changes"
+                        ? correctionPreview !== null
+                          ? "Save correction"
+                          : "Save changes"
                         : "Save invoice"}
                   </button>
                 </div>

@@ -19,6 +19,13 @@ const invoiceInclude = {
           code: true,
           unit: true,
           tankLinked: true,
+          category: true,
+          hsnCode: true,
+          purchasePrice: true,
+          purchasePriceHistory: {
+            orderBy: { effectiveFrom: 'desc' as const },
+          },
+          taxCategory: { select: { rate: true } },
         },
       },
     },
@@ -29,6 +36,17 @@ const invoiceInclude = {
     select: { id: true, fileName: true, mimeType: true, size: true },
   },
   createdBy: { select: { name: true } },
+  corrections: {
+    orderBy: { correctedAt: 'desc' as const },
+    select: {
+      id: true,
+      reason: true,
+      previousTotal: true,
+      correctedTotal: true,
+      correctedAt: true,
+      correctedBy: { select: { name: true } },
+    },
+  },
 } as const;
 const expenseInclude = {
   station: { select: { id: true, name: true, code: true } },
@@ -416,7 +434,11 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
     include: {
       supplier: { select: { name: true, paymentTerms: true } },
       payments: true,
-      receipt: true,
+      receipt: {
+        include: {
+          lines: { include: { ledgerEntry: true } },
+        },
+      },
       lines: {
         include: {
           product: {
@@ -432,8 +454,35 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
     },
   });
   if (!invoice) throw new AppError(404, 'INVOICE_NOT_FOUND', 'This purchase invoice was not found.');
-  const pricing = input.refreshPrices
-    ? priceShape(invoice, new Date(input.invoiceDate))
+  const submittedLines = input.lines;
+  if (submittedLines) {
+    const savedIds = new Set(invoice.lines.map((line) => line.id));
+    const submittedIds = new Set(submittedLines.map((line) => line.id));
+    if (
+      submittedIds.size !== submittedLines.length ||
+      submittedIds.size !== savedIds.size ||
+      [...submittedIds].some((lineId) => !savedIds.has(lineId))
+    )
+      throw new AppError(400, 'INVOICE_LINES_INVALID', 'Correct the quantities of the existing invoice lines only.');
+  }
+  const correctedQuantities = new Map(
+    submittedLines?.map((line) => [line.id, line.quantity]) ?? [],
+  );
+  const quantityChanged = invoice.lines.some(
+    (line) =>
+      correctedQuantities.has(line.id) &&
+      Number(line.quantity) !== correctedQuantities.get(line.id),
+  );
+  const shouldRecalculate = input.refreshPrices || quantityChanged;
+  const invoiceForPricing = {
+    ...invoice,
+    lines: invoice.lines.map((line) => ({
+      ...line,
+      quantity: new Prisma.Decimal(correctedQuantities.get(line.id) ?? line.quantity),
+    })),
+  };
+  const pricing = shouldRecalculate
+    ? priceShape(invoiceForPricing, new Date(input.invoiceDate))
     : {
         lines: invoice.lines.map((line) => ({
           id: line.id,
@@ -452,7 +501,7 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
   const paid = invoice.payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
   const openingPayment = invoice.status === 'PAID' && invoice.payments.length === 1 && Math.abs(paid - Number(invoice.totalAmount)) < 0.01 ? invoice.payments[0]! : null;
   const openingPaymentJournal =
-    openingPayment && input.refreshPrices
+    openingPayment && shouldRecalculate
       ? await prisma.journal.findFirst({
           where: {
             sourceType: 'SUPPLIER_PAYMENT',
@@ -461,8 +510,16 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
         })
       : null;
   const syncOpeningPayment = Boolean(openingPayment && openingPaymentJournal);
-  if (input.refreshPrices && pricing.totalAmount <= 0.001) throw new AppError(400, 'INVOICE_TOTAL_INVALID', 'Set a valid purchase price for every product before refreshing this invoice.');
-  if (input.refreshPrices && paid > pricing.totalAmount + 0.001 && !syncOpeningPayment) throw new AppError(409, 'INVOICE_TOTAL_BELOW_PAYMENTS', 'This invoice has separate recorded payments. Correct or reverse those payments before reducing the invoice total.');
+  if (shouldRecalculate && pricing.totalAmount <= 0.001) throw new AppError(400, 'INVOICE_TOTAL_INVALID', 'Set a valid purchase price for every product before refreshing this invoice.');
+  if (shouldRecalculate && paid > pricing.totalAmount + 0.001 && !syncOpeningPayment) throw new AppError(409, 'INVOICE_TOTAL_BELOW_PAYMENTS', 'This invoice has separate recorded payments. Correct or reverse those payments before reducing the invoice total.');
+  if (quantityChanged && invoice.receipt) {
+    for (const line of invoice.lines) {
+      if (!correctedQuantities.has(line.id) || Number(line.quantity) === correctedQuantities.get(line.id)) continue;
+      const matches = invoice.receipt.lines.filter((receiptLine) => receiptLine.productId === line.productId);
+      if (matches.length !== 1 || !matches[0]!.ledgerEntry)
+        throw new AppError(409, 'RECEIPT_LINE_AMBIGUOUS', `The received stock for ${line.description} cannot be matched safely. Please contact support before correcting this line.`);
+    }
+  }
   const effectivePaid = syncOpeningPayment ? pricing.totalAmount : paid;
   try {
     return await prisma.$transaction(async (tx) => {
@@ -474,7 +531,7 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
           invoiceDate: new Date(input.invoiceDate),
           dueDate: calculatedDueDate(input.invoiceDate, invoice.supplier.paymentTerms),
           notes: input.notes || null,
-          ...(input.refreshPrices
+          ...(shouldRecalculate
             ? {
                 subtotal: new Prisma.Decimal(pricing.subtotal),
                 taxAmount: new Prisma.Decimal(pricing.taxAmount),
@@ -484,32 +541,36 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
           status,
         },
       });
-      if (input.refreshPrices) {
+      if (shouldRecalculate) {
         for (const line of pricing.lines) {
           await tx.purchaseInvoiceLine.update({
             where: { id: line.id },
             data: {
               unitCost: new Prisma.Decimal(line.unitCost),
+              quantity: new Prisma.Decimal(line.quantity),
               lineTotal: new Prisma.Decimal(line.lineTotal),
             },
           });
           if (invoice.receipt && line.productId) {
-            await tx.receiptLine.updateMany({
-              where: {
-                receiptId: invoice.receipt.id,
-                productId: line.productId,
-              },
-              data: { unitCost: new Prisma.Decimal(line.unitCost) },
-            });
-            await tx.inventoryLedger.updateMany({
-              where: {
-                receiptLine: {
-                  receiptId: invoice.receipt.id,
-                  productId: line.productId,
+            const receiptLines = invoice.receipt.lines.filter(
+              (receiptLine) => receiptLine.productId === line.productId,
+            );
+            if (receiptLines.length === 1) {
+              await tx.receiptLine.update({
+                where: { id: receiptLines[0]!.id },
+                data: {
+                  quantity: new Prisma.Decimal(line.quantity),
+                  unitCost: new Prisma.Decimal(line.unitCost),
                 },
-              },
-              data: { unitCost: new Prisma.Decimal(line.unitCost) },
-            });
+              });
+              await tx.inventoryLedger.updateMany({
+                where: { receiptLineId: receiptLines[0]!.id },
+                data: {
+                  quantityDelta: new Prisma.Decimal(line.quantity),
+                  unitCost: new Prisma.Decimal(line.unitCost),
+                },
+              });
+            }
           }
         }
         const journal = await tx.journal.findFirst({
@@ -563,6 +624,27 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
                 credit: pricing.totalAmount,
               },
             ],
+          });
+        }
+        if (quantityChanged) {
+          await tx.purchaseInvoiceCorrection.create({
+            data: {
+              invoiceId: id,
+              reason: input.correctionReason!,
+              beforeLines: invoice.lines.map((line) => ({
+                id: line.id,
+                description: line.description,
+                quantity: Number(line.quantity),
+              })),
+              afterLines: pricing.lines.map((line) => ({
+                id: line.id,
+                productName: line.productName,
+                quantity: line.quantity,
+              })),
+              previousTotal: invoice.totalAmount,
+              correctedTotal: new Prisma.Decimal(pricing.totalAmount),
+              correctedById: userId,
+            },
           });
         }
       } else {
