@@ -67,13 +67,14 @@ const today = () => new Date().toISOString().slice(0, 10);
 export const purchasePriceForDate = (
   product: PurchasesBootstrap["products"][number] | undefined,
   invoiceDate: string,
+  savedInvoiceRate?: number,
 ) => {
   if (!product) return 0;
   const at = new Date(`${invoiceDate}T23:59:59.999`);
   const historical = product.purchasePriceHistory.find(
     (entry) => new Date(entry.effectiveFrom) <= at,
   );
-  return Number(historical?.price ?? product.purchasePrice);
+  return Number(historical?.price ?? savedInvoiceRate ?? product.purchasePrice);
 };
 async function attachment(file: File | null) {
   if (!file) return null;
@@ -220,6 +221,7 @@ export function PurchasesPage() {
       const unitCost = purchasePriceForDate(
         line.product ?? undefined,
         invoice.invoiceDate,
+        Number(line.unitCost),
       );
       const subtotal = quantity * unitCost;
       return total + subtotal + (subtotal * Number(line.taxRate)) / 100;

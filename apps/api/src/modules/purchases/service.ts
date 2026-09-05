@@ -375,11 +375,12 @@ const purchasePriceAt = (
   product: NonNullable<InvoiceForPricing['lines'][number]['product']>,
   invoiceDate: Date,
 ) =>
-  product.purchasePriceHistory.find((row) => row.effectiveFrom <= invoiceDate)?.price ??
-  product.purchasePrice;
+  product.purchasePriceHistory.find((row) => row.effectiveFrom <= invoiceDate)?.price;
 const priceShape = (invoice: InvoiceForPricing, invoiceDate: Date) => {
   const lines = invoice.lines.map((line) => {
-    const unitCost = line.product ? purchasePriceAt(line.product, invoiceDate) : line.unitCost;
+    const unitCost = line.product
+      ? (purchasePriceAt(line.product, invoiceDate) ?? line.unitCost)
+      : line.unitCost;
     const lineTotal = Number(line.quantity) * Number(unitCost);
     const tax = (lineTotal * Number(line.taxRate)) / 100;
     return {

@@ -110,4 +110,8 @@ describe("effective-dated purchase price", () => {
   it("uses the newer price once its effective date is reached", () => {
     expect(purchasePriceForDate(product, "2026-01-01")).toBe(105);
   });
+
+  it("keeps the saved invoice rate when no historical price existed yet", () => {
+    expect(purchasePriceForDate(product, "2025-11-01", 92.6)).toBe(92.6);
+  });
 });
