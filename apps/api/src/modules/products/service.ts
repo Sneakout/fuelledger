@@ -5,12 +5,31 @@ import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 
 const productInclude = { taxCategory: true, customCategory: true, sellingPriceHistory:{orderBy:{effectiveFrom:'desc' as const}},purchasePriceHistory:{orderBy:{effectiveFrom:'desc' as const}} };
+const defaultTaxCategories = [
+  { name: 'GST 0%', rate: 0 },
+  { name: 'GST 5%', rate: 5 },
+  { name: 'GST 12%', rate: 12 },
+  { name: 'GST 18%', rate: 18 },
+  { name: 'GST 28%', rate: 28 },
+] as const;
+
+async function ensureDefaultTaxCategories(organizationId: string) {
+  await prisma.$transaction(
+    defaultTaxCategories.map((tax) =>
+      prisma.taxCategory.upsert({
+        where: { organizationId_name: { organizationId, name: tax.name } },
+        update: {},
+        create: { organizationId, name: tax.name, rate: new Prisma.Decimal(tax.rate) },
+      }),
+    ),
+  );
+}
 const shapeProduct=<T extends {sellingPrice:Prisma.Decimal;purchasePrice:Prisma.Decimal;sellingPriceHistory:Array<{price:Prisma.Decimal;effectiveFrom:Date}>;purchasePriceHistory:Array<{price:Prisma.Decimal;effectiveFrom:Date}>}>(product:T)=>({...product,sellingPrice:effectivePriceAt(product.sellingPrice,product.sellingPriceHistory),purchasePrice:effectivePriceAt(product.purchasePrice,product.purchasePriceHistory)});
 async function assertReferences(organizationId: string, input: ProductInput) {
   if (input.taxCategoryId) { const tax = await prisma.taxCategory.findFirst({ where: { id: input.taxCategoryId, organizationId, active: true } }); if (!tax) throw new AppError(400, 'TAX_CATEGORY_INVALID', 'Choose an active tax category from this organization.'); }
   if (input.customCategoryId) { const category = await prisma.productCategorySetting.findFirst({ where: { id: input.customCategoryId, organizationId, active: true } }); if (!category) throw new AppError(400, 'CATEGORY_INVALID', 'Choose an active custom category from this organization.'); }
 }
-export async function listCatalog(organizationId: string) { const [products, categories, taxCategories] = await Promise.all([prisma.product.findMany({ where: { organizationId }, orderBy: [{ active: 'desc' }, { name: 'asc' }], include: productInclude }), prisma.productCategorySetting.findMany({ where: { organizationId }, orderBy: { name: 'asc' } }), prisma.taxCategory.findMany({ where: { organizationId }, orderBy: { rate: 'asc' } })]); return { products:products.map(product=>shapeProduct(product)), categories, taxCategories }; }
+export async function listCatalog(organizationId: string) { await ensureDefaultTaxCategories(organizationId); const [products, categories, taxCategories] = await Promise.all([prisma.product.findMany({ where: { organizationId }, orderBy: [{ active: 'desc' }, { name: 'asc' }], include: productInclude }), prisma.productCategorySetting.findMany({ where: { organizationId }, orderBy: { name: 'asc' } }), prisma.taxCategory.findMany({ where: { organizationId }, orderBy: [{ rate: 'asc' }, { name: 'asc' }] })]); return { products:products.map(product=>shapeProduct(product)), categories, taxCategories }; }
 export async function createProduct(organizationId: string, input: ProductInput) { await assertReferences(organizationId, input);const{sellingPriceEffectiveFrom,purchasePriceEffectiveFrom,...values}=input;const effectiveFrom=sellingPriceEffectiveFrom?new Date(sellingPriceEffectiveFrom):new Date(),purchaseEffectiveFrom=purchasePriceEffectiveFrom?new Date(purchasePriceEffectiveFrom):effectiveFrom;try { return await prisma.$transaction(async tx=>shapeProduct(await tx.product.create({ data: { organizationId, ...values, hsnCode: input.hsnCode || null, customCategoryId: input.customCategoryId ?? null, taxCategoryId: input.taxCategoryId ?? null, purchasePrice: new Prisma.Decimal(input.purchasePrice), sellingPrice: new Prisma.Decimal(input.sellingPrice),sellingPriceHistory:{create:{price:new Prisma.Decimal(input.sellingPrice),effectiveFrom}},purchasePriceHistory:{create:{price:new Prisma.Decimal(input.purchasePrice),effectiveFrom:purchaseEffectiveFrom}} }, include: productInclude }))); } catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AppError(409, 'PRODUCT_CODE_EXISTS', 'A product already uses this SKU/code.'); throw error; } }
 export async function updateProduct(organizationId:string,id:string,input:ProductInput){
   const now=new Date();

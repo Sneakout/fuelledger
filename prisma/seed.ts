@@ -40,7 +40,9 @@ async function main() {
     [
       { name: "GST 0%", rate: 0 },
       { name: "GST 5%", rate: 5 },
+      { name: "GST 12%", rate: 12 },
       { name: "GST 18%", rate: 18 },
+      { name: "GST 28%", rate: 28 },
     ].map((tax) =>
       prisma.taxCategory.upsert({
         where: {
