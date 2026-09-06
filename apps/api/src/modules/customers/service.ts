@@ -20,7 +20,7 @@ function financials(customer: { creditLimit: Prisma.Decimal; ledger: Array<{ amo
 
 export async function bootstrap(organizationId: string,stationIds?:string[]) {
   const [customers, stations] = await Promise.all([
-    prisma.customer.findMany({ where: { organizationId }, orderBy: [{ active: 'desc' }, { name: 'asc' }], include: {...customerInclude,ledger:{...customerInclude.ledger,...(stationIds?{where:{stationId:{in:stationIds}}}:{})}} }),
+    prisma.customer.findMany({ where: { organizationId, active: true }, orderBy: { name: 'asc' }, include: {...customerInclude,ledger:{...customerInclude.ledger,...(stationIds?{where:{stationId:{in:stationIds}}}:{})}} }),
     prisma.station.findMany({ where: { organizationId, active: true,...(stationIds?{id:{in:stationIds}}:{}) }, select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } }),
   ]);
   return { customers: customers.map(customer => ({ ...customer, ...financials(customer) })), stations };
@@ -51,6 +51,15 @@ export async function updateCustomer(organizationId: string, id: string, input: 
   const existing = await prisma.customer.findFirst({ where: { id, organizationId } }); if (!existing) throw new AppError(404, 'CUSTOMER_NOT_FOUND', 'Customer account not found.');
   const { code: _ignoredCode, ...details } = input;
   return prisma.customer.update({ where: { id }, data: { ...details, email: input.email || null, phone: input.phone || null, taxId: input.taxId || null, billingAddress: input.billingAddress || null }, include: customerInclude });
+}
+
+export async function removeCustomer(organizationId: string, id: string) {
+  const customer = await prisma.customer.findFirst({ where: { id, organizationId }, include: { ledger: { select: { amount: true } } } });
+  if (!customer || !customer.active) return { removed: true };
+  const balance = customer.ledger.reduce((sum, entry) => sum + Number(entry.amount), 0);
+  if (Math.abs(balance) >= 0.005) throw new AppError(409, 'CUSTOMER_BALANCE_REMAINS', 'Settle this customer’s balance before deleting the account.');
+  await prisma.customer.update({ where: { id }, data: { active: false } });
+  return { removed: true };
 }
 
 export async function addVehicle(organizationId: string, customerId: string, input: VehicleInput) {

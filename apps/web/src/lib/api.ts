@@ -228,6 +228,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  removeCustomer: (id: string) =>
+    request<{ removed: boolean }>(`/customers/${id}`, { method: "DELETE" }),
   addVehicle: (id: string, input: VehicleInput) =>
     request<{ vehicle: CustomerVehicle }>(`/customers/${id}/vehicles`, {
       method: "POST",
