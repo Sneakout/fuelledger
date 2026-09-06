@@ -192,6 +192,63 @@ async function main() {
     create: { userId: manager.id, stationId: station.id },
   });
 
+  const creditCustomer = await prisma.customer.upsert({
+    where: {
+      organizationId_code: {
+        organizationId: owner.organizationId,
+        code: "SOUTHERN-TRANS",
+      },
+    },
+    update: { name: "Southern Transport", active: true },
+    create: {
+      id: "demo-customer-southern-transport",
+      organizationId: owner.organizationId,
+      name: "Southern Transport",
+      code: "SOUTHERN-TRANS",
+      type: "CREDIT",
+      phone: "919876543210",
+      creditLimit: 300000,
+      creditDays: 15,
+      active: true,
+    },
+  });
+  const fleetCustomer = await prisma.customer.upsert({
+    where: {
+      organizationId_code: {
+        organizationId: owner.organizationId,
+        code: "CITY-CABS",
+      },
+    },
+    update: { name: "City Cabs Fleet", active: true },
+    create: {
+      id: "demo-customer-city-cabs",
+      organizationId: owner.organizationId,
+      name: "City Cabs Fleet",
+      code: "CITY-CABS",
+      type: "FLEET",
+      phone: "919812345678",
+      creditLimit: 180000,
+      creditDays: 7,
+      active: true,
+    },
+  });
+  const fleetVehicle = await prisma.vehicle.upsert({
+    where: {
+      customerId_number: {
+        customerId: fleetCustomer.id,
+        number: "TN 37 AB 2468",
+      },
+    },
+    update: { label: "Airport cab", active: true },
+    create: {
+      id: "demo-vehicle-city-cabs-1",
+      customerId: fleetCustomer.id,
+      number: "TN 37 AB 2468",
+      label: "Airport cab",
+      active: true,
+    },
+  });
+
   const nozzles = configuration.dispensers.flatMap(
     (dispenser) => dispenser.nozzles,
   );
@@ -253,9 +310,26 @@ async function main() {
       const price = Number(nozzle.product.sellingPrice);
       const saleId = `demo-real-sale-${daysAgo}-${index}`;
       const tankId = nozzle.tankMappings[0]?.tankId ?? null;
+      const paymentMethod =
+        paymentCycle[(index + daysAgo) % paymentCycle.length]!;
+      const customer =
+        paymentMethod === PaymentMethod.CREDIT
+          ? creditCustomer
+          : paymentMethod === PaymentMethod.FLEET
+            ? fleetCustomer
+            : null;
       await prisma.sale.upsert({
         where: { id: saleId },
-        update: { occurredAt: at(daysAgo, 10 + index) },
+        update: {
+          occurredAt: at(daysAgo, 10 + index),
+          paymentMethod,
+          customerId: customer?.id ?? null,
+          customerName: customer?.name ?? null,
+          vehicleId:
+            paymentMethod === PaymentMethod.FLEET ? fleetVehicle.id : null,
+          vehicleNumber:
+            paymentMethod === PaymentMethod.FLEET ? fleetVehicle.number : null,
+        },
         create: {
           id: saleId,
           organizationId: owner.organizationId,
@@ -266,7 +340,7 @@ async function main() {
           tankId,
           nozzleId: nozzle.id,
           kind: SaleKind.METERED,
-          paymentMethod: paymentCycle[(index + daysAgo) % paymentCycle.length]!,
+          paymentMethod,
           quantity,
           unitPrice: price,
           totalAmount: quantity * price,
@@ -274,8 +348,41 @@ async function main() {
           meterClosing: 500000 + daysAgo * 5000 + index * 1000 + quantity,
           occurredAt: at(daysAgo, 10 + index),
           notes: "Demo metered sale",
+          customerId: customer?.id ?? null,
+          customerName: customer?.name ?? null,
+          vehicleId:
+            paymentMethod === PaymentMethod.FLEET ? fleetVehicle.id : null,
+          vehicleNumber:
+            paymentMethod === PaymentMethod.FLEET ? fleetVehicle.number : null,
         },
       });
+      if (customer) {
+        const occurredAt = at(daysAgo, 10 + index);
+        const dueDate = new Date(occurredAt);
+        dueDate.setDate(dueDate.getDate() + customer.creditDays);
+        await prisma.customerLedgerEntry.upsert({
+          where: { saleId },
+          update: {
+            customerId: customer.id,
+            amount: quantity * price,
+            dueDate,
+            occurredAt,
+          },
+          create: {
+            id: `demo-ledger-${daysAgo}-${index}`,
+            organizationId: owner.organizationId,
+            stationId: station.id,
+            customerId: customer.id,
+            type: "SALE",
+            amount: quantity * price,
+            saleId,
+            description: `${nozzle.product.name} supplied on account`,
+            dueDate,
+            occurredAt,
+            createdById: attendants[index % attendants.length]!.id,
+          },
+        });
+      }
       const posted = await prisma.journal.findUnique({
         where: {
           sourceType_sourceId: { sourceType: "DEMO_SALE", sourceId: saleId },
@@ -297,7 +404,7 @@ async function main() {
             lines: [
               {
                 account: collectionAccount(
-                  paymentCycle[(index + daysAgo) % paymentCycle.length]!,
+                  paymentMethod,
                 ),
                 debit: revenue,
               },
@@ -309,6 +416,60 @@ async function main() {
           transactionOptions,
         );
       }
+    }
+    const shiftSales = await prisma.sale.groupBy({
+      by: ["paymentMethod"],
+      where: { shiftId },
+      _sum: { totalAmount: true },
+    });
+    const reconciliation = await prisma.shiftReconciliation.upsert({
+      where: { shiftId },
+      update: {
+        reconciledById: owner.id,
+        reconciledAt: at(daysAgo, 22),
+        lockedAt: at(daysAgo, 22),
+        notes: "Demo collections checked and matched.",
+      },
+      create: {
+        id: `demo-reconciliation-${daysAgo}`,
+        shiftId,
+        reconciledById: owner.id,
+        reconciledAt: at(daysAgo, 22),
+        lockedAt: at(daysAgo, 22),
+        notes: "Demo collections checked and matched.",
+      },
+    });
+    const totals = new Map(
+      shiftSales.map((row) => [
+        row.paymentMethod,
+        Number(row._sum.totalAmount ?? 0),
+      ]),
+    );
+    for (const method of Object.values(PaymentMethod)) {
+      const amount = totals.get(method) ?? 0;
+      await prisma.shiftCollectionReconciliation.upsert({
+        where: {
+          reconciliationId_paymentMethod: {
+            reconciliationId: reconciliation.id,
+            paymentMethod: method,
+          },
+        },
+        update: {
+          expectedAmount: amount,
+          actualAmount: amount,
+          adjustmentAmount: 0,
+          adjustmentReason: null,
+          varianceAmount: 0,
+        },
+        create: {
+          reconciliationId: reconciliation.id,
+          paymentMethod: method,
+          expectedAmount: amount,
+          actualAmount: amount,
+          adjustmentAmount: 0,
+          varianceAmount: 0,
+        },
+      });
     }
   }
 
@@ -348,6 +509,221 @@ async function main() {
         },
       },
     });
+
+  const supplier = await prisma.supplier.upsert({
+    where: {
+      organizationId_code: {
+        organizationId: owner.organizationId,
+        code: "DEMO-OIL-CO",
+      },
+    },
+    update: { name: "Indian Oil Corporation Ltd", active: true },
+    create: {
+      id: "demo-supplier-oil-company",
+      organizationId: owner.organizationId,
+      name: "Indian Oil Corporation Ltd",
+      code: "DEMO-OIL-CO",
+      paymentTerms: 3,
+      active: true,
+    },
+  });
+  const purchaseSpecs = [
+    {
+      id: "demo-purchase-hsd-paid",
+      lineId: "demo-purchase-line-hsd-paid",
+      receiptId: "demo-receipt-hsd-paid",
+      receiptLineId: "demo-receipt-line-hsd-paid",
+      paymentId: "demo-payment-hsd-paid",
+      productCode: "HSD",
+      invoiceNumber: "DEMO-HSD-10021",
+      quantity: 10000,
+      daysAgo: 5,
+      paid: true,
+    },
+    {
+      id: "demo-purchase-ms-open",
+      lineId: "demo-purchase-line-ms-open",
+      receiptId: "demo-receipt-ms-open",
+      receiptLineId: "demo-receipt-line-ms-open",
+      paymentId: "demo-payment-ms-open",
+      productCode: "MS",
+      invoiceNumber: "DEMO-MS-10038",
+      quantity: 8000,
+      daysAgo: 1,
+      paid: false,
+    },
+  ];
+  for (const spec of purchaseSpecs) {
+    const tank = configuration.tanks.find(
+      (item) => item.product.code === spec.productCode,
+    );
+    if (!tank) continue;
+    const invoiceDate = at(spec.daysAgo, 8);
+    const dueDate = new Date(invoiceDate);
+    dueDate.setDate(dueDate.getDate() + 3);
+    const unitCost = Number(tank.product.purchasePrice);
+    const total = spec.quantity * unitCost;
+    await prisma.purchaseInvoice.upsert({
+      where: { id: spec.id },
+      update: {
+        invoiceDate,
+        dueDate,
+        subtotal: total,
+        totalAmount: total,
+        status: spec.paid ? "PAID" : "OPEN",
+      },
+      create: {
+        id: spec.id,
+        organizationId: owner.organizationId,
+        stationId: station.id,
+        supplierId: supplier.id,
+        invoiceNumber: spec.invoiceNumber,
+        invoiceDate,
+        dueDate,
+        subtotal: total,
+        taxAmount: 0,
+        totalAmount: total,
+        status: spec.paid ? "PAID" : "OPEN",
+        notes: "Sample fuel delivery for the product tour.",
+        createdById: owner.id,
+      },
+    });
+    await prisma.purchaseInvoiceLine.upsert({
+      where: { id: spec.lineId },
+      update: { quantity: spec.quantity, unitCost, lineTotal: total },
+      create: {
+        id: spec.lineId,
+        invoiceId: spec.id,
+        productId: tank.productId,
+        description: `${tank.product.name} bulk delivery`,
+        quantity: spec.quantity,
+        unitCost,
+        taxRate: 0,
+        lineTotal: total,
+      },
+    });
+    await prisma.purchaseReceipt.upsert({
+      where: { id: spec.receiptId },
+      update: { receivedAt: invoiceDate },
+      create: {
+        id: spec.receiptId,
+        organizationId: owner.organizationId,
+        stationId: station.id,
+        supplierName: supplier.name,
+        referenceNo: spec.invoiceNumber,
+        receivedAt: invoiceDate,
+        notes: "Stock received against the sample invoice.",
+        createdById: owner.id,
+        supplierId: supplier.id,
+        invoiceId: spec.id,
+      },
+    });
+    await prisma.receiptLine.upsert({
+      where: { id: spec.receiptLineId },
+      update: { quantity: spec.quantity, unitCost },
+      create: {
+        id: spec.receiptLineId,
+        receiptId: spec.receiptId,
+        productId: tank.productId,
+        tankId: tank.id,
+        quantity: spec.quantity,
+        unitCost,
+      },
+    });
+    await prisma.inventoryLedger.upsert({
+      where: { id: `demo-purchase-stock-${spec.productCode.toLowerCase()}` },
+      update: { occurredAt: invoiceDate, quantityDelta: spec.quantity, unitCost },
+      create: {
+        id: `demo-purchase-stock-${spec.productCode.toLowerCase()}`,
+        organizationId: owner.organizationId,
+        stationId: station.id,
+        productId: tank.productId,
+        tankId: tank.id,
+        type: "RECEIPT",
+        quantityDelta: spec.quantity,
+        unitCost,
+        receiptLineId: spec.receiptLineId,
+        note: `Stock received against ${spec.invoiceNumber}`,
+        occurredAt: invoiceDate,
+        createdById: owner.id,
+      },
+    });
+    if (spec.paid)
+      await prisma.supplierPayment.upsert({
+        where: { id: spec.paymentId },
+        update: { amount: total, paidAt: invoiceDate },
+        create: {
+          id: spec.paymentId,
+          origin: "RECORDED_PAYMENT",
+          organizationId: owner.organizationId,
+          stationId: station.id,
+          supplierId: supplier.id,
+          invoiceId: spec.id,
+          amount: total,
+          paymentMethod: PaymentMethod.UPI,
+          referenceNo: "DEMO-UTR-4821",
+          paidAt: invoiceDate,
+          createdById: owner.id,
+        },
+      });
+    if (
+      !(await prisma.journal.findUnique({
+        where: {
+          sourceType_sourceId: {
+            sourceType: "PURCHASE_INVOICE",
+            sourceId: spec.id,
+          },
+        },
+      }))
+    )
+      await prisma.$transaction(
+        (transaction) =>
+          postJournal(transaction, {
+            organizationId: owner.organizationId,
+            stationId: station.id,
+            createdById: owner.id,
+            journalDate: invoiceDate,
+            reference: spec.invoiceNumber,
+            description: `${tank.product.name} stock received`,
+            sourceType: "PURCHASE_INVOICE",
+            sourceId: spec.id,
+            lines: [
+              { account: "1200", debit: total },
+              { account: "2000", credit: total },
+            ],
+          }),
+        transactionOptions,
+      );
+    if (
+      spec.paid &&
+      !(await prisma.journal.findUnique({
+        where: {
+          sourceType_sourceId: {
+            sourceType: "SUPPLIER_PAYMENT",
+            sourceId: spec.paymentId,
+          },
+        },
+      }))
+    )
+      await prisma.$transaction(
+        (transaction) =>
+          postJournal(transaction, {
+            organizationId: owner.organizationId,
+            stationId: station.id,
+            createdById: owner.id,
+            journalDate: invoiceDate,
+            reference: "DEMO-UTR-4821",
+            description: `Payment to ${supplier.name}`,
+            sourceType: "SUPPLIER_PAYMENT",
+            sourceId: spec.paymentId,
+            lines: [
+              { account: "2000", debit: total },
+              { account: "1010", credit: total },
+            ],
+          }),
+        transactionOptions,
+      );
+  }
 
   const payroll = [
     {
@@ -421,8 +797,15 @@ async function main() {
         createdById: owner.id,
       },
     });
-    await prisma.tankReading.create({
-      data: {
+    await prisma.tankReading.upsert({
+      where: { id: `demo-tank-reading-${tank.id}` },
+      update: {
+        physicalStock: target - 18 + index * 7,
+        dipReading: target - 18 + index * 7,
+        recordedAt: at(0, 7),
+      },
+      create: {
+        id: `demo-tank-reading-${tank.id}`,
         organizationId: owner.organizationId,
         stationId: station.id,
         tankId: tank.id,
@@ -432,8 +815,14 @@ async function main() {
         recordedById: owner.id,
       },
     });
-    await prisma.tankDensityReading.create({
-      data: {
+    await prisma.tankDensityReading.upsert({
+      where: { id: `demo-density-reading-${tank.id}` },
+      update: {
+        density: tank.product.code === "MS" ? 742.6 : 832.4,
+        recordedAt: at(0, 7),
+      },
+      create: {
+        id: `demo-density-reading-${tank.id}`,
         organizationId: owner.organizationId,
         stationId: station.id,
         tankId: tank.id,

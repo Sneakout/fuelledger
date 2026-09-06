@@ -43,6 +43,7 @@ describe('shift validation', () => {
   const id='ckshift000000000000000001';
   it('accepts a complete opening shift',()=>expect(openShiftSchema.safeParse({stationId:id,managerId:id,userIds:[id],nozzleAssignments:[{nozzleId:id,userId:id}],openingCash:5000,tankReadings:[{id,value:100}],nozzleReadings:[{id,value:1000}]}).success).toBe(true));
   it('accepts a complete closing shift',()=>expect(closeShiftSchema.safeParse({closingCash:6200,tankReadings:[{id,value:90}],nozzleReadings:[{id,value:1120}],nozzleCollections:[{nozzleId:id,amount:6200}]}).success).toBe(true));
+  it('accepts nozzle testing details at closing',()=>expect(closeShiftSchema.safeParse({closingCash:6200,tankReadings:[{id,value:90}],nozzleReadings:[{id,value:1120,testingQuantity:5,testingReturned:false}],nozzleCollections:[{nozzleId:id,amount:6200}]}).success).toBe(true));
   it('rejects negative readings or cash',()=>expect(closeShiftSchema.safeParse({closingCash:-1,tankReadings:[],nozzleReadings:[]}).success).toBe(false));
 });
 

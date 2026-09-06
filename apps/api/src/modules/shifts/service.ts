@@ -380,6 +380,13 @@ export async function closeShift(
         "READING_INVALID",
         "A closing meter reading cannot be below its opening reading.",
       );
+    const meterMovement = reading.value - Number(opening.openingMeter);
+    if (reading.testingQuantity - meterMovement > 0.001)
+      throw new AppError(
+        400,
+        "TESTING_QUANTITY_INVALID",
+        `${opening.nozzle.dispenser.code} / ${opening.nozzle.code} testing quantity cannot exceed its ${meterMovement.toLocaleString()} L meter movement.`,
+      );
   }
   const meteredSales = await tx.sale.groupBy({
     by: ["nozzleId"],
@@ -390,7 +397,8 @@ export async function closeShift(
     const opening = shift.nozzleReadings.find(
       (value) => value.nozzleId === reading.id,
     )!;
-    const meterMovement = reading.value - Number(opening.openingMeter);
+    const meterMovement =
+      reading.value - Number(opening.openingMeter) - reading.testingQuantity;
     const recorded = Number(
       meteredSales.find((sale) => sale.nozzleId === reading.id)?._sum
         .quantity ?? 0,
@@ -414,13 +422,18 @@ export async function closeShift(
       const opening = shift.nozzleReadings.find(
         (value) => value.nozzleId === reading.id,
       )!;
-      const meterMovement = reading.value - Number(opening.openingMeter);
+      const meterMovement =
+        reading.value - Number(opening.openingMeter) - reading.testingQuantity;
       const recorded = Number(
         meteredSales.find((sale) => sale.nozzleId === reading.id)?._sum
           .quantity ?? 0,
       );
       const missingQuantity = meterMovement - recorded;
-      if (missingQuantity <= 0.001) continue;
+      if (
+        missingQuantity <= 0.001 &&
+        (reading.testingQuantity <= 0.001 || reading.testingReturned)
+      )
+        continue;
 
       const assignment = shift.nozzleAssignments.find(
         (row) => row.nozzleId === reading.id,
@@ -479,67 +492,129 @@ export async function closeShift(
         nozzle.product.purchasePriceHistory,
         closedAt,
       );
-      const quantity = new Prisma.Decimal(missingQuantity);
-      const totalAmount = quantity.mul(unitPrice);
-      const meterClosing = new Prisma.Decimal(reading.value);
-      const meterOpening = meterClosing.sub(quantity);
       const tankId = resolvedTanks[0]!.tankId;
-      if (nozzle.product.inventoryTracked) await assertStockAvailable(tx, { organizationId, stationId: shift.stationId, productId: nozzle.productId, tankId }, quantity, closedAt);
-      const sale = await tx.sale.create({
-        data: {
-          organizationId,
-          stationId: shift.stationId,
-          shiftId: shift.id,
-          productId: nozzle.productId,
-          employeeId: assignment.userId,
-          tankId,
-          nozzleId: nozzle.id,
-          kind: "METERED",
-          paymentMethod: "OTHER",
-          quantity,
-          unitPrice,
-          totalAmount,
-          meterOpening,
-          meterClosing,
-          notes: "Automatically calculated from shift closing meter; payment method pending reconciliation.",
-          occurredAt: closedAt,
-        },
-      });
-      if (nozzle.product.inventoryTracked)
-        await tx.inventoryLedger.create({
+      if (missingQuantity > 0.001) {
+        const quantity = new Prisma.Decimal(missingQuantity);
+        const totalAmount = quantity.mul(unitPrice);
+        const meterClosing = new Prisma.Decimal(reading.value).sub(
+          reading.testingQuantity,
+        );
+        const meterOpening = meterClosing.sub(quantity);
+        if (nozzle.product.inventoryTracked)
+          await assertStockAvailable(
+            tx,
+            {
+              organizationId,
+              stationId: shift.stationId,
+              productId: nozzle.productId,
+              tankId,
+            },
+            quantity,
+            closedAt,
+          );
+        const sale = await tx.sale.create({
           data: {
             organizationId,
             stationId: shift.stationId,
+            shiftId: shift.id,
             productId: nozzle.productId,
+            employeeId: assignment.userId,
             tankId,
-            type: "SALE",
-            quantityDelta: quantity.neg(),
-            unitCost: purchasePrice,
-            saleId: sale.id,
+            nozzleId: nozzle.id,
+            kind: "METERED",
+            paymentMethod: "OTHER",
+            quantity,
+            unitPrice,
+            totalAmount,
+            meterOpening,
+            meterClosing,
+            notes:
+              "Automatically calculated from shift closing meter; payment method pending reconciliation.",
             occurredAt: closedAt,
-            createdById: assignment.userId,
           },
         });
-      await postJournal(tx, {
-        organizationId,
-        stationId: shift.stationId,
-        createdById: assignment.userId,
-        journalDate: closedAt,
-        reference: `SALE-${sale.id.slice(-8)}`,
-        description: `${nozzle.product.name} sale · automatically calculated at shift close`,
-        sourceType: "SALE",
-        sourceId: sale.id,
-        lines: [
-          { account: collectionAccount("OTHER"), debit: totalAmount },
-          { account: "4000", credit: totalAmount },
-          ...(nozzle.product.inventoryTracked
-            ? [
-                { account: "5000", debit: quantity.mul(purchasePrice) },
-                { account: "1200", credit: quantity.mul(purchasePrice) },
-              ]
-            : []),
-        ],
-      });
+        if (nozzle.product.inventoryTracked)
+          await tx.inventoryLedger.create({
+            data: {
+              organizationId,
+              stationId: shift.stationId,
+              productId: nozzle.productId,
+              tankId,
+              type: "SALE",
+              quantityDelta: quantity.neg(),
+              unitCost: purchasePrice,
+              saleId: sale.id,
+              occurredAt: closedAt,
+              createdById: assignment.userId,
+            },
+          });
+        await postJournal(tx, {
+          organizationId,
+          stationId: shift.stationId,
+          createdById: assignment.userId,
+          journalDate: closedAt,
+          reference: `SALE-${sale.id.slice(-8)}`,
+          description: `${nozzle.product.name} sale · automatically calculated at shift close`,
+          sourceType: "SALE",
+          sourceId: sale.id,
+          lines: [
+            { account: collectionAccount("OTHER"), debit: totalAmount },
+            { account: "4000", credit: totalAmount },
+            ...(nozzle.product.inventoryTracked
+              ? [
+                  { account: "5000", debit: quantity.mul(purchasePrice) },
+                  { account: "1200", credit: quantity.mul(purchasePrice) },
+                ]
+              : []),
+          ],
+        });
+      }
+
+      if (reading.testingQuantity > 0.001 && !reading.testingReturned) {
+        const testingQuantity = new Prisma.Decimal(reading.testingQuantity);
+        if (nozzle.product.inventoryTracked)
+          await assertStockAvailable(
+            tx,
+            {
+              organizationId,
+              stationId: shift.stationId,
+              productId: nozzle.productId,
+              tankId,
+            },
+            testingQuantity,
+            closedAt,
+          );
+        if (nozzle.product.inventoryTracked)
+          await tx.inventoryLedger.create({
+            data: {
+              organizationId,
+              stationId: shift.stationId,
+              productId: nozzle.productId,
+              tankId,
+              type: "ADJUSTMENT",
+              quantityDelta: testingQuantity.neg(),
+              unitCost: purchasePrice,
+              note: `Nozzle testing not returned · ${opening.nozzle.dispenser.code} / ${opening.nozzle.code} · shift #${shift.shiftNumber}`,
+              occurredAt: closedAt,
+              createdById: assignment.userId,
+            },
+          });
+        if (nozzle.product.inventoryTracked)
+          await postJournal(tx, {
+            organizationId,
+            stationId: shift.stationId,
+            createdById: assignment.userId,
+            journalDate: closedAt,
+            reference: `TEST-${shift.id.slice(-6)}-${nozzle.id.slice(-4)}`,
+            description: `${nozzle.product.name} used for nozzle testing and not returned`,
+            sourceType: "SHIFT_TESTING",
+            sourceId: `${shift.id}:${nozzle.id}`,
+            lines: [
+              { account: "5000", debit: testingQuantity.mul(purchasePrice) },
+              { account: "1200", credit: testingQuantity.mul(purchasePrice) },
+            ],
+          });
+      }
     }
     await Promise.all(
       input.tankReadings.map((reading) =>
@@ -553,7 +628,11 @@ export async function closeShift(
       input.nozzleReadings.map((reading) =>
         tx.shiftNozzleReading.update({
           where: { shiftId_nozzleId: { shiftId: id, nozzleId: reading.id } },
-          data: { closingMeter: new Prisma.Decimal(reading.value) },
+          data: {
+            closingMeter: new Prisma.Decimal(reading.value),
+            testingQuantity: new Prisma.Decimal(reading.testingQuantity),
+            testingReturned: reading.testingReturned,
+          },
         }),
       ),
     );
@@ -587,7 +666,9 @@ function summary(shift: any) {
       sum +
       (reading.closingMeter === null
         ? 0
-        : Number(reading.closingMeter) - Number(reading.openingMeter)),
+        : Number(reading.closingMeter) -
+          Number(reading.openingMeter) -
+          Number(reading.testingQuantity ?? 0)),
     0,
   );
   return {

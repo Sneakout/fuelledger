@@ -590,7 +590,12 @@ export const openShiftSchema = z.object({
 export const closeShiftSchema = z.object({
   closingCash: z.coerce.number().min(0),
   tankReadings: z.array(reading),
-  nozzleReadings: z.array(reading),
+  nozzleReadings: z.array(
+    reading.extend({
+      testingQuantity: z.coerce.number().min(0).default(0),
+      testingReturned: z.boolean().default(true),
+    }),
+  ),
   nozzleCollections: z.array(
     z.object({ nozzleId: z.string().cuid(), amount: z.coerce.number().min(0) }),
   ),

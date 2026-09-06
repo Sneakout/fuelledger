@@ -26,7 +26,7 @@ suite('isolated release workflow', () => {
     const opening = {stationId:station.id,managerId:user.id,userIds:[user.id],nozzleAssignments:[{nozzleId:nozzle.id,userId:user.id}],openingCash:0,tankReadings:[{id:tank.id,value:1000}],nozzleReadings:[{id:nozzle.id,value:0}]};
     const shift = await shifts.openShift(org.id,opening);
     await createSale(org.id,{stationId:station.id,shiftId:shift.id,employeeId:user.id,productId:oil.id,quantity:1,unitPrice:100,paymentMethod:'CREDIT',customerId:customer.id} as any);
-    await shifts.closeShift(org.id,shift.id,{closingCash:10000,tankReadings:[{id:tank.id,value:900}],nozzleReadings:[{id:nozzle.id,value:100}],nozzleCollections:[{nozzleId:nozzle.id,amount:10000}]});
+    await shifts.closeShift(org.id,shift.id,{closingCash:10000,tankReadings:[{id:tank.id,value:900}],nozzleReadings:[{id:nozzle.id,value:100,testingQuantity:0,testingReturned:true}],nozzleCollections:[{nozzleId:nozzle.id,amount:10000}]});
     await reconcile(org.id,user.id,shift.id,{collections:['CASH','UPI','CARD','CREDIT','FLEET','OTHER'].map(paymentMethod=>({paymentMethod,adjustmentAmount:paymentMethod==='CASH'?10000:paymentMethod==='OTHER'?-10000:0,actualAmount:paymentMethod==='CASH'?10000:paymentMethod==='CREDIT'?100:0,adjustmentReason:'Payment split verified'})),creditAllocations:[{paymentMethod:'CREDIT',customerId:customer.id,amount:100}]} as any);
     await receivePayment(org.id,customer.id,user.id,{stationId:station.id,amount:50,paymentMethod:'CASH'} as any);
     const category = await db.expenseCategory.create({data:{organizationId:org.id,name:'Repairs',code:'REPAIR'}});

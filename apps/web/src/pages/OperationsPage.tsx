@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Clock3, Fuel, LockKeyhole, Play } from "lucide-react";
+import { Beaker, CheckCircle2, Clock3, Fuel, LockKeyhole, Play } from "lucide-react";
 import {
   ApiRequestError,
   api,
+  type ClosingNozzleReading,
   type Reading,
   type Shift,
   type ShiftBootstrap,
@@ -94,6 +95,7 @@ export function OperationsPage() {
     [closeCash, setCloseCash] = useState(0),
     [closeTanks, setCloseTanks] = useState<Reading[]>([]),
     [closeNozzles, setCloseNozzles] = useState<Reading[]>([]),
+    [testingReadings, setTestingReadings] = useState<ClosingNozzleReading[]>([]),
     [closeCollections, setCloseCollections] = useState<Reading[]>([]),
     [notes, setNotes] = useState(""),
     [error, setError] = useState(""),
@@ -190,6 +192,14 @@ export function OperationsPage() {
           value: Number(r.openingMeter),
         })),
       );
+      setTestingReadings(
+        active.nozzleReadings.map((r) => ({
+          id: r.nozzleId,
+          value: Number(r.openingMeter),
+          testingQuantity: Number(r.testingQuantity ?? 0),
+          testingReturned: r.testingReturned ?? true,
+        })),
+      );
       setCloseCollections(
         active.nozzleAssignments.map((assignment) => ({
           id: assignment.nozzleId,
@@ -262,7 +272,14 @@ export function OperationsPage() {
       await api.closeShift(active.id, {
         closingCash: closeCash,
         tankReadings: closeTanks,
-        nozzleReadings: closeNozzles,
+        nozzleReadings: closeNozzles.map((reading) => {
+          const testing = testingReadings.find((item) => item.id === reading.id);
+          return {
+            ...reading,
+            testingQuantity: testing?.testingQuantity ?? 0,
+            testingReturned: testing?.testingReturned ?? true,
+          };
+        }),
         nozzleCollections: closeCollections.map((item) => ({
           nozzleId: item.id,
           amount: item.value,
@@ -408,6 +425,65 @@ export function OperationsPage() {
                           }
                         />
                       </label>
+                      <details className="testing-entry">
+                        <summary>
+                          <span><Beaker size={14} /> Testing / calibration</span>
+                          <small>
+                            {(testingReadings.find((item) => item.id === reading.nozzleId)?.testingQuantity ?? 0) > 0
+                              ? `${testingReadings.find((item) => item.id === reading.nozzleId)?.testingQuantity.toLocaleString("en-IN")} L recorded`
+                              : "No testing"}
+                          </small>
+                        </summary>
+                        <div className="testing-entry-fields">
+                          <label>
+                            <span>Testing quantity (L)</span>
+                            <input
+                              aria-label={`Testing quantity in litres for ${reading.nozzle.code}`}
+                              type="number"
+                              min="0"
+                              max={Math.max(0, (closeNozzles.find((item) => item.id === reading.nozzleId)?.value ?? Number(reading.openingMeter)) - Number(reading.openingMeter))}
+                              step="0.001"
+                              value={testingReadings.find((item) => item.id === reading.nozzleId)?.testingQuantity || ""}
+                              placeholder="0"
+                              onChange={(event) =>
+                                setTestingReadings((current) =>
+                                  current.map((item) => item.id === reading.nozzleId
+                                    ? { ...item, testingQuantity: event.target.value === "" ? 0 : Number(event.target.value) }
+                                    : item),
+                                )
+                              }
+                            />
+                          </label>
+                          <fieldset>
+                            <legend>Where did the tested fuel go?</legend>
+                            <label>
+                              <input
+                                type="radio"
+                                name={`testing-return-${reading.nozzleId}`}
+                                checked={testingReadings.find((item) => item.id === reading.nozzleId)?.testingReturned ?? true}
+                                onChange={() => setTestingReadings((current) => current.map((item) => item.id === reading.nozzleId ? { ...item, testingReturned: true } : item))}
+                              />
+                              Returned to tank
+                            </label>
+                            <label>
+                              <input
+                                type="radio"
+                                name={`testing-return-${reading.nozzleId}`}
+                                checked={!(testingReadings.find((item) => item.id === reading.nozzleId)?.testingReturned ?? true)}
+                                onChange={() => setTestingReadings((current) => current.map((item) => item.id === reading.nozzleId ? { ...item, testingReturned: false } : item))}
+                              />
+                              Not returned
+                            </label>
+                          </fieldset>
+                          <p>
+                            Sale volume: <strong>{Math.max(0,
+                              (closeNozzles.find((item) => item.id === reading.nozzleId)?.value ?? Number(reading.openingMeter)) -
+                              Number(reading.openingMeter) -
+                              (testingReadings.find((item) => item.id === reading.nozzleId)?.testingQuantity ?? 0),
+                            ).toLocaleString("en-IN")} L</strong>
+                          </p>
+                        </div>
+                      </details>
                     </div>
                   );
                 })}

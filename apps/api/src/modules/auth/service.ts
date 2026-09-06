@@ -153,6 +153,7 @@ export async function startDemo(input: DemoAccessInput) {
       "DEMO_UNAVAILABLE",
       "The product demo is temporarily unavailable.",
     );
+  await refreshDemoShowcaseDates();
   const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
   const contact = input.contact.includes("@")
     ? input.contact.toLowerCase()
@@ -175,6 +176,85 @@ export async function startDemo(input: DemoAccessInput) {
     { expiresIn: "48h" },
   );
   return { token, user: present(owner, expiresAt) };
+}
+
+const demoDate = (daysAgo: number, hour: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  date.setHours(hour, 0, 0, 0);
+  return date;
+};
+
+/** Keeps the shared, read-only product tour current without touching customer data. */
+async function refreshDemoShowcaseDates() {
+  await prisma.$transaction(async (tx) => {
+    for (let daysAgo = 6; daysAgo >= 0; daysAgo--) {
+      const shiftId = `demo-real-shift-${daysAgo}`;
+      const openedAt = demoDate(daysAgo, 6);
+      const closedAt = demoDate(daysAgo, 22);
+      await tx.shift.updateMany({
+        where: { id: shiftId },
+        data: { openedAt, closedAt },
+      });
+      const sales = await tx.sale.findMany({
+        where: { id: { startsWith: `demo-real-sale-${daysAgo}-` } },
+        select: { id: true, customerId: true },
+        orderBy: { id: "asc" },
+      });
+      for (const [index, sale] of sales.entries()) {
+        const occurredAt = demoDate(daysAgo, 10 + index);
+        await tx.sale.update({ where: { id: sale.id }, data: { occurredAt } });
+        await tx.journal.updateMany({
+          where: { sourceType: "DEMO_SALE", sourceId: sale.id },
+          data: { journalDate: occurredAt },
+        });
+        if (sale.customerId) {
+          const customer = await tx.customer.findUnique({
+            where: { id: sale.customerId },
+            select: { creditDays: true },
+          });
+          const dueDate = new Date(occurredAt);
+          dueDate.setDate(dueDate.getDate() + (customer?.creditDays ?? 0));
+          await tx.customerLedgerEntry.updateMany({
+            where: { saleId: sale.id },
+            data: { occurredAt, dueDate },
+          });
+        }
+      }
+      await tx.shiftReconciliation.updateMany({
+        where: { shiftId },
+        data: { reconciledAt: closedAt, lockedAt: closedAt },
+      });
+    }
+    await tx.shift.updateMany({
+      where: { id: "demo-real-open-shift" },
+      data: { openedAt: demoDate(0, 6) },
+    });
+    for (const purchase of [
+      { id: "demo-purchase-hsd-paid", daysAgo: 5 },
+      { id: "demo-purchase-ms-open", daysAgo: 1 },
+    ]) {
+      const invoiceDate = demoDate(purchase.daysAgo, 8);
+      const dueDate = new Date(invoiceDate);
+      dueDate.setDate(dueDate.getDate() + 3);
+      await tx.purchaseInvoice.updateMany({
+        where: { id: purchase.id },
+        data: { invoiceDate, dueDate },
+      });
+      await tx.purchaseReceipt.updateMany({
+        where: { invoiceId: purchase.id },
+        data: { receivedAt: invoiceDate },
+      });
+      await tx.supplierPayment.updateMany({
+        where: { invoiceId: purchase.id },
+        data: { paidAt: invoiceDate },
+      });
+      await tx.journal.updateMany({
+        where: { sourceType: "PURCHASE_INVOICE", sourceId: purchase.id },
+        data: { journalDate: invoiceDate },
+      });
+    }
+  }, { maxWait: 10_000, timeout: 30_000 });
 }
 
 export async function currentUser(token: string): Promise<User> {

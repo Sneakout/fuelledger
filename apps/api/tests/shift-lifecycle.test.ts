@@ -35,11 +35,15 @@ describe('closing shift', () => {
       shiftTankReading:{update:vi.fn()},shiftNozzleReading:{update:vi.fn()},shiftNozzleAssignment:{update:vi.fn()},
     };
     db.$transaction.mockImplementation(async fn => fn(tx));
-    const input = { closingCash: 8000, tankReadings:[{id:'t',value:900}], nozzleReadings:[{id:'n',value:1100}], nozzleCollections:[{nozzleId:'n',amount:8000}] };
+    const input = { closingCash: 7500, tankReadings:[{id:'t',value:895}], nozzleReadings:[{id:'n',value:1100,testingQuantity:5,testingReturned:false}], nozzleCollections:[{nozzleId:'n',amount:7500}] };
     await closeShift('org','s',input);
     expect(tx.sale.create).toHaveBeenCalledTimes(1);
-    expect(tx.sale.create.mock.calls[0][0].data.quantity.toNumber()).toBe(80);
-    expect(tx.sale.create.mock.calls[0][0].data.totalAmount.toNumber()).toBe(8000);
+    expect(tx.sale.create.mock.calls[0][0].data.quantity.toNumber()).toBe(75);
+    expect(tx.sale.create.mock.calls[0][0].data.totalAmount.toNumber()).toBe(7500);
+    expect(tx.inventoryLedger.create).toHaveBeenCalledTimes(2);
+    expect(tx.inventoryLedger.create.mock.calls[1][0].data).toMatchObject({type:'ADJUSTMENT'});
+    expect(tx.inventoryLedger.create.mock.calls[1][0].data.quantityDelta.toNumber()).toBe(-5);
+    expect(tx.shiftNozzleReading.update.mock.calls[0][0].data).toMatchObject({testingReturned:false});
     await expect(closeShift('org','s',input)).rejects.toMatchObject({code:'SHIFT_NOT_OPEN'});
     expect(tx.sale.create).toHaveBeenCalledTimes(1);
     expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function),{isolationLevel:'Serializable'});

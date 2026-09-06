@@ -457,6 +457,8 @@ model ShiftNozzleReading {
   nozzleId      String  @map("nozzle_id")
   openingMeter  Decimal @db.Decimal(14, 3) @map("opening_meter")
   closingMeter  Decimal? @db.Decimal(14, 3) @map("closing_meter")
+  testingQuantity Decimal @default(0) @db.Decimal(12, 3) @map("testing_quantity")
+  testingReturned Boolean @default(true) @map("testing_returned")
   shift         Shift   @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   nozzle        Nozzle  @relation(fields: [nozzleId], references: [id], onDelete: Restrict)
 

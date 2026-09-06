@@ -421,6 +421,10 @@ export type SubscriptionStatus = {
   subscriptionUpdatedAt: string | null;
 };
 export type Reading = { id: string; value: number };
+export type ClosingNozzleReading = Reading & {
+  testingQuantity: number;
+  testingReturned: boolean;
+};
 export type ShiftOpenForm = {
   stationId: string;
   managerId: string;
@@ -434,7 +438,7 @@ export type ShiftOpenForm = {
 export type ShiftCloseForm = {
   closingCash: number;
   tankReadings: Reading[];
-  nozzleReadings: Reading[];
+  nozzleReadings: ClosingNozzleReading[];
   nozzleCollections: Array<{ nozzleId: string; amount: number }>;
   notes?: string;
 };
@@ -506,6 +510,8 @@ export type Shift = {
     nozzleId: string;
     openingMeter: string;
     closingMeter: string | null;
+    testingQuantity: string;
+    testingReturned: boolean;
     nozzle: {
       code: string;
       product: { name: string; code: string };
