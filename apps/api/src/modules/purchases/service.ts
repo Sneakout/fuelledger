@@ -5,7 +5,8 @@ import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { defaultExpenseCategories } from '../../lib/default-expense-categories.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
-import { assertStockAvailable } from '../../lib/stock.js';
+import { assertStockAvailable, bookStockAt } from '../../lib/stock.js';
+import { affectsClosedShift, shiftAtInstant } from '../../lib/shift-interval.js';
 import { collectionAccount, postJournal } from '../accounting/service.js';
 
 const invoiceInclude = {
@@ -34,7 +35,7 @@ const invoiceInclude = {
     },
   },
   payments: { orderBy: { paidAt: 'desc' as const } },
-  receipt: { select: { id: true, receivedAt: true } },
+  receipt: { select: { id: true, receivedAt: true, receivedAtReason: true, createdAt: true, createdBy: { select: { name: true } } } },
   attachments: {
     select: { id: true, fileName: true, mimeType: true, size: true },
   },
@@ -67,6 +68,73 @@ const calculatedDueDate = (invoiceDate: string | Date, paymentTerms: number) => 
   dueDate.setUTCDate(dueDate.getUTCDate() + Math.max(0, Math.trunc(paymentTerms)));
   return dueDate;
 };
+const receiptTimeToleranceMs = 60 * 1000;
+const legacyAuditLagMs = 5 * 60 * 1000;
+export function resolveReceiptTiming(requestedAt?: string, reason?: string, now = new Date()) {
+  if (!requestedAt) return { receivedAt: now, receivedAtReason: null };
+  const receivedAt = new Date(requestedAt);
+  if (receivedAt.getTime() > now.getTime() + receiptTimeToleranceMs)
+    throw new AppError(400, 'RECEIPT_TIME_FUTURE', 'Stock cannot be received in the future. Check the receipt date and time.');
+  const isPast = receivedAt.getTime() < now.getTime() - receiptTimeToleranceMs;
+  const receivedAtReason = reason?.trim() || null;
+  if (isPast && (!receivedAtReason || receivedAtReason.length < 5))
+    throw new AppError(400, 'RECEIPT_TIME_REASON_REQUIRED', 'Explain why an earlier stock receipt time is being entered.');
+  return { receivedAt, receivedAtReason };
+}
+
+export async function receiptTimingAudit(organizationId: string, stationIds?: string[]) {
+  const receipts = await prisma.purchaseReceipt.findMany({
+    where: { organizationId, invoiceId: { not: null }, ...(stationIds ? { stationId: { in: stationIds } } : {}) },
+    select: {
+      id: true, referenceNo: true, receivedAt: true, receivedAtReason: true, createdAt: true,
+      supplierName: true, station: { select: { id: true, name: true, code: true } },
+      createdBy: { select: { name: true } }, invoice: { select: { invoiceNumber: true, invoiceDate: true } },
+    },
+    orderBy: { receivedAt: 'desc' },
+  });
+  const candidates = await Promise.all(receipts.filter(receipt =>
+    receipt.invoice && !receipt.receivedAtReason &&
+    Math.abs(receipt.receivedAt.getTime() - receipt.invoice.invoiceDate.getTime()) < 1_000 &&
+    receipt.createdAt.getTime() - receipt.receivedAt.getTime() > legacyAuditLagMs,
+  ).map(async receipt => {
+    const suspectedShift = await shiftAtInstant(prisma, organizationId, receipt.station.id, receipt.receivedAt);
+    const lines = await prisma.receiptLine.findMany({ where: { receiptId: receipt.id }, select: { tankId: true, productId: true } });
+    const affectedTanks = await Promise.all(lines.filter(line => line.tankId).map(async line => ({ tankId: line.tankId!, bookStockAtReceipt: Number(await bookStockAt(prisma, { organizationId, stationId: receipt.station.id, productId: line.productId, tankId: line.tankId! }, receipt.receivedAt)) })));
+    return {
+    id: receipt.id,
+    invoiceNumber: receipt.invoice!.invoiceNumber,
+    supplierName: receipt.supplierName,
+    station: receipt.station,
+    invoiceDate: receipt.invoice!.invoiceDate,
+    receivedAt: receipt.receivedAt,
+    enteredAt: receipt.createdAt,
+    enteredBy: receipt.createdBy.name,
+    reason: 'Receipt time matches the invoice date but the receipt was entered later.',
+    suspectedShift: suspectedShift ? { id: suspectedShift.id, shiftNumber: suspectedShift.shiftNumber, status: suspectedShift.status } : null,
+    affectedTanks,
+  };
+  }));
+  return { generatedAt: new Date(), recordsChanged: false, candidates };
+}
+
+export async function receiptTimingRepairPreview(organizationId: string, receiptId: string, receivedAtValue: string, stationIds?: string[]) {
+  const receivedAt = new Date(receivedAtValue);
+  if (Number.isNaN(receivedAt.getTime())) throw new AppError(400, 'RECEIPT_TIME_INVALID', 'Choose a valid stock receipt time.');
+  const receipt = await prisma.purchaseReceipt.findFirst({ where: { id: receiptId, organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}) }, include: { lines: { select: { id: true, tankId: true, productId: true, quantity: true } }, invoice: { select: { invoiceNumber: true, invoiceDate: true } } } });
+  if (!receipt) throw new AppError(404, 'RECEIPT_NOT_FOUND', 'This receipt was not found.');
+  const [oldShift, newShift, ledgerCount, journal] = await Promise.all([shiftAtInstant(prisma, organizationId, receipt.stationId, receipt.receivedAt), shiftAtInstant(prisma, organizationId, receipt.stationId, receivedAt), prisma.inventoryLedger.count({ where: { receiptLine: { receiptId } } }), prisma.journal.findFirst({ where: { sourceType: 'PURCHASE_INVOICE', sourceId: receipt.invoiceId ?? '' }, select: { id: true, journalDate: true, reference: true } })]);
+  return { recordsChanged: false, receipt: { id: receipt.id, invoiceNumber: receipt.invoice?.invoiceNumber ?? receipt.referenceNo, previousReceivedAt: receipt.receivedAt, proposedReceivedAt: receivedAt, quantities: receipt.lines }, oldShift, newShift, affectsClosedShift: affectsClosedShift(oldShift) || affectsClosedShift(newShift), inventoryLedgerEntries: ledgerCount, journal: journal ? { id: journal.id, journalDate: journal.journalDate, reference: journal.reference, willChange: false } : null, warning: 'Only receipt timing and linked inventory movement timestamps change. Quantities, payments, invoice totals and journals remain unchanged.' };
+}
+
+export async function receiptShiftImpact(organizationId: string, stationId: string, receivedAtValue: string, stationIds?: string[]) {
+  if (stationIds && !stationIds.includes(stationId)) throw new AppError(403, 'STATION_ACCESS_DENIED', 'You do not have access to this fuel station.');
+  const receivedAt = new Date(receivedAtValue);
+  if (Number.isNaN(receivedAt.getTime())) throw new AppError(400, 'RECEIPT_TIME_INVALID', 'Choose a valid stock received date and time.');
+  const station = await prisma.station.findFirst({ where: { id: stationId, organizationId }, select: { id: true } });
+  if (!station) throw new AppError(404, 'STATION_NOT_FOUND', 'Choose an active fuel station.');
+  const shift = await shiftAtInstant(prisma, organizationId, stationId, receivedAt);
+  return { receivedAt: receivedAt.toISOString(), interval: shift ? 'DURING_SHIFT' as const : 'BETWEEN_SHIFTS' as const, affectsClosedShift: affectsClosedShift(shift), shift: shift ? { id: shift.id, shiftNumber: shift.shiftNumber, status: shift.status, openedAt: shift.openedAt, closedAt: shift.closedAt } : null };
+}
 export async function bootstrap(organizationId: string, stationIds?: string[]) {
   await prisma.expenseCategory.createMany({ data: defaultExpenseCategories.map(category => ({ organizationId, ...category })), skipDuplicates: true });
   const startOfToday = new Date();
@@ -189,6 +257,27 @@ export async function createSupplier(organizationId: string, input: SupplierInpu
     throw error;
   }
 }
+export async function updateSupplier(organizationId: string, id: string, input: SupplierInput) {
+  const existing = await prisma.supplier.findFirst({ where: { id, organizationId } });
+  if (!existing) throw new AppError(404, 'SUPPLIER_NOT_FOUND', 'Supplier not found.');
+  try {
+    return await prisma.supplier.update({
+      where: { id },
+      data: {
+        name: input.name,
+        phone: input.phone || null,
+        email: input.email || null,
+        taxId: input.taxId || null,
+        address: input.address || null,
+        paymentTerms: input.paymentTerms,
+        active: input.active,
+      },
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AppError(409, 'SUPPLIER_CODE_EXISTS', 'That supplier code is already in use.');
+    throw error;
+  }
+}
 export async function createCategory(organizationId: string, input: ExpenseCategoryInput) {
   try {
     return await prisma.expenseCategory.create({
@@ -200,6 +289,7 @@ export async function createCategory(organizationId: string, input: ExpenseCateg
   }
 }
 export async function createInvoice(organizationId: string, userId: string, input: PurchaseInvoiceInput) {
+  const receiptTiming = input.receiveNow ? resolveReceiptTiming(input.receivedAt, input.receiptTimingReason) : null;
   const [station, supplier, products] = await Promise.all([
     prisma.station.findFirst({
       where: { id: input.stationId, organizationId, active: true },
@@ -272,11 +362,28 @@ export async function createInvoice(organizationId: string, userId: string, inpu
             invoiceId: invoice.id,
             supplierName: supplier.name,
             referenceNo: invoice.invoiceNumber,
-            receivedAt: invoice.invoiceDate,
+            receivedAt: receiptTiming!.receivedAt,
+            receivedAtReason: receiptTiming!.receivedAtReason,
             notes: 'Received with purchase invoice',
             createdById: userId,
           },
         });
+        const affectedShift = await shiftAtInstant(tx, organizationId, station.id, receipt.receivedAt);
+        if (receiptTiming!.receivedAtReason)
+          await tx.receiptTimingAuditEvent.create({
+            data: {
+              organizationId,
+              stationId: station.id,
+              receiptId: receipt.id,
+              previousReceivedAt: null,
+              receivedAt: receipt.receivedAt,
+              reason: receiptTiming!.receivedAtReason,
+              affectedShiftId: affectedShift?.id ?? null,
+              affectedShiftStatus: affectedShift?.status ?? null,
+              affectsClosedShift: affectsClosedShift(affectedShift),
+              changedById: userId,
+            },
+          });
         for (const line of input.lines) {
           const product = products.find((x) => x.id === line.productId)!;
           const tank = line.tankId
@@ -310,7 +417,7 @@ export async function createInvoice(organizationId: string, userId: string, inpu
               quantityDelta: line.quantity,
               unitCost: line.unitCost,
               receiptLineId: receiptLine.id,
-              occurredAt: invoice.invoiceDate,
+              occurredAt: receiptTiming!.receivedAt,
               createdById: userId,
             },
           });
@@ -439,6 +546,7 @@ export async function invoicePricePreview(organizationId: string, id: string, st
   return priceShape(invoice, invoiceDate);
 }
 export async function updateInvoice(organizationId: string, userId: string, id: string, input: PurchaseInvoiceUpdateInput, stationIds?: string[]) {
+  const correctedReceiptTiming = input.receivedAt ? resolveReceiptTiming(input.receivedAt, input.correctionReason) : null;
   const invoice = await prisma.purchaseInvoice.findFirst({
     where: {
       id,
@@ -531,7 +639,7 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
         invoiceId: id, reason: input.correctionReason, correctedById: userId,
         previousTotal: invoice.totalAmount, correctedTotal: new Prisma.Decimal(pricing.totalAmount),
         beforeLines: { invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate.toISOString(), receivedAt: invoice.receipt?.receivedAt.toISOString() ?? null, notes: invoice.notes, lines: invoice.lines.map(line => ({id:line.id, quantity:Number(line.quantity), unitCost:Number(line.unitCost)})), payments: invoice.payments.map(p => ({id:p.id, amount:Number(p.amount), origin:p.origin})) },
-        afterLines: { invoiceNumber: input.invoiceNumber, invoiceDate: input.invoiceDate, receivedAt: input.receivedAt ?? invoice.receipt?.receivedAt.toISOString() ?? null, notes: input.notes ?? null, lines: pricing.lines.map(line => ({id:line.id, quantity:line.quantity, unitCost:line.unitCost})) }
+        afterLines: { invoiceNumber: input.invoiceNumber, invoiceDate: input.invoiceDate, receivedAt: input.receivedAt ?? invoice.receipt?.receivedAt.toISOString() ?? null, receivedAtReason: correctedReceiptTiming?.receivedAtReason ?? null, notes: input.notes ?? null, lines: pricing.lines.map(line => ({id:line.id, quantity:line.quantity, unitCost:line.unitCost})) }
       } });
       let status: 'PAID' | 'PART_PAID' | 'OPEN' = pricing.totalAmount - effectivePaid < 0.01 ? 'PAID' : effectivePaid > 0 ? 'PART_PAID' : 'OPEN';
       await tx.purchaseInvoice.update({
@@ -626,13 +734,30 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
           where: { id: invoice.receipt.id },
           data: {
             referenceNo: input.invoiceNumber,
-            ...(input.receivedAt ? { receivedAt: new Date(input.receivedAt) } : {}),
+            ...(correctedReceiptTiming ? { receivedAt: correctedReceiptTiming.receivedAt, receivedAtReason: correctedReceiptTiming.receivedAtReason } : {}),
           },
         });
-        if (input.receivedAt) await tx.inventoryLedger.updateMany({
+        if (correctedReceiptTiming) await tx.inventoryLedger.updateMany({
           where: { receiptLine: { receiptId: invoice.receipt.id } },
-          data: { occurredAt: new Date(input.receivedAt!) },
+          data: { occurredAt: correctedReceiptTiming.receivedAt },
         });
+        if (correctedReceiptTiming) {
+          const affectedShift = await shiftAtInstant(tx, organizationId, invoice.stationId, correctedReceiptTiming.receivedAt);
+          await tx.receiptTimingAuditEvent.create({
+            data: {
+              organizationId,
+              stationId: invoice.stationId,
+              receiptId: invoice.receipt.id,
+              previousReceivedAt: invoice.receipt.receivedAt,
+              receivedAt: correctedReceiptTiming.receivedAt,
+              reason: input.correctionReason,
+              affectedShiftId: affectedShift?.id ?? null,
+              affectedShiftStatus: affectedShift?.status ?? null,
+              affectsClosedShift: affectsClosedShift(affectedShift),
+              changedById: userId,
+            },
+          });
+        }
       }
       const remaining = pricing.totalAmount - effectivePaid;
       if (input.markPaid && remaining > 0.01) {

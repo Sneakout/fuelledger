@@ -27,6 +27,26 @@ const meterLabel = (
   `${dispenser.code} / ${nozzle.code} · ${nozzle.product.code}${
     dispenser.location ? ` · ${dispenser.location}` : ""
   }`;
+const litres = (value: number) => `${value.toLocaleString("en-IN", { maximumFractionDigits: 3 })} L`;
+function bridgeValues(shift: Shift, tankId: string, actual: number, closingMeters: Reading[], testing: ClosingNozzleReading[]) {
+  const tank = shift.tankReadings.find((reading) => reading.tankId === tankId)!;
+  const nozzleIds = new Set(tank.stockBridge.nozzles.map((nozzle) => nozzle.id));
+  const contributions = shift.nozzleReadings.filter((reading) => nozzleIds.has(reading.nozzleId)).map((reading) => {
+    const test = testing.find((item) => item.id === reading.nozzleId);
+    const quantity = test?.testingQuantity ?? 0;
+    const closing = closingMeters.find((item) => item.id === reading.nozzleId)?.value ?? Number(reading.openingMeter);
+    return {
+      id: reading.nozzleId,
+      code: tank.stockBridge.nozzles.find((nozzle) => nozzle.id === reading.nozzleId)?.code ?? reading.nozzle.code,
+      sales: Math.max(0, closing - Number(reading.openingMeter) - quantity),
+      testingLoss: test?.testingReturned === false ? quantity : 0,
+    };
+  });
+  const sales = contributions.reduce((sum, item) => sum + item.sales, 0);
+  const testingLoss = contributions.reduce((sum, item) => sum + item.testingLoss, 0);
+  const expected = Number(tank.openingDip) + Number(tank.stockBridge.received) + Number(tank.stockBridge.adjustments) - sales - testingLoss;
+  return { tank, contributions, sales, testingLoss, expected, difference: actual - expected };
+}
 function Field({
   label,
   value,
@@ -266,6 +286,14 @@ export function OperationsPage() {
   }
   async function close() {
     if (!active) return;
+    const needsStockNote = active.tankReadings.some((reading) => {
+      const actual = closeTanks.find((item) => item.id === reading.tankId)?.value ?? Number(reading.openingDip);
+      return Math.abs(bridgeValues(active, reading.tankId, actual, closeNozzles, testingReadings).difference) > (data?.stockVarianceTolerance ?? 50) + 0.001;
+    });
+    if (needsStockNote && !notes.trim()) {
+      setError("Add a closing note explaining the highlighted tank difference.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -345,17 +373,13 @@ export function OperationsPage() {
               value={closeCash}
               onChange={setCloseCash}
             />
-            <Readings
-              title="Closing tank readings"
-              items={active.tankReadings.map((r) => ({
-                id: r.tankId,
-                label: `${r.tank.code} · ${r.tank.product.code}`,
-                opening: Number(r.openingDip),
-              }))}
-              values={closeTanks}
-              onChange={(v) =>
-                replace(closeTanks, v.id, v.value, setCloseTanks)
-              }
+            <ClosingStockBridge
+              shift={active}
+              actuals={closeTanks}
+              closingMeters={closeNozzles}
+              testing={testingReadings}
+              tolerance={data.stockVarianceTolerance}
+              onChange={(v) => replace(closeTanks, v.id, v.value, setCloseTanks)}
             />
             <div className="nozzle-closing">
               <div className="nozzle-closing-heading">
@@ -490,7 +514,10 @@ export function OperationsPage() {
               </div>
             </div>
             <label className="field">
-              <span>Close note (optional)</span>
+              <span>Closing note {active.tankReadings.some((reading) => {
+                const actual = closeTanks.find((item) => item.id === reading.tankId)?.value ?? Number(reading.openingDip);
+                return Math.abs(bridgeValues(active, reading.tankId, actual, closeNozzles, testingReadings).difference) > data.stockVarianceTolerance + 0.001;
+              }) ? "(required for stock difference)" : "(optional)"}</span>
               <input value={notes} onChange={(e) => setNotes(e.target.value)} />
             </label>
             <button
@@ -580,11 +607,14 @@ export function OperationsPage() {
                 id: t.id,
                 label: `${t.code} · ${t.product.code}`,
                 opening: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.value??selected?.availableTankStock.find(reading=>reading.id===t.id)?.value??t.openingStock),
+                lastActual: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.lastActual ?? 0),
+                receivedBetween: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.receivedBetween ?? 0),
+                adjustmentsBetween: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.adjustmentsBetween ?? 0),
+                expectedOpening: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.expectedOpening ?? 0),
               })) ?? []
             }
             values={openTanks}
             onChange={(v) => replace(openTanks, v.id, v.value, setOpenTanks)}
-            locked
           />
           <section className="opening-nozzle-table">
             <h3>Opening meter readings & attendants</h3>
@@ -685,6 +715,51 @@ export function OperationsPage() {
     </main>
   );
 }
+function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance, onChange }: {
+  shift: Shift;
+  actuals: Reading[];
+  closingMeters: Reading[];
+  testing: ClosingNozzleReading[];
+  tolerance: number;
+  onChange(value: Reading): void;
+}) {
+  return <section className="closing-stock-bridge">
+    <div className="closing-stock-heading">
+      <div><h3>Closing stock bridge</h3><p>Enter only the actual dip. The rest is calculated from this shift.</p></div>
+      <small>Allowed difference: {litres(tolerance)}</small>
+    </div>
+    <div className="stock-bridge-table">
+      <div className="stock-bridge-head" aria-hidden="true">
+        <span>Tank</span><span>Opening</span><span>Received</span><span>Sales</span><span>Testing / loss</span><span>Expected</span><span>Actual dip</span><span>Difference</span>
+      </div>
+      {shift.tankReadings.map((reading) => {
+        const actual = actuals.find((item) => item.id === reading.tankId)?.value ?? Number(reading.openingDip);
+        const bridge = bridgeValues(shift, reading.tankId, actual, closingMeters, testing);
+        const outside = Math.abs(bridge.difference) > tolerance + 0.001;
+        return <div className={`stock-bridge-row ${outside ? "has-variance" : ""}`} key={reading.tankId}>
+          <span className="stock-bridge-tank" data-label="Tank"><b>{reading.tank.code}</b><small>{reading.tank.product.code}</small></span>
+          <span data-label="Opening">{litres(Number(reading.openingDip))}</span>
+          <span data-label="Received">
+            <b>{litres(Number(reading.stockBridge.received))}</b>
+            {reading.stockBridge.deliveries.length > 0 && <details><summary>View {reading.stockBridge.deliveries.length} {reading.stockBridge.deliveries.length === 1 ? "delivery" : "deliveries"}</summary>{reading.stockBridge.deliveries.map((delivery) => <small key={delivery.id}>{delivery.reference} · {delivery.supplier} · {litres(Number(delivery.quantity))}</small>)}</details>}
+          </span>
+          <span data-label="Sales">
+            <b>{litres(bridge.sales)}</b>
+            {bridge.contributions.length > 0 && <details><summary>View nozzles</summary>{bridge.contributions.map((item) => <small key={item.id}>{item.code} · {litres(item.sales)}</small>)}</details>}
+          </span>
+          <span data-label="Testing / loss">
+            <b>{litres(bridge.testingLoss)}</b>
+            <small>{bridge.testingLoss > 0 ? "Not returned" : "No stock consumed"}</small>
+          </span>
+          <span data-label="Expected"><b>{litres(bridge.expected)}</b>{Math.abs(Number(reading.stockBridge.adjustments)) > 0.001 && <small>Includes {Number(reading.stockBridge.adjustments) > 0 ? "+" : ""}{litres(Number(reading.stockBridge.adjustments))} approved adjustments</small>}</span>
+          <label data-label="Actual dip"><input aria-label={`Actual closing dip in litres for ${reading.tank.code}`} type="number" min="0" step="0.001" value={actual} onChange={(event) => onChange({ id: reading.tankId, value: Number(event.target.value) })}/></label>
+          <span className={outside ? "stock-difference variance" : "stock-difference"} data-label="Difference"><b>{bridge.difference > 0 ? "+" : ""}{litres(bridge.difference)}</b><small>{outside ? "Explain in closing note" : "Within tolerance"}</small></span>
+        </div>;
+      })}
+    </div>
+    <p className="stock-bridge-help">A difference is highlighted for investigation only. Closing the shift does not create a stock adjustment.</p>
+  </section>;
+}
 function Readings({
   title,
   items,
@@ -693,7 +768,7 @@ function Readings({
   locked = false,
 }: {
   title: string;
-  items: Array<{ id: string; label: string; opening: number }>;
+  items: Array<{ id: string; label: string; opening: number; received?: number; lastActual?: number; receivedBetween?: number; adjustmentsBetween?: number; expectedOpening?: number }>;
   values: Reading[];
   onChange(value: Reading): void;
   locked?: boolean;
@@ -712,6 +787,8 @@ function Readings({
                   ? "Automatically from previous shift closing"
                   : `Opening: ${item.opening.toLocaleString()}`}
               </small>
+              {!locked && (item.received ?? 0) > 0 && <small>Received during shift: {item.received!.toLocaleString("en-IN")} L</small>}
+              {!locked && item.lastActual !== undefined && item.lastActual > 0 && <small>Last actual: {item.lastActual.toLocaleString("en-IN")} L · Between shifts: +{(item.receivedBetween ?? 0).toLocaleString("en-IN")} L receipts · {(item.adjustmentsBetween ?? 0).toLocaleString("en-IN")} L adjustments · Expected: {(item.expectedOpening ?? 0).toLocaleString("en-IN")} L</small>}
             </span>
             {locked ? (
               <output>{value.toLocaleString("en-IN")} L</output>

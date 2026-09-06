@@ -63,3 +63,11 @@ The default dashboard is not a smaller copy of every report. It leads with today
 ## ADR-016: Station access is an allow-list enforced by the API
 
 Owner and accountant roles are organization-wide because their work inherently spans outlets. Manager and staff access is an explicit user/station junction and defaults to no stations for newly created restricted users. Every station-owned read is filtered and every write target is authorized by the API. The global browser selector is navigation context only, never a security control. Deployment backfills existing restricted users to existing organization stations to preserve current operations while owners review assignments.
+
+## ADR-017: Stock time and stock evidence have distinct meanings
+
+Invoice date describes a supplier document; received-at time describes physical stock arrival and is the effective time of its inventory movement. Book stock is derived only from the configured opening balance and effective ledger movements. Physical opening and closing readings are immutable observations, not ledger movements. Expected closing bridges the shift opening through in-shift receipts, sales, testing not returned, and approved adjustments. Variance is actual closing minus expected closing and never adjusts stock automatically. The complete terminology and equations are maintained in `docs/stock-rules.md` and the shared stock calculation contract.
+
+## ADR-018: Current stock has one scoped, time-aware source
+
+Operational stock checks and projections use one cutoff-based balance service. Every query is isolated by organization, fuel station, product and tank, includes the complete ledger through a single `asOf` instant, and excludes later movements. Multi-tank views validate that each aggregated movement still belongs to the expected station and product. Physical readings may bridge one shift to the next but do not replace or rewrite the book ledger.

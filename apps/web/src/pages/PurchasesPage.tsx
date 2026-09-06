@@ -4,6 +4,7 @@ import {
   FileText,
   IndianRupee,
   PackageCheck,
+  Pencil,
   Plus,
   Truck,
   X,
@@ -15,6 +16,7 @@ import {
   type PurchaseInvoice,
   type PurchasesBootstrap,
   type PurchaseStation,
+  type Supplier,
 } from "../lib/api";
 const money = (v: number | string) =>
   new Intl.NumberFormat("en-IN", {
@@ -64,6 +66,11 @@ export const dueDateFromInvoiceDate = (
 };
 const iso = (date: string) => new Date(`${date}T00:00:00`).toISOString();
 const today = () => new Date().toISOString().slice(0, 10);
+const localDateTimeNow = () => {
+  const value = new Date();
+  value.setMinutes(value.getMinutes() - value.getTimezoneOffset());
+  return value.toISOString().slice(0, 16);
+};
 export const purchasePriceForDate = (
   product: PurchasesBootstrap["products"][number] | undefined,
   invoiceDate: string,
@@ -93,7 +100,7 @@ async function attachment(file: File | null) {
     contentBase64,
   };
 }
-type Mode = "supplier" | "invoice" | "edit-invoice" | "payment" | null;
+type Mode = "supplier" | "edit-supplier" | "invoice" | "edit-invoice" | "payment" | null;
 type Line = {
   productId: string;
   tankId: string;
@@ -124,6 +131,7 @@ export function PurchasesPage() {
     [mode, setMode] = useState<Mode>(null),
     [error, setError] = useState(""),
     [saving, setSaving] = useState(false),
+    [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null),
     [file, setFile] = useState<File | null>(null);
   const [supplier, setSupplier] = useState({
     name: "",
@@ -145,6 +153,8 @@ export function PurchasesPage() {
     invoiceTotal: "",
     notes: "",
     receiveNow: true,
+    receivedAt: localDateTimeNow(),
+    receiptTimingReason: "",
     paidNow: false,
     paymentMethod: "UPI" as "CASH" | "UPI" | "CARD" | "OTHER",
     paymentReferenceNo: "",
@@ -161,6 +171,8 @@ export function PurchasesPage() {
   );
   const [correctionReason, setCorrectionReason] = useState("");
   const [receiptDateCorrection, setReceiptDateCorrection] = useState("");
+  const [receiptTimeEdited, setReceiptTimeEdited] = useState(false);
+  const [receiptShiftImpact, setReceiptShiftImpact] = useState<Awaited<ReturnType<typeof api.purchaseReceiptShiftImpact>> | null>(null);
   const [payment, setPayment] = useState({
     stationId: "",
     invoiceId: "",
@@ -191,6 +203,15 @@ export function PurchasesPage() {
   useEffect(() => {
     void load().catch(() => setError("Unable to load purchases."));
   }, []);
+  useEffect(() => {
+    const localValue = editingInvoice ? receiptDateCorrection : receiptTimeEdited && invoice.receiveNow ? invoice.receivedAt : "";
+    const station = editingInvoice?.station.id ?? invoice.stationId;
+    if (!localValue || !station) { setReceiptShiftImpact(null); return; }
+    const timer = window.setTimeout(() => {
+      void api.purchaseReceiptShiftImpact(station, new Date(localValue).toISOString()).then(setReceiptShiftImpact).catch(() => setReceiptShiftImpact(null));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [editingInvoice?.id, editingInvoice?.station.id, receiptDateCorrection, receiptTimeEdited, invoice.receiveNow, invoice.receivedAt, invoice.stationId]);
   const subtotal = useMemo(
     () => lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0),
     [lines],
@@ -237,13 +258,11 @@ export function PurchasesPage() {
     setSaving(true);
     setError("");
     try {
-      await api.createSupplier({
-        ...supplier,
-        name,
-        code: supplierCodeFromName(name),
-      });
+      if (editingSupplier) await api.updateSupplier(editingSupplier.id, { ...supplier, name, code: editingSupplier.code });
+      else await api.createSupplier({ ...supplier, name, code: supplierCodeFromName(name) });
       setMode(null);
-      setSupplier({ ...supplier, name: "", code: "" });
+      setEditingSupplier(null);
+      setSupplier({ name: "", code: "", phone: "", email: "", taxId: "", address: "", paymentTerms: 30, active: true });
       await load();
     } catch (e) {
       setError(
@@ -252,6 +271,24 @@ export function PurchasesPage() {
     } finally {
       setSaving(false);
     }
+  }
+  function editSupplier(item: Supplier) {
+    setError("");
+    setEditingSupplier(item);
+    setSupplier({ name: item.name, code: item.code, phone: item.phone ?? "", email: item.email ?? "", taxId: item.taxId ?? "", address: item.address ?? "", paymentTerms: item.paymentTerms, active: item.active });
+    setMode("edit-supplier");
+  }
+  function addSupplier() {
+    setError("");
+    setEditingSupplier(null);
+    setSupplier({ name: "", code: "", phone: "", email: "", taxId: "", address: "", paymentTerms: 30, active: true });
+    setMode("supplier");
+  }
+  function addInvoice() {
+    setError("");
+    setReceiptTimeEdited(false);
+    setInvoice(current => ({ ...current, receivedAt: localDateTimeNow(), receiptTimingReason: "" }));
+    setMode("invoice");
   }
   async function saveInvoice() {
     setSaving(true);
@@ -264,7 +301,7 @@ export function PurchasesPage() {
         await api.updatePurchaseInvoice(editingInvoice.id, {
           version: editingInvoice.version,
           correctionReason,
-          ...(receiptDateCorrection ? { receivedAt: iso(receiptDateCorrection) } : {}),
+          ...(receiptDateCorrection ? { receivedAt: new Date(receiptDateCorrection).toISOString() } : {}),
           invoiceNumber: invoice.invoiceNumber,
           invoiceDate: iso(invoice.invoiceDate),
           dueDate: iso(invoice.dueDate),
@@ -294,6 +331,8 @@ export function PurchasesPage() {
       }
       await api.createPurchaseInvoice({
         ...invoice,
+        receivedAt: invoice.receiveNow && receiptTimeEdited ? new Date(invoice.receivedAt).toISOString() : undefined,
+        receiptTimingReason: invoice.receiveNow && receiptTimeEdited && invoice.receiptTimingReason ? invoice.receiptTimingReason : undefined,
         invoiceTotal: invoice.invoiceTotal
           ? Number(invoice.invoiceTotal)
           : undefined,
@@ -334,9 +373,12 @@ export function PurchasesPage() {
         ),
         taxAmount: 0,
         notes: "",
+        receivedAt: localDateTimeNow(),
+        receiptTimingReason: "",
         paidNow: false,
         paymentReferenceNo: "",
       }));
+      setReceiptTimeEdited(false);
       setLines([emptyLine()]);
       await load();
     } catch (e) {
@@ -407,12 +449,12 @@ export function PurchasesPage() {
           </p>
         </div>
         <div className="heading-actions">
-          <button className="secondary" onClick={() => setMode("supplier")}>
+          <button className="secondary" onClick={addSupplier}>
             <Truck size={16} /> Supplier
           </button>
           <button
             className="primary small"
-            onClick={() => setMode("invoice")}
+            onClick={addInvoice}
             disabled={!data.suppliers.length}
           >
             <Plus size={16} /> Purchase invoice
@@ -460,7 +502,7 @@ export function PurchasesPage() {
             Supplier terms set the default due date and make every payable easy
             to trace.
           </p>
-          <button className="primary small" onClick={() => setMode("supplier")}>
+          <button className="primary small" onClick={addSupplier}>
             <Plus size={16} /> Add supplier
           </button>
         </section>
@@ -590,6 +632,7 @@ export function PurchasesPage() {
                     {s.code} · {s.paymentTerms} day terms
                   </small>
                 </span>
+                <button className="secondary" aria-label={`Edit ${s.name}`} onClick={() => editSupplier(s)}><Pencil size={14} /> Edit</button>
               </div>
             ))}
           </aside>
@@ -598,13 +641,13 @@ export function PurchasesPage() {
       {mode && (
         <div className="product-modal">
           <section className="product-editor purchase-modal">
-            <button className="modal-close" onClick={() => setMode(null)}>
+            <button className="modal-close" onClick={() => { setMode(null); setEditingSupplier(null); }}>
               <X size={17} />
             </button>
-            {mode === "supplier" ? (
+            {mode === "supplier" || mode === "edit-supplier" ? (
               <>
                 <span className="eyebrow">Supplier master</span>
-                <h2>Add supplier</h2>
+                <h2>{editingSupplier ? "Edit supplier" : "Add supplier"}</h2>
                 <div className="form-grid">
                   <label className="field">
                     <span>Name</span>
@@ -618,7 +661,7 @@ export function PurchasesPage() {
                   <div className="field">
                     <span>Supplier code</span>
                     <div className="field-note">
-                      Generated automatically from the supplier name.
+                      {editingSupplier ? editingSupplier.code : "Generated automatically from the supplier name."}
                     </div>
                   </div>
                   <label className="field">
@@ -644,9 +687,12 @@ export function PurchasesPage() {
                       }
                     />
                   </label>
+                  <label className="field"><span>Email (optional)</span><input type="email" value={supplier.email} onChange={(e) => setSupplier({ ...supplier, email: e.target.value })} /></label>
+                  <label className="field"><span>GST / Tax ID (optional)</span><input value={supplier.taxId} onChange={(e) => setSupplier({ ...supplier, taxId: e.target.value })} /></label>
                 </div>
+                <label className="field"><span>Address (optional)</span><input value={supplier.address} onChange={(e) => setSupplier({ ...supplier, address: e.target.value })} /></label>
                 <div className="editor-footer">
-                  <button className="secondary" onClick={() => setMode(null)}>
+                  <button className="secondary" onClick={() => { setMode(null); setEditingSupplier(null); }}>
                     Cancel
                   </button>
                   <button
@@ -654,7 +700,7 @@ export function PurchasesPage() {
                     disabled={saving}
                     onClick={() => void saveSupplier()}
                   >
-                    Save supplier
+                    {saving ? "Saving…" : editingSupplier ? "Save changes" : "Save supplier"}
                   </button>
                 </div>
               </>
@@ -1005,7 +1051,8 @@ export function PurchasesPage() {
                         )}
                       </div>
                     )}
-                    {editingInvoice?.receipt && <label className="field"><span>Correct stock receipt date (optional)</span><input type="date" value={receiptDateCorrection} onChange={e => setReceiptDateCorrection(e.target.value)} /><small>Leave blank to preserve the original receipt date: {new Date(editingInvoice.receipt.receivedAt).toLocaleDateString("en-IN")}.</small></label>}
+                    {editingInvoice?.receipt && <label className="field"><span>Correct stock received date and time (optional)</span><input type="datetime-local" value={receiptDateCorrection} onChange={e => setReceiptDateCorrection(e.target.value)} /><small>Leave blank to preserve the original physical receipt time: {new Date(editingInvoice.receipt.receivedAt).toLocaleString("en-IN")}.</small></label>}
+                    {receiptShiftImpact && <div className={receiptShiftImpact.affectsClosedShift ? "form-error" : "form-note"}>{receiptShiftImpact.affectsClosedShift ? `This time falls inside closed shift #${receiptShiftImpact.shift?.shiftNumber}. Saving will recalculate its derived stock comparison; the shift, receipt and journals will not be duplicated.` : receiptShiftImpact.shift ? `This receipt will appear once under shift #${receiptShiftImpact.shift.shiftNumber} as received during shift.` : "This receipt falls between shifts and will be included in the next shift’s expected opening."}</div>}
                     {!!editingInvoice?.corrections.length && (
                       <div className="invoice-correction-history">
                         <b>Correction history</b>
@@ -1230,6 +1277,9 @@ export function PurchasesPage() {
                         />{" "}
                         Receive stock now
                       </label>
+                      {invoice.receiveNow && <label className="field"><span>Stock received date and time</span><input type="datetime-local" value={invoice.receivedAt} max={localDateTimeNow()} onChange={(e) => { setReceiptTimeEdited(true); setInvoice({ ...invoice, receivedAt: e.target.value }); }} /><small>Defaults to the time you save. Change this only if the stock physically arrived earlier.</small></label>}
+                      {invoice.receiveNow && receiptTimeEdited && <label className="field"><span>Reason for manually selected receipt time</span><input value={invoice.receiptTimingReason} maxLength={300} onChange={(e) => setInvoice({ ...invoice, receiptTimingReason: e.target.value })} placeholder="Required when the stock arrived earlier" /></label>}
+                      {receiptShiftImpact && <div className={receiptShiftImpact.affectsClosedShift ? "form-error" : "form-note"}>{receiptShiftImpact.affectsClosedShift ? `This time falls inside closed shift #${receiptShiftImpact.shift?.shiftNumber}. The receipt will be recorded there for stock comparison without reopening the shift.` : receiptShiftImpact.shift ? `This receipt will appear once under open shift #${receiptShiftImpact.shift.shiftNumber}.` : "This receipt is between shifts and will be included in the next shift’s expected opening."}</div>}
                       <label className="invoice-check">
                         <input
                           type="checkbox"

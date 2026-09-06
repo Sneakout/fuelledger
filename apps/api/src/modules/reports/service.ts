@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
+import { AppError } from '../../lib/errors.js';
 
 type ReportFilter = { startDate: string; endDate: string; stationId?: string | undefined; permittedStationIds?: string[] | undefined };
 
@@ -10,6 +11,7 @@ const add = <T>(map: Map<string, T>, key: string, make: () => T, update: (row: T
 };
 
 export async function buildReport(organizationId: string, filter: ReportFilter) {
+  const asOf = new Date();
   const start = new Date(`${filter.startDate}T00:00:00`);
   const endExclusive = new Date(`${filter.endDate}T00:00:00`); endExclusive.setDate(endExclusive.getDate() + 1);
   const stationIds=filter.stationId?[filter.stationId]:filter.permittedStationIds;
@@ -27,8 +29,8 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
     }),
     prisma.purchaseInvoice.findMany({ where: { organizationId, ...stationWhere, invoiceDate: period, status: { not: 'VOID' } }, select: { totalAmount: true } }),
     prisma.purchaseInvoice.findMany({ where: { organizationId, ...stationWhere, status: { in: ['OPEN', 'PART_PAID'] } }, include: { payments: { select: { amount: true } }, supplier: { select: { name: true, code: true } }, station: { select: { name: true, code: true } } }, orderBy: { dueDate: 'asc' } }),
-    prisma.inventoryLedger.findMany({ where: { organizationId, ...stationWhere }, include: { product: { select: { id: true, name: true, code: true, unit: true, purchasePrice: true, purchasePriceHistory:{where:{effectiveFrom:{lte:new Date()}},orderBy:{effectiveFrom:'desc'},take:1} } }, station: { select: { id: true, name: true, code: true } } } }),
-    prisma.tank.findMany({ where: { configuration: { active: true, station: { organizationId, ...(stationIds ? { id:{in:stationIds} } : {}) } } }, include: { product: { select: { id: true, name: true, code: true, unit: true, purchasePrice: true, purchasePriceHistory:{where:{effectiveFrom:{lte:new Date()}},orderBy:{effectiveFrom:'desc'},take:1} } }, configuration: { include: { station: { select: { id: true, name: true, code: true } } } } } }),
+    prisma.inventoryLedger.findMany({ where: { organizationId, ...stationWhere, occurredAt: { lte: asOf }, station: { active: true }, product: { active: true, inventoryTracked: true }, OR: [{ tankId: null }, { tank: { status: 'ACTIVE', configuration: { active: true } } }] }, include: { product: { select: { id: true, name: true, code: true, unit: true, tankLinked: true, purchasePrice: true, purchasePriceHistory:{where:{effectiveFrom:{lte:asOf}},orderBy:{effectiveFrom:'desc'},take:1} } }, station: { select: { id: true, name: true, code: true } }, tank: { select: { productId: true, configuration: { select: { stationId: true } } } } } }),
+    prisma.tank.findMany({ where: { status: 'ACTIVE', product: { active: true, inventoryTracked: true }, configuration: { active: true, station: { organizationId, active: true, ...(stationIds ? { id:{in:stationIds} } : {}) } } }, include: { product: { select: { id: true, name: true, code: true, unit: true, purchasePrice: true, purchasePriceHistory:{where:{effectiveFrom:{lte:asOf}},orderBy:{effectiveFrom:'desc'},take:1} } }, configuration: { include: { station: { select: { id: true, name: true, code: true } } } } } }),
     prisma.customer.findMany({ where: { organizationId, active: true }, include: { ledger: { where: stationIds ? { stationId:{in:stationIds} } : {}, select: { amount: true, dueDate: true } } }, orderBy: { name: 'asc' } }),
     prisma.journalLine.findMany({ where: { journal: { organizationId, ...stationWhere, journalDate: period } }, include: { account: { select: { code: true, name: true, type: true } } } }),
   ]);
@@ -56,6 +58,8 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
     add(stock, itemKey, () => ({ key: itemKey, product: tank.product.name, code: tank.product.code, unit: tank.product.unit, station: tank.configuration.station.name, quantity: 0, value: 0, purchasePrice: number(purchasePrice) }), row => { row.quantity += number(tank.openingStock); row.value+=number(tank.openingStock)*number(purchasePrice); });
   }
   for (const entry of inventoryEntries) {
+    if ((entry.product.tankLinked && !entry.tankId) || (entry.tankId && (!entry.tank || entry.tank.productId !== entry.productId || entry.tank.configuration.stationId !== entry.stationId)))
+      throw new AppError(409, 'STOCK_SCOPE_INVALID', 'A stock movement does not match its fuel station, product and tank. Review inventory consistency before continuing.');
     const itemKey = stockKey(entry.stationId, entry.productId);
     const purchasePrice=effectivePriceAt(entry.product.purchasePrice,entry.product.purchasePriceHistory);
     add(stock, itemKey, () => ({ key: itemKey, product: entry.product.name, code: entry.product.code, unit: entry.product.unit, station: entry.station.name, quantity: 0, value: 0, purchasePrice: number(purchasePrice) }), row => { const quantity=number(entry.quantityDelta),unitCost=number(entry.unitCost??purchasePrice);row.quantity+=quantity;row.value+=quantity*unitCost; });

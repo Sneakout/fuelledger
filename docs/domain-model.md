@@ -14,6 +14,8 @@ Milestone 8 separates the commercial purchase invoice from the physical goods re
 
 Milestone 5 adds PurchaseReceipt, ReceiptLine, InventoryLedger, and TankReading. A receipt and each inventory-tracked sale create one ledger movement; adjustments are their own, reasoned movements. Book stock is opening stock plus receipts, minus sales, plus/minus adjustments. A TankReading carries a physical stock quantity and optional dip measurement; variance is physical stock minus book stock.
 
+The canonical meanings of invoice date, received-at time, book stock, physical stock, shift opening, expected closing, actual closing, and variance are defined in [stock-rules.md](stock-rules.md). Those terms are calculation contracts, not interchangeable labels.
+
 Milestone 6 adds ShiftReconciliation and ShiftCollectionReconciliation. Expected values are recalculated from the shift’s sales on the server, then preserved alongside actual collection values. A signed adjustment changes adjusted expected collections only when accompanied by a reason. Variance is `actual − (expected + adjustment)`. A successfully reconciled shift is locked and cannot be reconciled twice.
 
 Milestone 9 adds ChartAccount, Journal, and JournalLine. A Journal belongs to an organization, may reference a station and creator, and uniquely identifies the originating operational fact. Its one-or-more JournalLines reference chart accounts and hold debit/credit values that must balance. The general ledger and trial balance are calculated views over those lines; customer and supplier operational ledgers remain their dedicated AR/AP subledgers.

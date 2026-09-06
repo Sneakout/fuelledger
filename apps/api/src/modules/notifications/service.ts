@@ -4,6 +4,7 @@ import { env, whatsappConfigured } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 import { prisma } from '../../lib/prisma.js';
+import { bookStockAt } from '../../lib/stock.js';
 import { buildReport } from '../reports/service.js';
 
 type DeliveryResult = { status: 'SENT' | 'FAILED' | 'SKIPPED'; reason?: string };
@@ -20,9 +21,10 @@ const defaults = {
   overdueCustomerEnabled: true,
   lowStockPercent: 20,
   varianceThreshold: 500,
+  stockVarianceTolerance: 50,
   dailySummaryHour: 20,
 };
-type NotificationSettingFields = Omit<typeof defaults, 'varianceThreshold'> & { varianceThreshold: unknown };
+type NotificationSettingFields = Omit<typeof defaults, 'varianceThreshold' | 'stockVarianceTolerance'> & { varianceThreshold: unknown; stockVarianceTolerance: unknown };
 
 function indiaParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone: indiaTimeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(date);
@@ -42,7 +44,7 @@ function featureEnabled(settings: typeof defaults, type: OwnerNotificationType) 
 }
 function presentSettings(settings: (NotificationSettingFields & { id?: string; updatedAt?: Date }) | null) {
   const value = settings ?? defaults;
-  return { ...value, varianceThreshold: Number(value.varianceThreshold), providerReady: whatsappConfigured };
+  return { ...value, varianceThreshold: Number(value.varianceThreshold), stockVarianceTolerance: Number(value.stockVarianceTolerance), providerReady: whatsappConfigured };
 }
 
 export async function getSettings(organizationId: string) {
@@ -61,6 +63,7 @@ export async function updateSettings(organizationId: string, input: OwnerNotific
     overdueCustomerEnabled: input.overdueCustomerEnabled,
     lowStockPercent: input.lowStockPercent,
     varianceThreshold: new Prisma.Decimal(input.varianceThreshold),
+    stockVarianceTolerance: new Prisma.Decimal(input.stockVarianceTolerance),
     dailySummaryHour: input.dailySummaryHour,
   };
   const settings = await prisma.ownerNotificationSettings.upsert({ where: { organizationId }, create: { organizationId, ...data }, update: data });
@@ -86,7 +89,7 @@ export async function sendOwnerNotification(input: { organizationId: string; sta
   const existing = await prisma.ownerNotificationDelivery.findUnique({ where: { dedupeKey: input.dedupeKey }, select: { status: true } });
   if (existing) return { status: existing.status === 'SENT' ? 'SENT' : 'SKIPPED', reason: 'already_processed' };
   const raw = await prisma.ownerNotificationSettings.findUnique({ where: { organizationId: input.organizationId } });
-  const settings = raw ? { ...raw, varianceThreshold: Number(raw.varianceThreshold) } : defaults;
+  const settings = raw ? { ...raw, varianceThreshold: Number(raw.varianceThreshold), stockVarianceTolerance: Number(raw.stockVarianceTolerance) } : defaults;
   if (!settings.whatsappOptedIn || !settings.whatsappNumber) return { status: 'SKIPPED', reason: 'owner_not_opted_in' };
   if (!featureEnabled(settings, input.type)) return { status: 'SKIPPED', reason: 'disabled_by_owner' };
   if (!whatsappConfigured) return { status: 'SKIPPED', reason: 'whatsapp_not_configured' };
@@ -124,9 +127,9 @@ export async function notifyShiftVariance(organizationId: string, shift: { id: s
 }
 
 export async function notifyLowStock(organizationId: string, tankId: string) {
-  const tank = await prisma.tank.findFirst({ where: { id: tankId, status: 'ACTIVE', configuration: { active: true, station: { organizationId } } }, include: { product: { select: { name: true, code: true } }, configuration: { include: { station: { select: { id: true, name: true } } } }, inventoryLedger: { select: { quantityDelta: true } } } });
+  const tank = await prisma.tank.findFirst({ where: { id: tankId, status: 'ACTIVE', configuration: { active: true, station: { organizationId } } }, include: { product: { select: { name: true, code: true } }, configuration: { include: { station: { select: { id: true, name: true } } } } } });
   if (!tank) return { status: 'SKIPPED' as const, reason: 'tank_not_found' };
-  const stock = Number(tank.openingStock) + tank.inventoryLedger.reduce((total, entry) => total + Number(entry.quantityDelta), 0);
+  const stock = Number(await bookStockAt(prisma, { organizationId, stationId: tank.configuration.station.id, productId: tank.productId, tankId: tank.id }));
   const fillPercent = Number(tank.workingCapacity) ? Math.max(0, stock / Number(tank.workingCapacity) * 100) : 0;
   const settings = await getSettings(organizationId);
   if (fillPercent > settings.lowStockPercent) return { status: 'SKIPPED' as const, reason: 'stock_healthy' };

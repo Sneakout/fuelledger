@@ -241,9 +241,16 @@ export const api = {
       body: JSON.stringify(input),
     }),
   purchasesBootstrap: () => request<PurchasesBootstrap>("/purchases/bootstrap"),
+  purchaseReceiptTimingAudit: () => request<ReceiptTimingAudit>("/purchases/receipt-timing-audit"),
+  purchaseReceiptShiftImpact: (stationId: string, receivedAt: string) => request<ReceiptShiftImpact>(`/purchases/receipt-shift-impact?stationId=${encodeURIComponent(stationId)}&receivedAt=${encodeURIComponent(receivedAt)}`),
   createSupplier: (input: SupplierInput) =>
     request<{ supplier: Supplier }>("/purchases/suppliers", {
       method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateSupplier: (id: string, input: SupplierInput) =>
+    request<{ supplier: Supplier }>(`/purchases/suppliers/${id}`, {
+      method: "PUT",
       body: JSON.stringify(input),
     }),
   createPurchaseInvoice: (input: PurchaseInvoiceInput) =>
@@ -376,6 +383,7 @@ export type NotificationSettings = {
   overdueCustomerEnabled: boolean;
   lowStockPercent: number;
   varianceThreshold: number;
+  stockVarianceTolerance: number;
   dailySummaryHour: number;
   providerReady: boolean;
 };
@@ -454,7 +462,7 @@ export type ShiftStation = {
     shiftId: string;
     shiftNumber: number;
     closedAt: string;
-    tankReadings: Array<{ id: string; value: string }>;
+    tankReadings: Array<{ id: string; value: string; lastActual?: string; receivedBetween?: string; adjustmentsBetween?: string; expectedOpening?: string }>;
     nozzleReadings: Array<{ id: string; value: string }>;
   } | null;
   configurations: Array<{
@@ -506,6 +514,14 @@ export type Shift = {
     tankId: string;
     openingDip: string;
     closingDip: string | null;
+    receivedDuringShift: string;
+    stockBridge: {
+      received: string;
+      adjustments: string;
+      deliveries: Array<{ id: string; quantity: string; occurredAt: string; reference: string; supplier: string }>;
+      adjustmentDetails: Array<{ id: string; quantity: string; note: string | null; occurredAt: string }>;
+      nozzles: Array<{ id: string; code: string }>;
+    };
     tank: { code: string; product: { name: string; code: string } };
   }>;
   nozzleReadings: Array<{
@@ -527,6 +543,7 @@ export type Shift = {
   };
 };
 export type ShiftBootstrap = {
+  stockVarianceTolerance: number;
   stations: ShiftStation[];
   users: Array<{
     id: string;
@@ -1026,7 +1043,7 @@ export type PurchaseInvoice = {
     paymentMethod: string;
     paidAt: string;
   }>;
-  receipt: { id: string; receivedAt: string } | null;
+  receipt: { id: string; receivedAt: string; receivedAtReason: string | null; createdAt: string; createdBy: { name: string } } | null;
   attachments: AttachmentMeta[];
   createdBy: { name: string };
   corrections: Array<{
@@ -1037,6 +1054,27 @@ export type PurchaseInvoice = {
     correctedAt: string;
     correctedBy: { name: string };
   }>;
+};
+export type ReceiptTimingAudit = {
+  generatedAt: string;
+  recordsChanged: false;
+  candidates: Array<{
+    id: string;
+    invoiceNumber: string;
+    supplierName: string;
+    station: { id: string; name: string; code: string };
+    invoiceDate: string;
+    receivedAt: string;
+    enteredAt: string;
+    enteredBy: string;
+    reason: string;
+  }>;
+};
+export type ReceiptShiftImpact = {
+  receivedAt: string;
+  interval: "DURING_SHIFT" | "BETWEEN_SHIFTS";
+  affectsClosedShift: boolean;
+  shift: { id: string; shiftNumber: number; status: string; openedAt: string; closedAt: string | null } | null;
 };
 export type InvoicePricePreview = {
   lines: Array<{

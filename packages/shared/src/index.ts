@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export * from "./stock-rules.js";
+
 export const roles = ["OWNER", "MANAGER", "ACCOUNTANT", "STAFF"] as const;
 export const userSchema = z.object({
   id: z.string(),
@@ -92,6 +94,7 @@ export const ownerNotificationSettingsSchema = z
     overdueCustomerEnabled: z.boolean(),
     lowStockPercent: z.coerce.number().int().min(1).max(50),
     varianceThreshold: z.coerce.number().min(0).max(1_000_000),
+    stockVarianceTolerance: z.coerce.number().min(0).max(100_000).default(50),
     dailySummaryHour: z.coerce.number().int().min(0).max(23),
   })
   .superRefine((value, context) => {
@@ -599,7 +602,7 @@ export const closeShiftSchema = z.object({
   nozzleCollections: z.array(
     z.object({ nozzleId: z.string().cuid(), amount: z.coerce.number().min(0) }),
   ),
-  notes: z.string().max(500).optional(),
+  notes: z.string().trim().max(500).optional(),
 });
 export type OpenShiftInput = z.infer<typeof openShiftSchema>;
 export type CloseShiftInput = z.infer<typeof closeShiftSchema>;
@@ -822,6 +825,8 @@ export const purchaseInvoiceInputSchema = z
     supplierId: z.string().cuid(),
     invoiceNumber: z.string().trim().min(1).max(80),
     invoiceDate: z.string().datetime(),
+    receivedAt: z.string().datetime().optional(),
+    receiptTimingReason: z.string().trim().min(5).max(300).optional(),
     dueDate: z.string().datetime(),
     invoiceTotal: z.coerce.number().positive().optional(),
     taxAmount: z.coerce.number().min(0).default(0),
@@ -860,6 +865,12 @@ export const purchaseInvoiceInputSchema = z
             message: "Every received line needs an inventory product.",
             path: ["lines", index, "productId"],
           });
+    if (!invoice.receiveNow && (invoice.receivedAt || invoice.receiptTimingReason))
+      context.addIssue({
+        code: "custom",
+        message: "Receipt timing applies only when stock is received.",
+        path: ["receivedAt"],
+      });
     if (invoice.paidNow && !invoice.paymentMethod)
       context.addIssue({
         code: "custom",

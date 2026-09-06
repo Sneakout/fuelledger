@@ -1,5 +1,5 @@
 import { safeTransaction } from '../../lib/safe-save.js';
-import type { DensityReadingInput, InventoryAdjustmentInput, ReceiptInput, TankReadingInput } from '@fuelledger/shared';
+import { calculateBookStock, type DensityReadingInput, type InventoryAdjustmentInput, type ReceiptInput, type TankReadingInput } from '@fuelledger/shared';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
@@ -9,20 +9,39 @@ import { postJournal } from '../accounting/service.js';
 
 const tankInclude = { product: { select: { id: true, name: true, code: true, unit: true, category: true } }, physicalReadings: { take: 1, orderBy: { recordedAt: 'desc' as const } }, densityReadings: { take: 1, orderBy: { recordedAt: 'desc' as const } } } as const;
 export async function bootstrap(organizationId: string,stationIds?:string[]) {
+  const asOf = new Date();
   const [stations, products, ledger, receipts, movements] = await Promise.all([
     prisma.station.findMany({ where: { organizationId, active: true,...(stationIds?{id:{in:stationIds}}:{}) }, include: { configurations: { where: { active: true }, take: 1, include: { tanks: { where: { status: 'ACTIVE' }, include: tankInclude } } } } }),
     prisma.product.findMany({ where: { organizationId, active: true, inventoryTracked: true }, select: { id: true, name: true, code: true, unit: true, category: true, tankLinked: true } }),
     prisma.inventoryLedger.findMany({ where: { organizationId,...(stationIds?{stationId:{in:stationIds}}:{}) }, orderBy: { occurredAt: 'desc' }, take: 80, include: { product: { select: { name: true, code: true, unit: true } }, station: { select: { name: true, code: true } }, tank: { select: { code: true } } } }),
     prisma.purchaseReceipt.findMany({ where: { organizationId,...(stationIds?{stationId:{in:stationIds}}:{}) }, orderBy: { receivedAt: 'desc' }, take: 20, include: { station: { select: { name: true } }, lines: { include: { product: { select: { name: true, code: true, unit: true } }, tank: { select: { code: true } } } } } }),
-    prisma.inventoryLedger.findMany({ where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), occurredAt: { lte: new Date() } }, select: { stationId: true, productId: true, tankId: true, type: true, quantityDelta: true, occurredAt: true } }),
+    prisma.inventoryLedger.findMany({ where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), occurredAt: { lte: asOf } }, select: { stationId: true, productId: true, tankId: true, type: true, quantityDelta: true, occurredAt: true, product: { select: { tankLinked: true } }, tank: { select: { productId: true, configuration: { select: { stationId: true } } } } } }),
   ]);
+  for (const movement of movements) {
+    if ((movement.product.tankLinked && !movement.tankId) || (movement.tankId && (!movement.tank || movement.tank.productId !== movement.productId || movement.tank.configuration.stationId !== movement.stationId)))
+      throw new AppError(409, 'STOCK_SCOPE_INVALID', 'A stock movement does not match its fuel station, product and tank. Review inventory consistency before continuing.');
+  }
   const ledgerByTank = group(movements.filter(entry => entry.tankId), entry => entry.tankId!); const ledgerByStationProduct = group(movements.filter(entry => !entry.tankId), entry => `${entry.stationId}:${entry.productId}`);
   const tanks = stations.flatMap(station => station.configurations[0]?.tanks.map(tank => reconciliation({ station, tank, entries: ledgerByTank.get(tank.id) ?? [] })) ?? []);
   const untanked = stations.flatMap(station => products.filter(product => !product.tankLinked).map(product => reconciliation({ station, product, entries: ledgerByStationProduct.get(`${station.id}:${product.id}`) ?? [] }))).filter(item => item.opening || item.receipts || item.sales || item.adjustments || item.physicalStock !== null);
-  return { stations, products, tanks, untanked, ledger, receipts };
+  return { asOf, stations, products, tanks, untanked, ledger, receipts };
 }
 function reconciliation({ station, tank, product, entries }: { station?: { id: string; name: string; code: string }; tank?: { id: string; code: string; openingStock: Prisma.Decimal; product: { id: string; name: string; code: string; unit: string; category: string }; physicalReadings: Array<{ physicalStock: Prisma.Decimal; dipReading: Prisma.Decimal | null; recordedAt: Date }>; densityReadings: Array<{ density: Prisma.Decimal; recordedAt: Date }> }; product?: { id: string; name: string; code: string; unit: string }; entries: Array<{ type: string; quantityDelta: Prisma.Decimal; occurredAt: Date }> }) {
-  const item = tank?.product ?? product!; const opening = Number(tank?.openingStock ?? 0); const receipts = sum(entries.filter(entry => entry.type === 'RECEIPT')); const sales = Math.abs(sum(entries.filter(entry => entry.type === 'SALE'))); const adjustments = sum(entries.filter(entry => entry.type === 'ADJUSTMENT')); const bookStock = opening + receipts - sales + adjustments; const reading = tank?.physicalReadings[0]; const densityReading = tank?.densityReadings[0]; const physicalStock = reading ? Number(reading.physicalStock) : null; return { station, tank: tank ? { id: tank.id, code: tank.code } : null, product: item, opening, receipts, sales, adjustments, bookStock, physicalStock, bookStockAtReading: reading ? opening + sum(entries.filter(entry => entry.occurredAt <= reading.recordedAt)) : null, variance: physicalStock === null ? null : physicalStock - (opening + sum(entries.filter(entry => entry.occurredAt <= reading!.recordedAt))), dipReading: reading?.dipReading ? Number(reading.dipReading) : null, readAt: reading?.recordedAt ?? null, density: densityReading ? Number(densityReading.density) : null, densityRecordedAt: densityReading?.recordedAt ?? null };
+  const item = tank?.product ?? product!;
+  const opening = Number(tank?.openingStock ?? 0);
+  const totals = (movements: typeof entries) => ({
+    receipts: sum(movements.filter(entry => entry.type === 'RECEIPT')),
+    sales: Math.abs(sum(movements.filter(entry => entry.type === 'SALE'))),
+    adjustments: sum(movements.filter(entry => entry.type === 'ADJUSTMENT')),
+  });
+  const movements = totals(entries);
+  const bookStock = calculateBookStock({ openingBalance: opening, receipts: movements.receipts, sales: movements.sales, approvedAdjustments: movements.adjustments });
+  const reading = tank?.physicalReadings[0];
+  const densityReading = tank?.densityReadings[0];
+  const physicalStock = reading ? Number(reading.physicalStock) : null;
+  const readingMovements = reading ? totals(entries.filter(entry => entry.occurredAt <= reading.recordedAt)) : null;
+  const bookStockAtReading = readingMovements ? calculateBookStock({ openingBalance: opening, receipts: readingMovements.receipts, sales: readingMovements.sales, approvedAdjustments: readingMovements.adjustments }) : null;
+  return { station, tank: tank ? { id: tank.id, code: tank.code } : null, product: item, opening, receipts: movements.receipts, sales: movements.sales, adjustments: movements.adjustments, bookStock, physicalStock, bookStockAtReading, variance: physicalStock === null || bookStockAtReading === null ? null : physicalStock - bookStockAtReading, dipReading: reading?.dipReading ? Number(reading.dipReading) : null, readAt: reading?.recordedAt ?? null, density: densityReading ? Number(densityReading.density) : null, densityRecordedAt: densityReading?.recordedAt ?? null };
 }
 const sum = (entries: Array<{ quantityDelta: Prisma.Decimal }>) => entries.reduce((total, entry) => total + Number(entry.quantityDelta), 0);
 const group = <T>(values: T[], key: (value: T) => string) => values.reduce((map, value) => { const id = key(value); map.set(id, [...(map.get(id) ?? []), value]); return map; }, new Map<string, T[]>());

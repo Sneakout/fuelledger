@@ -9,9 +9,9 @@ const d = (n: number) => new Prisma.Decimal(n);
 describe('closing shift', () => {
   it('opens with prior meters, stock including an intervening delivery, and chosen attendant', async () => {
     const tx: any = {
-      station: { findFirst: vi.fn().mockResolvedValue({id:'station', configurations:[{id:'cfg',tanks:[{id:'t',code:'T1',openingStock:d(1000)}],dispensers:[{nozzles:[{id:'n',code:'N1',openingMeter:d(1000)}]}]}]}) },
+      station: { findFirst: vi.fn().mockResolvedValue({id:'station', configurations:[{id:'cfg',tanks:[{id:'t',code:'T1',productId:'fuel',openingStock:d(1000)}],dispensers:[{nozzles:[{id:'n',code:'N1',openingMeter:d(1000)}]}]}]}) },
       shift: { findFirst: vi.fn().mockResolvedValueOnce({shiftNumber:1,closedAt:new Date('2026-01-01'),tankReadings:[{tankId:'t',closingDip:d(900)}],nozzleReadings:[{nozzleId:'n',closingMeter:d(1100)}]}).mockResolvedValueOnce(null), aggregate:vi.fn().mockResolvedValue({_max:{shiftNumber:1}}),create:vi.fn(async ({data})=>({...data,nozzleReadings:[],tankReadings:[]})) },
-      inventoryLedger:{groupBy:vi.fn().mockResolvedValueOnce([{tankId:'t',_sum:{quantityDelta:d(100)}}]).mockResolvedValueOnce([{tankId:'t',_sum:{quantityDelta:d(200)}}])},
+      inventoryLedger:{groupBy:vi.fn().mockResolvedValueOnce([{tankId:'t',stationId:'station',productId:'fuel',_sum:{quantityDelta:d(100)}}]).mockResolvedValueOnce([{tankId:'t',stationId:'station',productId:'fuel',_sum:{quantityDelta:d(200)}}])},
       user:{findMany:vi.fn().mockResolvedValue([{id:'u'}])},
     };
     db.$transaction.mockImplementation(async fn=>fn(tx));
@@ -23,19 +23,22 @@ describe('closing shift', () => {
   });
   it('creates only missing metered sales and rejects a repeated close', async () => {
     const shift = { id: 's', stationId: 'station', status: 'OPEN', configurationId: 'config', openedAt: new Date(), notes: null,
-      tankReadings: [{ tankId: 't', tank: { productId: 'fuel' }, closingDip: null }],
+      tankReadings: [{ tankId: 't', tank: { code: 'T1', productId: 'fuel' }, openingDip: d(1000), closingDip: null }],
       nozzleReadings: [{ nozzleId: 'n', openingMeter: d(1000), closingMeter: null, nozzle: { code: 'N1', dispenser: { code: 'D1' } } }],
       nozzleAssignments: [{ nozzleId: 'n', userId: 'u', user: { name: 'Staff' } }] };
     const tx: any = {
       shift: { findFirst: vi.fn(async () => shift), updateMany: vi.fn(async () => ({ count: 1 })), update: vi.fn(async ({data}) => Object.assign(shift, data)) },
       sale: { groupBy: vi.fn().mockResolvedValue([{ nozzleId: 'n', _sum: { quantity: d(20) } }]), create: vi.fn(async ({data}) => ({id:'sale', ...data})) },
-      nozzle: { findUnique: vi.fn().mockResolvedValue({id:'n',productId:'fuel',product:{name:'Fuel', code:'MS', inventoryTracked:true,sellingPrice:d(100),purchasePrice:d(90),sellingPriceHistory:[],purchasePriceHistory:[]},tankMappings:[{tankId:'t',tank:{productId:'fuel'}}]}) },
+      nozzle: { findMany: vi.fn().mockResolvedValue([{id:'n',code:'N1',productId:'fuel',dispenser:{code:'D1'},tankMappings:[{tankId:'t'}]}]), findUnique: vi.fn().mockResolvedValue({id:'n',productId:'fuel',product:{name:'Fuel', code:'MS', inventoryTracked:true,sellingPrice:d(100),purchasePrice:d(90),sellingPriceHistory:[],purchasePriceHistory:[]},tankMappings:[{tankId:'t',tank:{productId:'fuel'}}]}) },
       tank: { findFirst: vi.fn().mockResolvedValue({openingStock:d(1000)}) },
-      inventoryLedger: { aggregate: vi.fn().mockResolvedValue({_sum:{quantityDelta:d(-20)}}), create:vi.fn() },
+      inventoryLedger: { findMany: vi.fn().mockResolvedValue([]), aggregate: vi.fn().mockResolvedValue({_sum:{quantityDelta:d(-20)}}), create:vi.fn() },
+      ownerNotificationSettings: { findUnique: vi.fn().mockResolvedValueOnce({stockVarianceTolerance:d(1)}).mockResolvedValue({stockVarianceTolerance:d(50)}) },
       shiftTankReading:{update:vi.fn()},shiftNozzleReading:{update:vi.fn()},shiftNozzleAssignment:{update:vi.fn()},
     };
     db.$transaction.mockImplementation(async fn => fn(tx));
     const input = { closingCash: 7500, tankReadings:[{id:'t',value:895}], nozzleReadings:[{id:'n',value:1100,testingQuantity:5,testingReturned:false}], nozzleCollections:[{nozzleId:'n',amount:7500}] };
+    await expect(closeShift('org','s',input)).rejects.toMatchObject({code:'STOCK_VARIANCE_NOTE_REQUIRED'});
+    expect(tx.shift.updateMany).not.toHaveBeenCalled();
     await closeShift('org','s',input);
     expect(tx.sale.create).toHaveBeenCalledTimes(1);
     expect(tx.sale.create.mock.calls[0][0].data.quantity.toNumber()).toBe(75);

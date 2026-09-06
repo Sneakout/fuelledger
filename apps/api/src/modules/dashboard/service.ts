@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
+import { tankBookStocksAt } from '../../lib/stock.js';
 import { buildReport } from '../reports/service.js';
 
 const isoDate=(date:Date)=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -16,17 +17,17 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
     prisma.shift.findMany({where:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})},status:{in:['OPEN','RECONCILIATION_REQUIRED']}},select:{id:true,status:true,shiftNumber:true,openedAt:true,closedAt:true,station:{select:{id:true,name:true,code:true}}},orderBy:{openedAt:'desc'}}),
     prisma.shiftReconciliation.findMany({where:{shift:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})}},reconciledAt:{gte:today,lt:tomorrow}},include:{collections:{select:{varianceAmount:true}}}}),
     prisma.tank.findMany({
-      where:{status:'ACTIVE',configuration:{active:true,station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})}}},
+      where:{status:'ACTIVE',product:{active:true,inventoryTracked:true},configuration:{active:true,station:{organizationId,active:true,...(scopeIds?{id:{in:scopeIds}}:{})}}},
       include:{
         product:{select:{name:true,code:true,unit:true,sellingPrice:true,sellingPriceHistory:{where:{effectiveFrom:{lte:now}},orderBy:{effectiveFrom:'desc'},take:1}}},
         configuration:{select:{station:{select:{id:true,name:true,code:true}}}},
-        inventoryLedger:{select:{quantityDelta:true}},
         physicalReadings:{orderBy:{recordedAt:'desc'},take:1,select:{physicalStock:true,recordedAt:true}},
         densityReadings:{orderBy:{recordedAt:'desc'},take:1,select:{density:true,recordedAt:true}},
       },
       orderBy:[{configuration:{station:{name:'asc'}}},{code:'asc'}],
     }),
   ]);
+  const bookStockByTank=await tankBookStocksAt(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),now);
   const total=(from:Date,to:Date)=>recentSales.filter(row=>row.occurredAt>=from&&row.occurredAt<to).reduce((sum,row)=>sum+number(row.totalAmount),0);
   const thisWeek=total(weekStart,tomorrow),previousWeek=total(previousStart,weekStart),weekChange=previousWeek?((thisWeek-previousWeek)/previousWeek)*100:null;
   const trend=Array.from({length:7},(_,index)=>{const date=addDays(weekStart,index),next=addDays(date,1);return{date:isoDate(date),amount:total(date,next)};});
@@ -42,7 +43,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
   ];
   const stationHealth=report.stations.map(station=>{const stationSales=report.sales.byStation.find(row=>row.key===station.id);const stationOpen=open.filter(row=>row.station.id===station.id).length;const stationPending=pending.filter(row=>row.station.id===station.id).length;const stationLow=lowStock.filter(row=>row.key.startsWith(`${station.id}:`)).length;return{id:station.id,name:station.name,code:station.code,sales:stationSales?.amount??0,transactions:stationSales?.transactions??0,openShifts:stationOpen,pendingReconciliations:stationPending,stockAlerts:stationLow,status:stationPending||stationLow?'ATTENTION':stationOpen?'RUNNING':'CALM'};});
   const tankStocks=tanks.filter(tank=>['MS','HSD'].includes(tank.product.code)).map(tank=>{
-    const bookStock=number(tank.openingStock)+tank.inventoryLedger.reduce((sum,row)=>sum+number(row.quantityDelta),0);
+    const bookStock=number(bookStockByTank.get(tank.id)??tank.openingStock);
     const workingCapacity=number(tank.workingCapacity);
     const fillPercent=workingCapacity>0?Math.max(0,Math.min(100,bookStock/workingCapacity*100)):0;
     const latestReading=tank.physicalReadings[0],latestDensity=tank.densityReadings[0];
