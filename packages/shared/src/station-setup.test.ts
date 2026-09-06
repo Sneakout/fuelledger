@@ -84,6 +84,7 @@ describe('shift reconciliation validation', () => {
 describe('customer and fleet validation', () => {
   const customer={name:'Acme Logistics',code:'ACME',type:'FLEET' as const,creditLimit:100000,creditDays:30,active:true};
   it('accepts a fleet account with a credit policy',()=>expect(customerInputSchema.safeParse(customer).success).toBe(true));
+  it('accepts a new customer without a manually entered account code',()=>expect(customerInputSchema.safeParse({...customer,code:undefined}).success).toBe(true));
   it('rejects negative limits and unsafe account codes',()=>expect(customerInputSchema.safeParse({...customer,code:'bad code',creditLimit:-1}).success).toBe(false));
   it('accepts a registered fleet vehicle',()=>expect(vehicleInputSchema.safeParse({number:'KL 07 AB 1234',label:'Delivery truck',active:true}).success).toBe(true));
   it('accepts positive customer receipts',()=>expect(customerReceiptInputSchema.safeParse({stationId:'ckshift000000000000000001',amount:5000,paymentMethod:'UPI'}).success).toBe(true));

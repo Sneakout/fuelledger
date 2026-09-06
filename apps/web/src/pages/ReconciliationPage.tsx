@@ -866,7 +866,6 @@ function QuickCustomerModal({
 }) {
   const [form, setForm] = useState({
     name: "",
-    code: "",
     phone: "",
     creditLimit: 50000,
     creditDays: 15,
@@ -918,16 +917,6 @@ function QuickCustomerModal({
             />
           </label>
           <label className="field">
-            <span>Account code</span>
-            <input
-              value={form.code}
-              onChange={(e) =>
-                setForm({ ...form, code: e.target.value.toUpperCase() })
-              }
-              placeholder="CUSTOMER-01"
-            />
-          </label>
-          <label className="field">
             <span>Phone (optional)</span>
             <input
               value={form.phone}
@@ -963,7 +952,7 @@ function QuickCustomerModal({
           </button>
           <button
             className="primary small"
-            disabled={saving || !form.name.trim() || !form.code.trim()}
+            disabled={saving || !form.name.trim()}
             onClick={() => void submit()}
           >
             {saving ? "Creating…" : "Create & select"}

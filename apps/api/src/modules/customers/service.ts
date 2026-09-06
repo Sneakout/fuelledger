@@ -27,13 +27,30 @@ export async function bootstrap(organizationId: string,stationIds?:string[]) {
 }
 
 export async function createCustomer(organizationId: string, input: CustomerInput) {
-  try { return await prisma.customer.create({ data: { organizationId, ...input, email: input.email || null, phone: input.phone || null, taxId: input.taxId || null, billingAddress: input.billingAddress || null }, include: customerInclude }); }
-  catch (error) { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AppError(409, 'CUSTOMER_CODE_EXISTS', 'That customer code is already in use.'); throw error; }
+  const { code: _ignoredCode, ...details } = input;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const existing = await prisma.customer.findMany({
+      where: { organizationId, code: { startsWith: 'CUS-' } },
+      select: { code: true },
+    });
+    const next = existing.reduce((highest, customer) => {
+      const sequence = Number(customer.code.slice(4));
+      return Number.isInteger(sequence) ? Math.max(highest, sequence) : highest;
+    }, 0) + 1;
+    const code = `CUS-${String(next).padStart(4, '0')}`;
+    try {
+      return await prisma.customer.create({ data: { organizationId, ...details, code, email: input.email || null, phone: input.phone || null, taxId: input.taxId || null, billingAddress: input.billingAddress || null }, include: customerInclude });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
+    }
+  }
+  throw new AppError(409, 'CUSTOMER_CODE_RETRY', 'Another customer was added at the same time. Please try again.');
 }
 
 export async function updateCustomer(organizationId: string, id: string, input: CustomerInput) {
   const existing = await prisma.customer.findFirst({ where: { id, organizationId } }); if (!existing) throw new AppError(404, 'CUSTOMER_NOT_FOUND', 'Customer account not found.');
-  return prisma.customer.update({ where: { id }, data: { ...input, email: input.email || null, phone: input.phone || null, taxId: input.taxId || null, billingAddress: input.billingAddress || null }, include: customerInclude });
+  const { code: _ignoredCode, ...details } = input;
+  return prisma.customer.update({ where: { id }, data: { ...details, email: input.email || null, phone: input.phone || null, taxId: input.taxId || null, billingAddress: input.billingAddress || null }, include: customerInclude });
 }
 
 export async function addVehicle(organizationId: string, customerId: string, input: VehicleInput) {

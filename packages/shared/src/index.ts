@@ -767,7 +767,8 @@ export const customerInputSchema = z.object({
     .string()
     .trim()
     .toUpperCase()
-    .regex(/^[A-Z0-9-]+$/),
+    .regex(/^[A-Z0-9-]+$/)
+    .optional(),
   type: z.enum(customerTypes),
   phone: z.string().trim().max(30).optional(),
   email: z.string().trim().email().optional().or(z.literal("")),
