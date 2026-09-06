@@ -153,7 +153,11 @@ export function OperationsPage() {
       stationUsers.find((user) => user.role === "OWNER");
     if (manager) {
       const configuredAssignments = config?.dispensers.flatMap((d) =>
-        d.nozzles.map((n) => ({ nozzleId: n.id, userId: n.attendantAssignment?.userId ?? manager.id })),
+        d.nozzles.map((n) => {
+          const prior = last?.nozzleAssignments?.find(row => row.nozzleId === n.id)?.userId;
+          const candidate = prior ?? n.attendantAssignment?.userId;
+          return { nozzleId: n.id, userId: stationUsers.some(user => user.id === candidate) ? candidate! : manager.id };
+        }),
       ) ?? [];
       const assignedAttendants = [...new Set(configuredAssignments.map(row => row.userId))];
       setManagerId(manager.id);

@@ -1,0 +1,43 @@
+import { describe, expect, it } from 'vitest';
+
+const suite = process.env.RECOVERY_TEST_DATABASE_URL ? describe : describe.skip;
+suite('isolated release workflow', () => {
+  it('checks fuel, lubricant credit, repayment, expense, correction and next opening', async () => {
+    if (process.env.DATABASE_URL !== process.env.RECOVERY_TEST_DATABASE_URL) throw new Error('Use only the explicitly isolated database');
+    const { prisma: db } = await import('../src/lib/prisma.js');
+    const purchases = await import('../src/modules/purchases/service.js');
+    const shifts = await import('../src/modules/shifts/service.js');
+    const { createSale } = await import('../src/modules/sales/service.js');
+    const { reconcile } = await import('../src/modules/reconciliation/service.js');
+    const { receivePayment } = await import('../src/modules/customers/service.js');
+    const org = await db.organization.create({data:{name:'Release scenario'}});
+    const user = await db.user.create({data:{organizationId:org.id,name:'Test owner',email:`${org.id}@example.test`,passwordHash:'not-a-login',role:'OWNER'}});
+    const station = await db.station.create({data:{organizationId:org.id,name:'Test fuel station',code:'TEST',addressLine1:'Test',city:'Test',state:'Test',postalCode:'000000'}});
+    const fuel = await db.product.create({data:{organizationId:org.id,name:'Petrol',code:'MS',category:'FUEL',unit:'LITRE',purchasePrice:90,sellingPrice:100,tankLinked:true,meterLinked:true}});
+    const oil = await db.product.create({data:{organizationId:org.id,name:'Oil',code:'OIL',category:'LUBRICANTS',unit:'PIECE',purchasePrice:50,sellingPrice:100}});
+    const config = await db.stationConfiguration.create({data:{stationId:station.id,version:1}});
+    const tank = await db.tank.create({data:{configurationId:config.id,productId:fuel.id,code:'T1',nominalCapacity:5000,workingCapacity:4500,tankType:'UNDERGROUND',dipMethod:'MANUAL'}});
+    const du = await db.dispenser.create({data:{configurationId:config.id,code:'D1'}});
+    const nozzle = await db.nozzle.create({data:{dispenserId:du.id,productId:fuel.id,code:'N1',tankMappings:{create:{tankId:tank.id}}}});
+    const supplier = await db.supplier.create({data:{organizationId:org.id,name:'Test supplier',code:'SUP',paymentTerms:3}});
+    const customer = await db.customer.create({data:{organizationId:org.id,name:'Test customer',code:'C1',type:'CREDIT',creditLimit:1000,creditDays:7}});
+    const yesterday = new Date(Date.now()-86400000).toISOString();
+    const invoice = await purchases.createInvoice(org.id,user.id,{stationId:station.id,supplierId:supplier.id,invoiceNumber:'I1',invoiceDate:yesterday,dueDate:yesterday,taxAmount:0,receiveNow:true,paidNow:false,lines:[{productId:fuel.id,tankId:tank.id,description:'Fuel',quantity:1000,unitCost:90,taxRate:0},{productId:oil.id,description:'Oil',quantity:10,unitCost:50,taxRate:0}]});
+    const opening = {stationId:station.id,managerId:user.id,userIds:[user.id],nozzleAssignments:[{nozzleId:nozzle.id,userId:user.id}],openingCash:0,tankReadings:[{id:tank.id,value:1000}],nozzleReadings:[{id:nozzle.id,value:0}]};
+    const shift = await shifts.openShift(org.id,opening);
+    await createSale(org.id,{stationId:station.id,shiftId:shift.id,employeeId:user.id,productId:oil.id,quantity:1,unitPrice:100,paymentMethod:'CREDIT',customerId:customer.id} as any);
+    await shifts.closeShift(org.id,shift.id,{closingCash:10000,tankReadings:[{id:tank.id,value:900}],nozzleReadings:[{id:nozzle.id,value:100}],nozzleCollections:[{nozzleId:nozzle.id,amount:10000}]});
+    await reconcile(org.id,user.id,shift.id,{collections:['CASH','UPI','CARD','CREDIT','FLEET','OTHER'].map(paymentMethod=>({paymentMethod,adjustmentAmount:paymentMethod==='CASH'?10000:paymentMethod==='OTHER'?-10000:0,actualAmount:paymentMethod==='CASH'?10000:paymentMethod==='CREDIT'?100:0,adjustmentReason:'Payment split verified'})),creditAllocations:[{paymentMethod:'CREDIT',customerId:customer.id,amount:100}]} as any);
+    await receivePayment(org.id,customer.id,user.id,{stationId:station.id,amount:50,paymentMethod:'CASH'} as any);
+    const category = await db.expenseCategory.create({data:{organizationId:org.id,name:'Repairs',code:'REPAIR'}});
+    await purchases.createExpense(org.id,user.id,{stationId:station.id,categoryId:category.id,amount:20,paymentMethod:'CASH',description:'Test expense',incurredAt:new Date().toISOString()} as any);
+    await purchases.updateInvoice(org.id,user.id,invoice.id,{version:0,invoiceNumber:'I1',invoiceDate:yesterday,dueDate:yesterday,refreshPrices:false,markPaid:false,correctionReason:'Correct original delivery quantity',lines:invoice.lines.map(line=>({id:line.id,quantity:line.productId===fuel.id?1100:10}))});
+    expect(Number((await db.customerLedgerEntry.aggregate({where:{customerId:customer.id},_sum:{amount:true}}))._sum.amount)).toBe(50);
+    expect(Number((await db.inventoryLedger.aggregate({where:{stationId:station.id,productId:fuel.id},_sum:{quantityDelta:true}}))._sum.quantityDelta)).toBe(1000);
+    expect(Number((await db.inventoryLedger.aggregate({where:{stationId:station.id,productId:oil.id},_sum:{quantityDelta:true}}))._sum.quantityDelta)).toBe(9);
+    const next = await shifts.openShift(org.id,{...opening,tankReadings:[{id:tank.id,value:900}],nozzleReadings:[{id:nozzle.id,value:100}]});
+    expect(next.shiftNumber).toBe(2);
+    expect(await db.sale.count({where:{shiftId:shift.id}})).toBe(2);
+    await db.$disconnect();
+  },30000);
+});

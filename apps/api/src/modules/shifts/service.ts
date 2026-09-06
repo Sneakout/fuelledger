@@ -1,3 +1,5 @@
+import { safeTransaction } from '../../lib/safe-save.js';
+import { assertStockAvailable } from '../../lib/stock.js';
 import type {
   CloseShiftInput,
   NozzleCustodyInput,
@@ -27,6 +29,7 @@ const include = {
   },
 };
 const exact = (ids: string[], values: Array<{ id: string }>) =>
+  new Set(ids).size === ids.length &&
   ids.length === values.length &&
   ids.every((id) => values.some((value) => value.id === id));
 export async function bootstrap(organizationId: string, stationIds?: string[]) {
@@ -62,6 +65,7 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
             id: true,
             shiftNumber: true,
             closedAt: true,
+            nozzleAssignments: { select: { nozzleId: true, userId: true } },
             tankReadings: { select: { tankId: true, closingDip: true } },
             nozzleReadings: { select: { nozzleId: true, closingMeter: true } },
           },
@@ -112,7 +116,9 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
   const inventoryByTank = new Map(
     tankInventory.map((row) => [row.tankId!, Number(row._sum.quantityDelta ?? 0)]),
   );
-  const shapedStations = stations.map(({ shifts: previous, ...station }) => ({
+  const shapedStations = await Promise.all(stations.map(async ({ shifts: previous, ...station }) => {
+    const sinceClose = previous[0]?.closedAt ? await prisma.inventoryLedger.groupBy({ by: ['tankId'], where: { organizationId, stationId: station.id, occurredAt: { gt: previous[0].closedAt, lte: new Date() } }, _sum: { quantityDelta: true } }) : [];
+    return ({
     ...station,
     availableTankStock:
       station.configurations[0]?.tanks.map((tank) => ({
@@ -126,15 +132,16 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
           shiftId: previous[0].id,
           shiftNumber: previous[0].shiftNumber,
           closedAt: previous[0].closedAt!,
+          nozzleAssignments: previous[0].nozzleAssignments,
           tankReadings: previous[0].tankReadings
             .filter((row) => row.closingDip !== null)
-            .map((row) => ({ id: row.tankId, value: row.closingDip! })),
+            .map((row) => ({ id: row.tankId, value: row.closingDip!.add(sinceClose.find(entry => entry.tankId === row.tankId)?._sum.quantityDelta ?? 0) })),
           nozzleReadings: previous[0].nozzleReadings
             .filter((row) => row.closingMeter !== null)
             .map((row) => ({ id: row.nozzleId, value: row.closingMeter! })),
         }
       : null,
-  }));
+  }); }));
   return {
     stations: shapedStations,
     users: users.map((user) => ({
@@ -147,7 +154,8 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
   };
 }
 export async function openShift(organizationId: string, input: OpenShiftInput) {
-  const station = await prisma.station.findFirst({
+  return safeTransaction(prisma, async (tx) => {
+  const station = await tx.station.findFirst({
     where: { id: input.stationId, organizationId, active: true },
     include: {
       configurations: {
@@ -189,16 +197,17 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
       "READINGS_INCOMPLETE",
       "Enter one opening reading for every active tank and nozzle.",
     );
-  const previous = await prisma.shift.findFirst({
+  const previous = await tx.shift.findFirst({
     where: { stationId: station.id, closedAt: { not: null } },
     orderBy: { closedAt: "desc" },
     select: {
       shiftNumber: true,
+      closedAt: true,
       tankReadings: { select: { tankId: true, closingDip: true } },
       nozzleReadings: { select: { nozzleId: true, closingMeter: true } },
     },
   });
-  const tankInventory = await prisma.inventoryLedger.groupBy({
+  const tankInventory = await tx.inventoryLedger.groupBy({
     by: ["tankId"],
     where: {
       organizationId,
@@ -213,6 +222,7 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
       Number(row._sum.quantityDelta ?? 0),
     ]),
   );
+  const sinceClose = previous?.closedAt ? await tx.inventoryLedger.groupBy({ by: ['tankId'], where: { organizationId, stationId: station.id, occurredAt: { gt: previous.closedAt, lte: new Date() } }, _sum: { quantityDelta: true } }) : [];
   for (const reading of input.tankReadings) {
     const tank = tanks.find((item) => item.id === reading.id)!;
     const prior = previous?.tankReadings.find(
@@ -220,7 +230,7 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
     )?.closingDip;
     const expected =
       prior !== null && prior !== undefined
-        ? Number(prior)
+        ? Number(prior) + Number(sinceClose.find(row => row.tankId === tank.id)?._sum.quantityDelta ?? 0)
         : Number(tank.openingStock) + (inventoryByTank.get(tank.id) ?? 0);
     if (Math.abs(reading.value - expected) > 0.001)
       throw new AppError(
@@ -255,7 +265,7 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
       "NOZZLE_ASSIGNMENTS_INCOMPLETE",
       "Assign one attendant to every active nozzle.",
     );
-  const users = await prisma.user.findMany({
+  const users = await tx.user.findMany({
     where: {
       organizationId,
       id: { in: [input.managerId, ...input.userIds] },
@@ -272,7 +282,7 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
       "Each nozzle attendant must be on the shift team.",
     );
   if (
-    await prisma.shift.findFirst({
+    await tx.shift.findFirst({
       where: { stationId: station.id, status: "OPEN" },
     })
   )
@@ -281,11 +291,11 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
       "SHIFT_ALREADY_OPEN",
       "Close the current open shift before opening another one.",
     );
-  const latest = await prisma.shift.aggregate({
+  const latest = await tx.shift.aggregate({
     where: { stationId: station.id },
     _max: { shiftNumber: true },
   });
-  const shift = await prisma.shift.create({
+  const shift = await tx.shift.create({
     data: {
       stationId: station.id,
       configurationId: config.id,
@@ -321,13 +331,15 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
     include,
   });
   return summary(shift);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 export async function closeShift(
   organizationId: string,
   id: string,
   input: CloseShiftInput,
 ) {
-  const shift = await prisma.shift.findFirst({
+  return safeTransaction(prisma, async (tx) => {
+  const shift = await tx.shift.findFirst({
     where: { id, station: { organizationId } },
     include,
   });
@@ -369,7 +381,7 @@ export async function closeShift(
         "A closing meter reading cannot be below its opening reading.",
       );
   }
-  const meteredSales = await prisma.sale.groupBy({
+  const meteredSales = await tx.sale.groupBy({
     by: ["nozzleId"],
     where: { shiftId: id, kind: "METERED" },
     _sum: { quantity: true },
@@ -394,7 +406,9 @@ export async function closeShift(
       );
     }
   }
-  const closed = await prisma.$transaction(async (tx) => {
+  const closed = await (async () => {
+    const claimed = await tx.shift.updateMany({ where: { id, status: "OPEN" }, data: { status: "RECONCILIATION_REQUIRED" } });
+    if (claimed.count !== 1) throw new AppError(409, "SHIFT_NOT_OPEN", "This shift was already closed. Refresh to review it.");
     const closedAt = new Date();
     for (const reading of input.nozzleReadings) {
       const opening = shift.nozzleReadings.find(
@@ -470,6 +484,7 @@ export async function closeShift(
       const meterClosing = new Prisma.Decimal(reading.value);
       const meterOpening = meterClosing.sub(quantity);
       const tankId = resolvedTanks[0]!.tankId;
+      if (nozzle.product.inventoryTracked) await assertStockAvailable(tx, { organizationId, stationId: shift.stationId, productId: nozzle.productId, tankId }, quantity, closedAt);
       const sale = await tx.sale.create({
         data: {
           organizationId,
@@ -562,8 +577,9 @@ export async function closeShift(
       },
       include,
     });
-  });
+  })();
   return summary(closed);
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 function summary(shift: any) {
   const volume = shift.nozzleReadings.reduce(
@@ -627,7 +643,7 @@ export async function updateNozzleCustody(
       "ATTENDANT_NOT_ON_SHIFT",
       "Every nozzle attendant must be on this shift.",
     );
-  await prisma.$transaction(async (tx) => {
+  await safeTransaction(prisma, async (tx) => {
     await tx.shiftNozzleAssignment.deleteMany({ where: { shiftId: id } });
     await tx.shiftNozzleAssignment.createMany({
       data: input.assignments.map((row) => ({

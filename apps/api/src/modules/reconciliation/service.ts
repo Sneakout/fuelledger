@@ -1,3 +1,5 @@
+import { safeTransaction } from '../../lib/safe-save.js';
+import { additionalCustomerDebt, collectionDifferences } from '../../lib/shift-collections.js';
 import type { ReconciliationInput } from "@fuelledger/shared";
 import { paymentMethods } from "@fuelledger/shared";
 import { Prisma } from "@prisma/client";
@@ -21,6 +23,8 @@ const reconciliationInclude = {
   reconciledBy: { select: { id: true, name: true, role: true } },
 } as const;
 const shiftInclude = {
+  nozzleAssignments: { include: { user: { select: { id: true, name: true } } } },
+  sales: { where: { paymentMethod: { in: ["CREDIT", "FLEET"] as ("CREDIT" | "FLEET")[] } } },
   station: { select: { id: true, name: true, code: true } },
   manager: { select: { id: true, name: true, role: true } },
   reconciliation: { include: reconciliationInclude },
@@ -101,7 +105,8 @@ export async function reconcile(
   shiftId: string,
   input: ReconciliationInput,
 ) {
-  const shift = await prisma.shift.findFirst({
+  const result = await safeTransaction(prisma, async (tx) => {
+  const shift = await tx.shift.findFirst({
     where: { id: shiftId, station: { organizationId } },
     include: shiftInclude,
   });
@@ -119,7 +124,7 @@ export async function reconcile(
       "SHIFT_NOT_READY",
       "Close the shift before reconciling collections.",
     );
-  const sales = await prisma.sale.groupBy({
+  const sales = await tx.sale.groupBy({
     by: ["paymentMethod"],
     where: { shiftId },
     _sum: { totalAmount: true },
@@ -163,11 +168,12 @@ export async function reconcile(
         `Assign the complete ${method.toLowerCase()} amount to customer accounts.`,
       );
   }
+  const debtAdditions = additionalCustomerDebt(input.creditAllocations, shift.sales.filter(sale => sale.customerId).map(sale => ({customerId: sale.customerId!, paymentMethod: sale.paymentMethod, amount: Number(sale.totalAmount)})));
   const customerIds = [
     ...new Set(input.creditAllocations.map((row) => row.customerId)),
   ];
   const customers = customerIds.length
-    ? await prisma.customer.findMany({
+    ? await tx.customer.findMany({
         where: { id: { in: customerIds }, organizationId, active: true },
         include: {
           vehicles: { where: { active: true } },
@@ -228,7 +234,7 @@ export async function reconcile(
       (sum, row) => sum + Number(row.amount),
       0,
     );
-    const added = input.creditAllocations
+    const added = input.creditAllocations.map((row, index) => ({...row, amount: debtAdditions[index]!}))
       .filter(
         (row) =>
           row.customerId === customer.id &&
@@ -242,12 +248,13 @@ export async function reconcile(
         `These allocations would exceed ${customer.name}'s credit limit.`,
       );
   }
-  const automatic = await prisma.sale.aggregate({
+  const automatic = await tx.sale.aggregate({
     where: { shiftId, paymentMethod: "OTHER", notes: automaticSaleNote },
     _sum: { totalAmount: true },
   });
   const autoUnallocated = Number(automatic._sum.totalAmount ?? 0);
-  const result = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.shift.updateMany({ where: { id: shiftId, status: "RECONCILIATION_REQUIRED" }, data: { status: "LOCKED" } });
+    if (claimed.count !== 1) throw new AppError(409, "SHIFT_LOCKED", "This shift was already reconciled. Refresh to review it.");
     const reconciliation = await tx.shiftReconciliation.create({
       data: {
         shiftId,
@@ -276,7 +283,7 @@ export async function reconcile(
       },
       include: reconciliationInclude,
     });
-    for (const allocation of input.creditAllocations) {
+    for (const [allocationIndex, allocation] of input.creditAllocations.entries()) {
       const customer = customers.find(
         (row) => row.id === allocation.customerId,
       )!;
@@ -296,14 +303,14 @@ export async function reconcile(
       const vehicle = allocation.vehicleId
         ? customer.vehicles.find((row) => row.id === allocation.vehicleId)
         : null;
-      if (["CREDIT", "FLEET"].includes(allocation.paymentMethod))
+      if (debtAdditions[allocationIndex]! > 0)
         await tx.customerLedgerEntry.create({
           data: {
             organizationId,
             stationId: shift.station.id,
             customerId: customer.id,
             type: "SALE",
-            amount: new Prisma.Decimal(allocation.amount),
+            amount: new Prisma.Decimal(debtAdditions[allocationIndex]!),
             shiftCreditAllocationId: record.id,
             description: `Shift #${shift.shiftNumber} ${allocation.paymentMethod.toLowerCase()} sale${vehicle ? ` · ${vehicle.number}` : ""}`,
             dueDate,
@@ -355,7 +362,7 @@ export async function reconcile(
       })),
       autoUnallocated,
     );
-  });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   await notifyShiftVariance(organizationId, result).catch(() => undefined);
   return result;
 }
@@ -419,6 +426,8 @@ function presentShift(
     autoUnallocated,
     salesTotal: Object.values(expected).reduce((sum, value) => sum + value, 0),
     suggestedActual,
+    recordedCreditAllocations: shift.sales?.filter((sale: any) => sale.customerId).map((sale: any) => ({ customerId: sale.customerId, vehicleId: sale.vehicleId, paymentMethod: sale.paymentMethod, amount: Number(sale.totalAmount) })) ?? [],
+    collectionDifferences: collectionDifferences(collections.map((row: any) => ({ actualAmount: Number(row.actualAmount), expectedAmount: Number(row.expectedAmount), adjustmentAmount: Number(row.adjustmentAmount) }))),
     totals,
   };
 }

@@ -1,9 +1,11 @@
+import { safeTransaction } from '../../lib/safe-save.js';
 import type { SaleInput } from '@fuelledger/shared';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 import { collectionAccount, postJournal } from '../accounting/service.js';
+import { assertStockAvailable } from '../../lib/stock.js';
 import { notifyLowStock } from '../notifications/service.js';
 
 const saleInclude = { station: { select: { id: true, name: true, code: true } }, shift: { select: { id: true, shiftNumber: true, status: true } }, product: { select: { id: true, name: true, code: true, unit: true, meterLinked: true, isService: true } }, employee: { select: { id: true, name: true, role: true } }, tank: { select: { id: true, code: true } }, nozzle: { select: { id: true, code: true, dispenser: { select: { code: true } } } }, customer: { select: { id: true, name: true, code: true, type: true } }, vehicle: { select: { id: true, number: true, label: true } } } as const;
@@ -67,7 +69,7 @@ async function createMeteredSale(organizationId: string, input: SaleInput, shift
 
 async function persistSale({ organizationId, input, kind, quantity, product }: { organizationId: string; input: SaleInput; kind: 'METERED' | 'PRODUCT' | 'SERVICE'; quantity: number; product: { id: string; inventoryTracked: boolean; isService: boolean; purchasePrice: Prisma.Decimal;sellingPrice:Prisma.Decimal } }) {
   const unitPrice = product.sellingPrice; const totalAmount = new Prisma.Decimal(quantity).mul(unitPrice);
-  return prisma.$transaction(async tx => {
+  return safeTransaction(prisma, async tx => {
     const liveShift=await tx.shift.findFirst({where:{id:input.shiftId,stationId:input.stationId,status:'OPEN',station:{organizationId}},select:{id:true}});
     if(!liveShift)throw new AppError(409,'SHIFT_NOT_OPEN','This shift was closed before the sale could be saved. Refresh and choose an open shift.');
     if(kind==='METERED'&&input.nozzleId){const latest=await tx.sale.findFirst({where:{shiftId:input.shiftId,nozzleId:input.nozzleId,kind:'METERED'},orderBy:[{meterClosing:'desc'},{createdAt:'desc'}],select:{meterClosing:true}});if(latest&&Math.abs(Number(latest.meterClosing)-Number(input.meterOpening))>.001)throw new AppError(409,'METER_ALREADY_ADVANCED',`This nozzle has already advanced to ${Number(latest.meterClosing).toLocaleString()} L. Refresh before recording the next sale.`);}
@@ -77,6 +79,7 @@ async function persistSale({ organizationId, input, kind, quantity, product }: {
     const vehicle = input.vehicleId && customer ? await tx.vehicle.findFirst({ where: { id: input.vehicleId, customerId: customer.id, active: true } }) : null;
     if (input.vehicleId && !vehicle) throw new AppError(400, 'VEHICLE_INVALID', 'Choose a vehicle registered to this customer.');
     if (customer && ['CREDIT', 'FLEET'].includes(input.paymentMethod)) { const aggregate = await tx.customerLedgerEntry.aggregate({ where: { customerId: customer.id }, _sum: { amount: true } }); const projected = new Prisma.Decimal(aggregate._sum.amount ?? 0).add(totalAmount); if (projected.greaterThan(customer.creditLimit)) throw new AppError(409, 'CREDIT_LIMIT_EXCEEDED', `This sale would exceed ${customer.name}'s credit limit.`); }
+    if (product.inventoryTracked) await assertStockAvailable(tx, { organizationId, stationId: input.stationId, productId: product.id, tankId: input.tankId }, quantity);
     const sale = await tx.sale.create({ data: { organizationId, stationId: input.stationId, shiftId: input.shiftId, productId: product.id, employeeId: input.employeeId, tankId: input.tankId ?? null, nozzleId: input.nozzleId ?? null, kind, paymentMethod: input.paymentMethod, quantity: new Prisma.Decimal(quantity), unitPrice, totalAmount, meterOpening: input.meterOpening ?? null, meterClosing: input.meterClosing ?? null, customerId: customer?.id ?? null, vehicleId: vehicle?.id ?? null, customerName: customer?.name ?? input.customerName ?? null, vehicleNumber: vehicle?.number ?? input.vehicleNumber ?? null, notes: input.notes || null }, include: saleInclude });
     if (product.inventoryTracked) await tx.inventoryLedger.create({ data: { organizationId, stationId: input.stationId, productId: product.id, tankId: input.tankId ?? null, type: 'SALE', quantityDelta: new Prisma.Decimal(quantity).neg(), unitCost:product.purchasePrice, saleId: sale.id, occurredAt: sale.occurredAt, createdById: input.employeeId } });
     if (customer && ['CREDIT', 'FLEET'].includes(input.paymentMethod)) { const dueDate = new Date(sale.occurredAt); dueDate.setDate(dueDate.getDate() + customer.creditDays); await tx.customerLedgerEntry.create({ data: { organizationId, stationId: input.stationId, customerId: customer.id, type: 'SALE', amount: totalAmount, saleId: sale.id, description: `${sale.product.name} sale`, dueDate, occurredAt: sale.occurredAt, createdById: input.employeeId } }); }

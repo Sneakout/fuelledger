@@ -1,0 +1,30 @@
+{
+  "generatedAt": "2026-09-06T03:17:51.319Z",
+  "mode": "READ ONLY",
+  "negativeStock": [],
+  "unbalancedJournals": [],
+  "invoicePaymentIssues": [],
+  "accountChecks": [
+    {
+      "organization_id": "org_demo_fuelledger",
+      "station_id": "cmtid701o0001r0di000asjt6",
+      "account": "1100",
+      "register_balance": "1590",
+      "accounting_balance": "830828.75"
+    },
+    {
+      "organization_id": "org_demo_fuelledger",
+      "station_id": "cmtid701o0001r0di000asjt6",
+      "account": "2000",
+      "register_balance": "2990",
+      "accounting_balance": "0"
+    }
+  ],
+  "releaseBlockers": [
+    "Moving weighted-average costing and verified opening-stock values are not implemented."
+  ],
+  "limitations": [
+    "Account differences require review, not automatic repair. Standalone goods receipts may explain accounts-payable differences.",
+    "This report does not establish historical inventory value or prove all workflows. No records were modified."
+  ]
+}

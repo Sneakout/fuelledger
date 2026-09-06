@@ -863,6 +863,8 @@ export const purchaseInvoiceInputSchema = z
   });
 export const purchaseInvoiceUpdateSchema = z
   .object({
+    version: z.number().int().nonnegative(),
+    receivedAt: z.string().datetime().optional(),
     invoiceNumber: z.string().trim().min(1).max(80),
     invoiceDate: z.string().datetime(),
     dueDate: z.string().datetime(),
@@ -871,7 +873,7 @@ export const purchaseInvoiceUpdateSchema = z
     markPaid: z.boolean().optional().default(false),
     paymentMethod: z.enum(settlementMethods).optional(),
     paymentReferenceNo: z.string().trim().max(80).optional(),
-    correctionReason: z.string().trim().min(5).max(300).optional(),
+    correctionReason: z.string().trim().min(5).max(300),
     lines: z
       .array(
         z.object({

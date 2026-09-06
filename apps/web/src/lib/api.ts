@@ -39,7 +39,36 @@ export class ApiRequestError extends Error {
     super(message);
   }
 }
+const inFlightSaves = new Map<string, Promise<unknown>>();
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (!init?.method || !['POST', 'PUT', 'PATCH'].includes(init.method)) return rawRequest<T>(path, init);
+  const signature = `${init.method}:${path}:${String(init.body ?? '')}`;
+  const existing = inFlightSaves.get(signature);
+  if (existing) return existing as Promise<T>;
+  const pending = (async () => {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(signature));
+    const storageKey = 'fuelledger-save:' + Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+    let key: string;
+    try {
+      key = sessionStorage.getItem(storageKey) ?? crypto.randomUUID();
+      sessionStorage.setItem(storageKey, key);
+    } catch {
+      throw new ApiRequestError('Enable browser session storage before saving so interrupted saves can be retried safely.', 'SAVE_STORAGE_UNAVAILABLE');
+    }
+    try {
+      const result = await rawRequest<T>(path, { ...init, headers: { ...init.headers, 'Idempotency-Key': key } });
+      sessionStorage.removeItem(storageKey);
+      return result;
+    } catch (error) {
+      // Keep the key for an uncertain result; retrying must not create a second payment.
+      if (error instanceof ApiRequestError && !['SAVE_RETRY_REQUIRED', 'INTERNAL_ERROR', 'DATABASE_UNAVAILABLE', 'SERVER_UNAVAILABLE', 'INVALID_SERVER_RESPONSE'].includes(error.code)) sessionStorage.removeItem(storageKey);
+      throw error;
+    }
+  })();
+  inFlightSaves.set(signature, pending);
+  try { return await pending; } finally { inFlightSaves.delete(signature); }
+}
+async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
     credentials: "include",
@@ -415,6 +444,7 @@ export type ShiftStation = {
   code: string;
   availableTankStock: Array<{ id: string; value: string }>;
   lastClosing: {
+    nozzleAssignments: Array<{ nozzleId: string; userId: string }>;
     shiftId: string;
     shiftNumber: number;
     closedAt: string;
@@ -763,6 +793,7 @@ export type ReconciliationLine = {
   physicalStock: number | null;
   variance: number | null;
   dipReading: number | null;
+  bookStockAtReading?: number | null;
   readAt: string | null;
   density: number | null;
   densityRecordedAt: string | null;
@@ -825,6 +856,8 @@ export type ReconciliationShift = {
   autoUnallocated: number;
   salesTotal: number;
   suggestedActual: Record<string, number>;
+  recordedCreditAllocations?: Array<{ customerId: string; vehicleId: string | null; paymentMethod: string; amount: number }>;
+  collectionDifferences?: { shortage: number; excess: number };
   reconciliation: {
     id: string;
     reconciledAt: string;
@@ -956,6 +989,7 @@ export type AttachmentMeta = {
   size: number;
 };
 export type PurchaseInvoice = {
+  version: number;
   id: string;
   invoiceNumber: string;
   invoiceDate: string;

@@ -160,6 +160,7 @@ export function PurchasesPage() {
     {},
   );
   const [correctionReason, setCorrectionReason] = useState("");
+  const [receiptDateCorrection, setReceiptDateCorrection] = useState("");
   const [payment, setPayment] = useState({
     stationId: "",
     invoiceId: "",
@@ -261,6 +262,9 @@ export function PurchasesPage() {
           (line) => Number(editQuantities[line.id]) !== Number(line.quantity),
         );
         await api.updatePurchaseInvoice(editingInvoice.id, {
+          version: editingInvoice.version,
+          correctionReason,
+          ...(receiptDateCorrection ? { receivedAt: iso(receiptDateCorrection) } : {}),
           invoiceNumber: invoice.invoiceNumber,
           invoiceDate: iso(invoice.invoiceDate),
           dueDate: iso(invoice.dueDate),
@@ -546,6 +550,7 @@ export function PurchasesPage() {
                           ),
                         );
                         setCorrectionReason("");
+                        setReceiptDateCorrection("");
                         setInvoice((current) => ({
                           ...current,
                           stationId: item.station.id,
@@ -957,10 +962,7 @@ export function PurchasesPage() {
                           <strong>{money(correctionPreview)}</strong>
                         </div>
                       )}
-                      {editingInvoice?.lines.some(
-                        (line) =>
-                          Number(editQuantities[line.id]) !== Number(line.quantity),
-                      ) && (
+                      {editingInvoice && (
                         <label className="field invoice-correction-reason">
                           <span>Reason for correction</span>
                           <textarea
@@ -991,18 +993,19 @@ export function PurchasesPage() {
                           </small>
                         ))}
                         <b>
-                          Prices for the selected invoice date are loaded. They
-                          will be applied only when you save changes.
+                          Rates checked for invoice date {invoice.invoiceDate}.
+                          They apply only when you save changes. Recorded payments stay unchanged.
                         </b>
                         {editingInvoice?.status === "PAID" && (
                           <b>
-                            This cash-and-carry invoice will remain paid in
-                            full; its opening payment will update to the
-                            refreshed total.
+                            Recorded payments will not change. An increase may
+                            leave a balance due; a total below recorded payments
+                            must be resolved before saving.
                           </b>
                         )}
                       </div>
                     )}
+                    {editingInvoice?.receipt && <label className="field"><span>Correct stock receipt date (optional)</span><input type="date" value={receiptDateCorrection} onChange={e => setReceiptDateCorrection(e.target.value)} /><small>Leave blank to preserve the original receipt date: {new Date(editingInvoice.receipt.receivedAt).toLocaleDateString("en-IN")}.</small></label>}
                     {!!editingInvoice?.corrections.length && (
                       <div className="invoice-correction-history">
                         <b>Correction history</b>

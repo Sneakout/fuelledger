@@ -709,7 +709,18 @@ model Supplier {
   @@map("suppliers")
 }
 
+model SaveReceipt {
+  actor String
+  key String
+  fingerprint String
+  result Json
+  createdAt DateTime @default(now()) @map("created_at")
+  @@id([actor, key])
+  @@map("save_receipts")
+}
+
 model PurchaseInvoice {
+  version Int @default(0)
   id String @id @default(cuid())
   organizationId String @map("organization_id")
   stationId String @map("station_id")
@@ -773,6 +784,7 @@ model PurchaseInvoiceLine {
 }
 
 model SupplierPayment {
+  origin String @default("RECORDED_PAYMENT")
   id String @id @default(cuid())
   organizationId String @map("organization_id")
   stationId String @map("station_id")

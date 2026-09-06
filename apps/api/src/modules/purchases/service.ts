@@ -1,9 +1,11 @@
+import { safeTransaction } from '../../lib/safe-save.js';
 import type { ExpenseCategoryInput, ExpenseInput, PurchaseInvoiceInput, PurchaseInvoiceUpdateInput, SupplierInput, SupplierPaymentInput } from '@fuelledger/shared';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { defaultExpenseCategories } from '../../lib/default-expense-categories.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
+import { assertStockAvailable } from '../../lib/stock.js';
 import { collectionAccount, postJournal } from '../accounting/service.js';
 
 const invoiceInclude = {
@@ -42,6 +44,8 @@ const invoiceInclude = {
     select: {
       id: true,
       reason: true,
+      beforeLines: true,
+      afterLines: true,
       previousTotal: true,
       correctedTotal: true,
       correctedAt: true,
@@ -220,7 +224,7 @@ export async function createInvoice(organizationId: string, userId: string, inpu
   const subtotal = input.lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0);
   const total = subtotal + input.taxAmount;
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await safeTransaction(prisma, async (tx) => {
       const invoice = await tx.purchaseInvoice.create({
         data: {
           organizationId,
@@ -330,6 +334,7 @@ export async function createInvoice(organizationId: string, userId: string, inpu
             stationId: station.id,
             supplierId: supplier.id,
             invoiceId: invoice.id,
+            origin: "ALREADY_PAID_DECLARATION",
             amount: total,
             paymentMethod: input.paymentMethod!,
             referenceNo: input.paymentReferenceNo || null,
@@ -508,30 +513,26 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
         totalAmount: Number(invoice.totalAmount),
       };
   const paid = invoice.payments.reduce((sum, payment) => sum + Number(payment.amount), 0);
-  const openingPayment = invoice.status === 'PAID' && invoice.payments.length === 1 && Math.abs(paid - Number(invoice.totalAmount)) < 0.01 ? invoice.payments[0]! : null;
-  const openingPaymentJournal =
-    openingPayment && shouldRecalculate
-      ? await prisma.journal.findFirst({
-          where: {
-            sourceType: 'SUPPLIER_PAYMENT',
-            sourceId: openingPayment.id,
-          },
-        })
-      : null;
-  const syncOpeningPayment = Boolean(openingPayment && openingPaymentJournal);
   if (shouldRecalculate && pricing.totalAmount <= 0.001) throw new AppError(400, 'INVOICE_TOTAL_INVALID', 'Set a valid purchase price for every product before refreshing this invoice.');
-  if (shouldRecalculate && paid > pricing.totalAmount + 0.001 && !syncOpeningPayment) throw new AppError(409, 'INVOICE_TOTAL_BELOW_PAYMENTS', 'This invoice has separate recorded payments. Correct or reverse those payments before reducing the invoice total.');
-  if (quantityChanged && invoice.receipt) {
+  if (shouldRecalculate && paid > pricing.totalAmount + 0.001) throw new AppError(409, 'INVOICE_TOTAL_BELOW_PAYMENTS', 'This invoice has separate recorded payments. Correct or reverse those payments before reducing the invoice total.');
+  if (shouldRecalculate && invoice.receipt) {
     for (const line of invoice.lines) {
-      if (!correctedQuantities.has(line.id) || Number(line.quantity) === correctedQuantities.get(line.id)) continue;
       const matches = invoice.receipt.lines.filter((receiptLine) => receiptLine.productId === line.productId);
       if (matches.length !== 1 || !matches[0]!.ledgerEntry)
         throw new AppError(409, 'RECEIPT_LINE_AMBIGUOUS', `The received stock for ${line.description} cannot be matched safely. Please contact support before correcting this line.`);
     }
   }
-  const effectivePaid = syncOpeningPayment ? pricing.totalAmount : paid;
+  const effectivePaid = paid;
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await safeTransaction(prisma, async (tx) => {
+      const claimed = await tx.purchaseInvoice.updateMany({ where: { id, organizationId, version: input.version }, data: { version: { increment: 1 } } });
+      if (claimed.count !== 1) throw new AppError(409, 'INVOICE_CHANGED', 'This invoice changed while you were editing. Reopen it and review the latest values.');
+      await tx.purchaseInvoiceCorrection.create({ data: {
+        invoiceId: id, reason: input.correctionReason, correctedById: userId,
+        previousTotal: invoice.totalAmount, correctedTotal: new Prisma.Decimal(pricing.totalAmount),
+        beforeLines: { invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate.toISOString(), receivedAt: invoice.receipt?.receivedAt.toISOString() ?? null, notes: invoice.notes, lines: invoice.lines.map(line => ({id:line.id, quantity:Number(line.quantity), unitCost:Number(line.unitCost)})), payments: invoice.payments.map(p => ({id:p.id, amount:Number(p.amount), origin:p.origin})) },
+        afterLines: { invoiceNumber: input.invoiceNumber, invoiceDate: input.invoiceDate, receivedAt: input.receivedAt ?? invoice.receipt?.receivedAt.toISOString() ?? null, notes: input.notes ?? null, lines: pricing.lines.map(line => ({id:line.id, quantity:line.quantity, unitCost:line.unitCost})) }
+      } });
       let status: 'PAID' | 'PART_PAID' | 'OPEN' = pricing.totalAmount - effectivePaid < 0.01 ? 'PAID' : effectivePaid > 0 ? 'PART_PAID' : 'OPEN';
       await tx.purchaseInvoice.update({
         where: { id },
@@ -565,6 +566,8 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
               (receiptLine) => receiptLine.productId === line.productId,
             );
             if (receiptLines.length === 1) {
+              const reduction = Number(receiptLines[0]!.quantity) - line.quantity;
+              if (reduction > 0) await assertStockAvailable(tx, { organizationId, stationId: invoice.stationId, productId: line.productId, tankId: receiptLines[0]!.tankId }, reduction);
               await tx.receiptLine.update({
                 where: { id: receiptLines[0]!.id },
                 data: {
@@ -608,54 +611,6 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
             { account: '2000', credit: pricing.totalAmount },
           ],
         });
-        if (syncOpeningPayment && openingPayment && openingPaymentJournal) {
-          await tx.journalLine.deleteMany({
-            where: { journalId: openingPaymentJournal.id },
-          });
-          await tx.journal.delete({ where: { id: openingPaymentJournal.id } });
-          await tx.supplierPayment.update({
-            where: { id: openingPayment.id },
-            data: { amount: new Prisma.Decimal(pricing.totalAmount) },
-          });
-          await postJournal(tx, {
-            organizationId,
-            stationId: invoice.stationId,
-            createdById: openingPayment.createdById,
-            journalDate: openingPayment.paidAt,
-            reference: openingPaymentJournal.reference,
-            description: openingPaymentJournal.description,
-            sourceType: 'SUPPLIER_PAYMENT',
-            sourceId: openingPayment.id,
-            lines: [
-              { account: '2000', debit: pricing.totalAmount },
-              {
-                account: collectionAccount(openingPayment.paymentMethod),
-                credit: pricing.totalAmount,
-              },
-            ],
-          });
-        }
-        if (quantityChanged) {
-          await tx.purchaseInvoiceCorrection.create({
-            data: {
-              invoiceId: id,
-              reason: input.correctionReason!,
-              beforeLines: invoice.lines.map((line) => ({
-                id: line.id,
-                description: line.description,
-                quantity: Number(line.quantity),
-              })),
-              afterLines: pricing.lines.map((line) => ({
-                id: line.id,
-                productName: line.productName,
-                quantity: line.quantity,
-              })),
-              previousTotal: invoice.totalAmount,
-              correctedTotal: new Prisma.Decimal(pricing.totalAmount),
-              correctedById: userId,
-            },
-          });
-        }
       } else {
         await tx.journal.updateMany({
           where: { sourceType: 'PURCHASE_INVOICE', sourceId: id },
@@ -671,12 +626,12 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
           where: { id: invoice.receipt.id },
           data: {
             referenceNo: input.invoiceNumber,
-            receivedAt: new Date(input.invoiceDate),
+            ...(input.receivedAt ? { receivedAt: new Date(input.receivedAt) } : {}),
           },
         });
-        await tx.inventoryLedger.updateMany({
+        if (input.receivedAt) await tx.inventoryLedger.updateMany({
           where: { receiptLine: { receiptId: invoice.receipt.id } },
-          data: { occurredAt: new Date(input.invoiceDate) },
+          data: { occurredAt: new Date(input.receivedAt!) },
         });
       }
       const remaining = pricing.totalAmount - effectivePaid;
@@ -717,14 +672,15 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
         where: { id },
         include: invoiceInclude,
       });
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
   } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034') throw new AppError(409, 'INVOICE_CHANGED', 'Another transaction changed this invoice or its stock. Reopen it and review the latest values before saving.');
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AppError(409, 'INVOICE_EXISTS', 'This invoice number already exists for the supplier.');
     throw error;
   }
 }
 export async function payInvoice(organizationId: string, userId: string, input: SupplierPaymentInput) {
-  return prisma.$transaction(
+  return safeTransaction(prisma,
     async (tx) => {
       const invoice = await tx.purchaseInvoice.findFirst({
         where: {
@@ -753,7 +709,7 @@ export async function payInvoice(organizationId: string, userId: string, input: 
       const next = remaining - input.amount;
       await tx.purchaseInvoice.update({
         where: { id: invoice.id },
-        data: { status: next < 0.01 ? 'PAID' : 'PART_PAID' },
+        data: { status: next < 0.01 ? 'PAID' : 'PART_PAID', version: { increment: 1 } },
       });
       await postJournal(tx, {
         organizationId,
@@ -787,7 +743,7 @@ export async function createExpense(organizationId: string, userId: string, inpu
     }),
   ]);
   if (!station || !category) throw new AppError(404, 'EXPENSE_CONTEXT_INVALID', 'Choose an active fuel station and expense category.');
-  return prisma.$transaction(async (tx) => {
+  return safeTransaction(prisma, async (tx) => {
     const expense = await tx.expense.create({
       data: {
         organizationId,

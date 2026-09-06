@@ -1,0 +1,475 @@
+{
+  "scope": "org_demo_fuelledger; read-only diagnosis",
+  "postings": {
+    "journals": [
+      {
+        "id": "cmtiwa4rr003l15pha9sy021y",
+        "source_type": "DEMO_SALE",
+        "source_id": "demo-real-sale-6-2",
+        "reference": "DEMO-6-2",
+        "description": "High Speed Diesel (HSD) metered sale",
+        "journal_date": "2026-08-26T06:30:00.000Z",
+        "code": "1100",
+        "debit": "79430",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwa4rz004k15phua5vn0dk",
+        "source_type": "DEMO_SALE",
+        "source_id": "demo-real-sale-6-3",
+        "reference": "DEMO-6-3",
+        "description": "DEF Bulk metered sale",
+        "journal_date": "2026-08-26T07:30:00.000Z",
+        "code": "1100",
+        "debit": "38025",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwa4su008q15phwij8n2dq",
+        "source_type": "DEMO_SALE",
+        "source_id": "demo-real-sale-5-3",
+        "reference": "DEMO-5-3",
+        "description": "DEF Bulk metered sale",
+        "journal_date": "2026-08-27T07:30:00.000Z",
+        "code": "1100",
+        "debit": "41793.75",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwa4t1009z15ph9qq3369y",
+        "source_type": "DEMO_SALE",
+        "source_id": "demo-real-sale-4-0",
+        "reference": "DEMO-4-0",
+        "description": "Motor Spirit (MS) metered sale",
+        "journal_date": "2026-08-28T04:30:00.000Z",
+        "code": "1100",
+        "debit": "88995",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwa4tv00e515phmcgs04kg",
+        "source_type": "DEMO_SALE",
+        "source_id": "demo-real-sale-3-0",
+        "reference": "DEMO-3-0",
+        "description": "Motor Spirit (MS) metered sale",
+        "journal_date": "2026-08-29T04:30:00.000Z",
+        "code": "1100",
+        "debit": "105060",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwa4u100f415ph3p4jgdjy",
+        "source_type": "DEMO_SALE",
+        "source_id": "demo-real-sale-3-1",
+        "reference": "DEMO-3-1",
+        "description": "High Speed Diesel (HSD) metered sale",
+        "journal_date": "2026-08-29T05:30:00.000Z",
+        "code": "1100",
+        "debit": "96820",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwa4uu00ja15php3czisyc",
+        "source_type": "DEMO_SALE",
+        "source_id": "demo-real-sale-2-1",
+        "reference": "DEMO-2-1",
+        "description": "High Speed Diesel (HSD) metered sale",
+        "journal_date": "2026-08-30T05:30:00.000Z",
+        "code": "1100",
+        "debit": "90945",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwa4v000k915phzdhsnxpi",
+        "source_type": "DEMO_SALE",
+        "source_id": "demo-real-sale-2-2",
+        "reference": "DEMO-2-2",
+        "description": "High Speed Diesel (HSD) metered sale",
+        "journal_date": "2026-08-30T06:30:00.000Z",
+        "code": "1100",
+        "debit": "90945",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwa4vs00of15ph27o4s455",
+        "source_type": "DEMO_SALE",
+        "source_id": "demo-real-sale-1-2",
+        "reference": "DEMO-1-2",
+        "description": "High Speed Diesel (HSD) metered sale",
+        "journal_date": "2026-08-31T06:30:00.000Z",
+        "code": "1100",
+        "debit": "102225",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwa4vz00pe15phd3q46hh7",
+        "source_type": "DEMO_SALE",
+        "source_id": "demo-real-sale-1-3",
+        "reference": "DEMO-1-3",
+        "description": "DEF Bulk metered sale",
+        "journal_date": "2026-08-31T07:30:00.000Z",
+        "code": "1100",
+        "debit": "48937.5",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwa4wp00tk15phunzrzviz",
+        "source_type": "DEMO_SALE",
+        "source_id": "demo-real-sale-0-3",
+        "reference": "DEMO-0-3",
+        "description": "DEF Bulk metered sale",
+        "journal_date": "2026-09-01T07:30:00.000Z",
+        "code": "1100",
+        "debit": "45112.5",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwbd2y004m15s03m207ew1",
+        "source_type": "SALE",
+        "source_id": "cmtif2yts000fr0dx9wcuyla4",
+        "reference": "BACKFILL-9wcuyla4",
+        "description": "Car Wash sale",
+        "journal_date": "2026-09-01T08:40:21.712Z",
+        "code": "1100",
+        "debit": "450",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwbd35005j15s0jt8lgojc",
+        "source_type": "SALE",
+        "source_id": "cmtih66ze000hr0gitukcfvp7",
+        "reference": "BACKFILL-tukcfvp7",
+        "description": "Engine Oil sale",
+        "journal_date": "2026-09-01T09:38:51.483Z",
+        "code": "1100",
+        "debit": "620",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwbd3c006i15s0thbkgcjg",
+        "source_type": "SALE",
+        "source_id": "cmtih6hxe000nr0gi7nqdh302",
+        "reference": "BACKFILL-7nqdh302",
+        "description": "Car Wash sale",
+        "journal_date": "2026-09-01T09:39:05.667Z",
+        "code": "1100",
+        "debit": "450",
+        "credit": "0"
+      },
+      {
+        "id": "cmtiwbd3k007f15s0ag1h0r0n",
+        "source_type": "SALE",
+        "source_id": "cmtih6tv0000rr0gifubcyjxn",
+        "reference": "BACKFILL-fubcyjxn",
+        "description": "Motor Spirit (MS) sale",
+        "journal_date": "2026-09-01T09:39:21.132Z",
+        "code": "1100",
+        "debit": "1020",
+        "credit": "0"
+      }
+    ],
+    "ledger": [
+      {
+        "id": "cmtih66zm000lr0gigdjmyaus",
+        "type": "SALE",
+        "amount": "620",
+        "sale_id": "cmtih66ze000hr0gitukcfvp7",
+        "receipt_id": null,
+        "description": "Engine Oil sale",
+        "occurred_at": "2026-09-01T09:38:51.483Z"
+      },
+      {
+        "id": "cmtih6hxh000pr0gihuiodda3",
+        "type": "SALE",
+        "amount": "450",
+        "sale_id": "cmtih6hxe000nr0gi7nqdh302",
+        "receipt_id": null,
+        "description": "Car Wash sale",
+        "occurred_at": "2026-09-01T09:39:05.667Z"
+      },
+      {
+        "id": "cmtih6tv5000vr0gi69ipqqgc",
+        "type": "SALE",
+        "amount": "1020",
+        "sale_id": "cmtih6tv0000rr0gifubcyjxn",
+        "receipt_id": null,
+        "description": "Motor Spirit (MS) sale",
+        "occurred_at": "2026-09-01T09:39:21.132Z"
+      },
+      {
+        "id": "cmtih6v1n000zr0gio93t7kpb",
+        "type": "RECEIPT",
+        "amount": "-500",
+        "sale_id": null,
+        "receipt_id": "cmtih6v1i000xr0gi4j6cxqaz",
+        "description": "Receipt via UPI",
+        "occurred_at": "2026-09-01T09:39:22.662Z"
+      }
+    ],
+    "invoices": [
+      {
+        "id": "cmtihtmj90003r0hk65iwtjal",
+        "invoice_number": "KLS-INV-001",
+        "total_amount": "3990",
+        "status": "PART_PAID",
+        "invoice_date": "2026-08-31T18:30:00.000Z"
+      }
+    ],
+    "payments": [
+      {
+        "id": "cmtihu1zb0001r0j5avplcdey",
+        "invoice_id": "cmtihtmj90003r0hk65iwtjal",
+        "amount": "1000",
+        "payment_method": "UPI",
+        "paid_at": "2026-09-01T09:57:24.743Z"
+      }
+    ]
+  },
+  "sources": {
+    "creditSales": [
+      {
+        "id": "demo-real-sale-6-2",
+        "payment_method": "CREDIT",
+        "total_amount": "79430",
+        "customer_id": null,
+        "customer_name": null,
+        "notes": "Demo metered sale",
+        "occurred_at": "2026-08-26T06:30:00.000Z",
+        "ledger_id": null
+      },
+      {
+        "id": "demo-real-sale-6-3",
+        "payment_method": "FLEET",
+        "total_amount": "38025",
+        "customer_id": null,
+        "customer_name": null,
+        "notes": "Demo metered sale",
+        "occurred_at": "2026-08-26T07:30:00.000Z",
+        "ledger_id": null
+      },
+      {
+        "id": "demo-real-sale-5-3",
+        "payment_method": "CREDIT",
+        "total_amount": "41793.75",
+        "customer_id": null,
+        "customer_name": null,
+        "notes": "Demo metered sale",
+        "occurred_at": "2026-08-27T07:30:00.000Z",
+        "ledger_id": null
+      },
+      {
+        "id": "demo-real-sale-4-0",
+        "payment_method": "FLEET",
+        "total_amount": "88995",
+        "customer_id": null,
+        "customer_name": null,
+        "notes": "Demo metered sale",
+        "occurred_at": "2026-08-28T04:30:00.000Z",
+        "ledger_id": null
+      },
+      {
+        "id": "demo-real-sale-3-0",
+        "payment_method": "CREDIT",
+        "total_amount": "105060",
+        "customer_id": null,
+        "customer_name": null,
+        "notes": "Demo metered sale",
+        "occurred_at": "2026-08-29T04:30:00.000Z",
+        "ledger_id": null
+      },
+      {
+        "id": "demo-real-sale-3-1",
+        "payment_method": "FLEET",
+        "total_amount": "96820",
+        "customer_id": null,
+        "customer_name": null,
+        "notes": "Demo metered sale",
+        "occurred_at": "2026-08-29T05:30:00.000Z",
+        "ledger_id": null
+      },
+      {
+        "id": "demo-real-sale-2-1",
+        "payment_method": "CREDIT",
+        "total_amount": "90945",
+        "customer_id": null,
+        "customer_name": null,
+        "notes": "Demo metered sale",
+        "occurred_at": "2026-08-30T05:30:00.000Z",
+        "ledger_id": null
+      },
+      {
+        "id": "demo-real-sale-2-2",
+        "payment_method": "FLEET",
+        "total_amount": "90945",
+        "customer_id": null,
+        "customer_name": null,
+        "notes": "Demo metered sale",
+        "occurred_at": "2026-08-30T06:30:00.000Z",
+        "ledger_id": null
+      },
+      {
+        "id": "demo-real-sale-1-2",
+        "payment_method": "CREDIT",
+        "total_amount": "102225",
+        "customer_id": null,
+        "customer_name": null,
+        "notes": "Demo metered sale",
+        "occurred_at": "2026-08-31T06:30:00.000Z",
+        "ledger_id": null
+      },
+      {
+        "id": "demo-real-sale-1-3",
+        "payment_method": "FLEET",
+        "total_amount": "48937.5",
+        "customer_id": null,
+        "customer_name": null,
+        "notes": "Demo metered sale",
+        "occurred_at": "2026-08-31T07:30:00.000Z",
+        "ledger_id": null
+      },
+      {
+        "id": "demo-real-sale-0-3",
+        "payment_method": "CREDIT",
+        "total_amount": "45112.5",
+        "customer_id": null,
+        "customer_name": null,
+        "notes": "Demo metered sale",
+        "occurred_at": "2026-09-01T07:30:00.000Z",
+        "ledger_id": null
+      },
+      {
+        "id": "cmtif2yts000fr0dx9wcuyla4",
+        "payment_method": "FLEET",
+        "total_amount": "450",
+        "customer_id": null,
+        "customer_name": "Orion Fleet Services",
+        "notes": null,
+        "occurred_at": "2026-09-01T08:40:21.712Z",
+        "ledger_id": null
+      },
+      {
+        "id": "cmtih66ze000hr0gitukcfvp7",
+        "payment_method": "FLEET",
+        "total_amount": "620",
+        "customer_id": "cmtih53dz0001r0gignaome0e",
+        "customer_name": "Acme Mobility",
+        "notes": null,
+        "occurred_at": "2026-09-01T09:38:51.483Z",
+        "ledger_id": "cmtih66zm000lr0gigdjmyaus"
+      },
+      {
+        "id": "cmtih6hxe000nr0gi7nqdh302",
+        "payment_method": "FLEET",
+        "total_amount": "450",
+        "customer_id": "cmtih53dz0001r0gignaome0e",
+        "customer_name": "Acme Mobility",
+        "notes": null,
+        "occurred_at": "2026-09-01T09:39:05.667Z",
+        "ledger_id": "cmtih6hxh000pr0gihuiodda3"
+      },
+      {
+        "id": "cmtih6tv0000rr0gifubcyjxn",
+        "payment_method": "FLEET",
+        "total_amount": "1020",
+        "customer_id": "cmtih53dz0001r0gignaome0e",
+        "customer_name": "Acme Mobility",
+        "notes": null,
+        "occurred_at": "2026-09-01T09:39:21.132Z",
+        "ledger_id": "cmtih6tv5000vr0gi69ipqqgc"
+      }
+    ],
+    "missingPostingSources": [],
+    "receipt": [
+      {
+        "id": "cmtihtmjh0007r0hkojyjr6vu",
+        "invoice_id": "cmtihtmj90003r0hk65iwtjal",
+        "received_at": "2026-08-31T18:30:00.000Z",
+        "quantity": "10",
+        "unit_cost": "390",
+        "product_id": "cmtidcfu6000fr0kjemkwycdg",
+        "movement_id": "cmtihtmjj000br0hk4v8g999r"
+      }
+    ],
+    "invoiceLines": [
+      {
+        "description": "Engine Oil",
+        "quantity": "10",
+        "unit_cost": "390",
+        "tax_rate": "0",
+        "line_total": "3900"
+      }
+    ],
+    "invoice": [
+      {
+        "subtotal": "3900",
+        "tax_amount": "90",
+        "total_amount": "3990"
+      }
+    ],
+    "migrations": [
+      {
+        "migration_name": "20260901000000_milestone_0_foundation"
+      },
+      {
+        "migration_name": "20260901130000_station_digital_twin"
+      },
+      {
+        "migration_name": "20260901140000_product_service_engine"
+      },
+      {
+        "migration_name": "20260901150000_shift_management"
+      },
+      {
+        "migration_name": "20260901160000_sales_collections"
+      },
+      {
+        "migration_name": "20260901170000_inventory_wet_stock"
+      },
+      {
+        "migration_name": "20260901180000_cash_shift_reconciliation"
+      },
+      {
+        "migration_name": "20260901190000_customers_credit_fleet"
+      },
+      {
+        "migration_name": "20260901200000_purchases_expenses"
+      },
+      {
+        "migration_name": "20260901201000_staff_nozzle_custody"
+      },
+      {
+        "migration_name": "20260901210000_accounting_engine"
+      },
+      {
+        "migration_name": "20260901213000_morning_density"
+      },
+      {
+        "migration_name": "20260901220000_multi_station_access"
+      },
+      {
+        "migration_name": "20260901230000_demo_sessions"
+      },
+      {
+        "migration_name": "20260901233000_manager_login"
+      },
+      {
+        "migration_name": "20260901234500_staff_without_login"
+      },
+      {
+        "migration_name": "20260902000000_production_sessions"
+      },
+      {
+        "migration_name": "20260903140000_owner_whatsapp_notifications"
+      },
+      {
+        "migration_name": "20260903170000_station_setup_drafts"
+      },
+      {
+        "migration_name": "20260903173000_invoice_hsn_support"
+      },
+      {
+        "migration_name": "20260904093000_effective_dated_selling_prices"
+      }
+    ]
+  }
+}

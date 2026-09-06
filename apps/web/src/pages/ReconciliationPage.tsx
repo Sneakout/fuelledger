@@ -112,7 +112,7 @@ export function ReconciliationPage() {
         customerId: row.customer.id,
         vehicleId: row.vehicle?.id ?? "",
         amount: Number(row.amount),
-      })) ?? [],
+      })) ?? next.recordedCreditAllocations?.map(row => ({ ...row, paymentMethod: row.paymentMethod as Method, vehicleId: row.vehicleId ?? "" })) ?? [],
     );
     setNotes(next.reconciliation?.notes ?? "");
     setError("");
@@ -313,9 +313,9 @@ export function ReconciliationPage() {
             </div>
             <div className="allocation-columns">
               <span>Payment method</span>
-              <span>Allocated sales (₹)</span>
-              <span>Confirmed amount (₹)</span>
-              <span>Difference (₹)</span>
+              <span>Sales by payment type (₹)</span>
+              <span>Verified amount (₹)</span>
+              <span>Short / excess (₹)</span>
             </div>
             {rows.map((row) => {
               const Icon = icons[row.paymentMethod];
@@ -334,7 +334,7 @@ export function ReconciliationPage() {
                   </div>
                   <label>
                     <input
-                      aria-label={`${labels[row.paymentMethod]} allocated sales`}
+                      aria-label={`${labels[row.paymentMethod]} sales amount in rupees`}
                       type="number"
                       min="0"
                       step="0.01"
@@ -352,7 +352,7 @@ export function ReconciliationPage() {
                   </label>
                   <label>
                     <input
-                      aria-label={`${labels[row.paymentMethod]} confirmed amount`}
+                      aria-label={`${labels[row.paymentMethod]} verified amount in rupees`}
                       type="number"
                       min="0"
                       step="0.01"
@@ -400,21 +400,23 @@ export function ReconciliationPage() {
             />
             <div className="allocation-total">
               <span>Shift total</span>
+              <span>Shortage: {money(rows.reduce((sum, row) => sum + Math.max(0, row.allocationAmount - row.actualAmount), 0))} · Excess: {money(rows.reduce((sum, row) => sum + Math.max(0, row.actualAmount - row.allocationAmount), 0))}</span>
               <strong>{money(totals.allocated)} allocated</strong>
               <strong>{money(totals.actual)} confirmed</strong>
               <b
                 className={
-                  Math.abs(totals.actual - totals.allocated) < 0.01
+                  rows.every(row => Math.abs(row.actualAmount - row.allocationAmount) < 0.01)
                     ? "balanced"
                     : "unbalanced"
                 }
               >
-                {Math.abs(totals.actual - totals.allocated) < 0.01
+                {rows.every(row => Math.abs(row.actualAmount - row.allocationAmount) < 0.01)
                   ? "Collections match"
                   : `${money(totals.actual - totals.allocated)} difference`}
               </b>
             </div>
             <label className="field reconciliation-note">
+              <small>Staff handovers and physical closing cash are separate checks. Confirm payment receipts here; credit and fleet dues are customer balances, not cash received. Account for expenses, deposits and other cash movements when checking the till.</small>
               <span>Reconciliation note (optional)</span>
               <input
                 value={notes}
