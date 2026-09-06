@@ -279,6 +279,7 @@ export async function currentUser(token: string): Promise<User> {
         "DEMO_EXPIRED",
         "Your 48-hour demo has ended. Start a new demo to continue.",
       );
+    await refreshDemoShowcaseDates();
     demoExpiresAt = demo.expiresAt;
   } else {
     const sessionId = String(payload.jti ?? "");

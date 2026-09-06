@@ -388,7 +388,12 @@ async function main() {
           sourceType_sourceId: { sourceType: "DEMO_SALE", sourceId: saleId },
         },
       });
-      if (!posted) {
+      if (posted) {
+        await prisma.journal.update({
+          where: { id: posted.id },
+          data: { journalDate: at(daysAgo, 10 + index) },
+        });
+      } else {
         const revenue = quantity * price;
         const cost = quantity * Number(nozzle.product.purchasePrice);
         await prisma.$transaction(
