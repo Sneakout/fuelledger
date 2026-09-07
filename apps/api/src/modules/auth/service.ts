@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
+import { Prisma } from "@prisma/client";
 import type {
   ChangePasswordInput,
   DemoAccessInput,
@@ -156,15 +157,20 @@ export async function startDemo(input: DemoAccessInput) {
   await refreshDemoShowcaseDates();
   const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
   const contact = input.contact.includes("@")
-    ? input.contact.toLowerCase()
-    : input.contact.replace(/[\s-]/g, "");
-  const demo = await prisma.demoSession.create({
-    data: {
-      contact,
-      kind: contact.includes("@") ? "EMAIL" : "MOBILE",
-      expiresAt,
-    },
-  });
+    ? input.contact.trim().toLowerCase()
+    : (() => { const digits=input.contact.replace(/\D/g, ""); return digits.length===10 ? `91${digits}` : digits; })();
+  const kind = contact.includes("@") ? "EMAIL" : "MOBILE";
+  let demo;
+  try {
+    demo = await prisma.$transaction(async tx => {
+      await tx.demoAccessClaim.create({ data: { contact, kind } });
+      return tx.demoSession.create({ data: { contact, kind, expiresAt } });
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")
+      throw new AppError(409, "DEMO_ALREADY_USED", "This email address or mobile number has already used its free demo. Sign in or contact us to continue.");
+    throw error;
+  }
   const token = jwt.sign(
     {
       sub: owner.id,

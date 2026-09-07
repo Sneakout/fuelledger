@@ -1142,3 +1142,11 @@ model DemoSession {
   @@index([expiresAt])
   @@map("demo_sessions")
 }
+
+model DemoAccessClaim {
+  contact     String   @id
+  kind        String
+  firstUsedAt DateTime @default(now()) @map("first_used_at")
+
+  @@map("demo_access_claims")
+}

@@ -25,17 +25,17 @@ function Select({ label, value, onChange, options }: { label: string; value: str
 export function StationsPage() {
   const { user } = useAuth();
   const { refresh: refreshStationContext } = useStation();
-  const [stations, setStations] = useState<StationSummary[]>([]); const [setup, setSetup] = useState<StationSetup>(emptySetup); const [step, setStep] = useState(0); const [saving, setSaving] = useState(false); const [error, setError] = useState(''); const [showWizard, setShowWizard] = useState(true);
+  const [stations, setStations] = useState<StationSummary[]>([]); const [setup, setSetup] = useState<StationSetup>(emptySetup); const [step, setStep] = useState(0); const [saving, setSaving] = useState(false); const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [showWizard, setShowWizard] = useState(false);
   const [draftStationId, setDraftStationId] = useState<string | null>(null); const [draftReady, setDraftReady] = useState(true); const [draftStatus, setDraftStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [editing, setEditing] = useState<StationSummary | null>(null);
   const [equipmentEditing, setEquipmentEditing] = useState<StationSummary | null>(null);
   const [equipmentData, setEquipmentData] = useState<StationEquipment | null>(null);
   const steps = ['Petrol Pump profile','Products & services','Equipment','Review & publish'];
-  useEffect(() => { api.stations().then(result => { setStations(result.stations); if (result.stations.length) setShowWizard(false); }).catch(() => setError('We could not load your petrol pumps.')); }, []);
+  useEffect(() => { let active=true; api.stations().then(result => { if(!active)return; setStations(result.stations); setShowWizard(result.stations.length===0); }).catch(() => { if(active)setError('We could not load your petrol pumps.'); }).finally(() => { if(active)setLoading(false); }); return()=>{active=false;}; }, []);
   const validation = useMemo(() => stationSetupSchema.safeParse(setup), [setup]);
   const update = (fn: (draft: StationSetup) => void) => setSetup(previous => { const next = clone(previous); fn(next); return next; });
   useEffect(() => {
-    if (!showWizard || !draftReady) return;
+    if (loading || !showWizard || !draftReady) return;
     setDraftStatus('saving');
     const draft = clone(setup); let active = true;
     const timer = window.setTimeout(() => { void (async () => {
@@ -46,7 +46,7 @@ export function StationsPage() {
       } catch { if (active) setDraftStatus('error'); }
     })(); }, 700);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [setup, showWizard, draftReady, draftStationId]);
+  }, [setup, showWizard, draftReady, draftStationId, loading]);
   async function publish() { setError(''); const parsed = stationSetupSchema.safeParse(setup); if (!parsed.success) { setError(parsed.error.issues[0]?.message ?? 'Please check the petrol pump configuration.'); return; } setSaving(true); try { const result = await api.createStation(parsed.data); setStations(previous => [result.station, ...previous]); window.localStorage.removeItem(NEW_PUMP_DRAFT_KEY); setDraftStationId(null); setDraftStatus('idle'); await refreshStationContext().catch(() => undefined); setShowWizard(false); setStep(0); } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : 'Unable to create this petrol pump.'); } finally { setSaving(false); } }
   async function saveProfile(profile: StationProfileInput) {
     if (!editing) return;
