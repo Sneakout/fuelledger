@@ -1,6 +1,6 @@
 # Architecture
 
-FuelNerve (formerly FuelLedger) is a pnpm monorepo with a React/Vite client (`apps/web`), an Express API (`apps/api`), shared Zod contracts (`packages/shared`), and a PostgreSQL schema managed by Prisma. The browser talks only to `/api`; business rules belong in backend modules, never UI components.
+FuelNerve is a pnpm monorepo with a React/Vite client (`apps/web`), an Express API (`apps/api`), shared Zod contracts (`packages/shared`), and a PostgreSQL schema managed by Prisma. The browser talks only to `/api`; business rules belong in backend modules, never UI components.
 
 The foundation is organized for vertical domain modules. Each future capability should own its routes, validation, services, policies, and tests. Shared contracts contain transport-safe schemas only. Organization ownership is present from the first migration so future station data can be tenant-scoped.
 

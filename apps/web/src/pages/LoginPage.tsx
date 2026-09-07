@@ -114,7 +114,7 @@ export function LoginPage() {
           <span className="brand-mark">
             <Fuel size={24} />
           </span>
-          <span>FuelNerve<small className="brand-legacy">formerly FuelLedger</small></span>
+          FuelNerve
         </div>
         <div>
           <span className="eyebrow light">Fuel station business OS</span>

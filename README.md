@@ -1,7 +1,5 @@
 # FuelNerve
 
-Previously known as FuelLedger. Internal package names and development credentials retain the original identifier for compatibility.
-
 **Every litre. Every product. Every rupee.**
 
 Modern business operating system for Indian petrol pumps: shifts, nozzle custody, sales, collections, wet stock, credit, purchases, expenses, accounting, reports and multi-pump owner control.
