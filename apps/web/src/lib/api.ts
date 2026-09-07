@@ -80,7 +80,7 @@ async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiRequestError(
       response.ok
         ? "The server returned an invalid response."
-        : "FuelLedger could not connect to its server. Please try again shortly.",
+        : "FuelNerve could not connect to its server. Please try again shortly.",
       response.ok ? "INVALID_SERVER_RESPONSE" : "SERVER_UNAVAILABLE",
     );
   }

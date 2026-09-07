@@ -9,7 +9,7 @@ export const platformRouter = Router();
 platformRouter.use(authenticate);
 const requirePlatformAdmin = (email: string) => {
   if (!isPlatformAdminEmail(email))
-    throw new AppError(403, "PLATFORM_ADMIN_REQUIRED", "This area is restricted to the FuelLedger team.");
+    throw new AppError(403, "PLATFORM_ADMIN_REQUIRED", "This area is restricted to the FuelNerve team.");
 };
 platformRouter.get("/demo-leads", async (req, res) => {
   requirePlatformAdmin(req.user!.email);

@@ -1,4 +1,4 @@
-/* Shared FuelLedger form language. Purpose-built toggles and uploads are excluded. */
+/* Shared FuelNerve form language. Purpose-built toggles and uploads are excluded. */
 .page input:not([type='checkbox']):not([type='radio']):not([type='file']),
 .page select,
 .page textarea {

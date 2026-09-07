@@ -1,4 +1,6 @@
-# FuelLedger
+# FuelNerve
+
+Previously known as FuelLedger. Internal package names and development credentials retain the original identifier for compatibility.
 
 **Every litre. Every product. Every rupee.**
 

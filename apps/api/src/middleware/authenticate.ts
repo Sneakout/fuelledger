@@ -27,7 +27,7 @@ export async function authenticate(
       throw new AppError(
         403,
         "PASSWORD_CHANGE_REQUIRED",
-        "Create your private password before using FuelLedger.",
+        "Create your private password before using FuelNerve.",
       );
     if (
       req.user.demoExpiresAt &&
@@ -36,7 +36,7 @@ export async function authenticate(
       throw new AppError(
         403,
         "DEMO_READ_ONLY",
-        "Demo mode is read-only. Create your account to start using FuelLedger.",
+        "Demo mode is read-only. Create your account to start using FuelNerve.",
       );
     next();
   } catch (error) {

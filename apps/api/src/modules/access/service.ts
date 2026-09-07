@@ -284,7 +284,7 @@ export async function createManager(
     throw new AppError(
       409,
       "EMAIL_EXISTS",
-      "That email address already has a FuelLedger account.",
+      "That email address already has a FuelNerve account.",
     );
   const user = await prisma.user.create({
     data: {

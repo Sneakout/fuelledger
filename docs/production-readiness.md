@@ -1,6 +1,6 @@
 # Production Hardening & Vercel Deployment
 
-FuelLedger is configured for a single Vercel project: the React app is served at `/` and the Express API is served through the same first-party `/api/*` origin. This preserves secure cookie authentication without cross-domain browser exceptions.
+FuelNerve is configured for a single Vercel project: the React app is served at `/` and the Express API is served through the same first-party `/api/*` origin. This preserves secure cookie authentication without cross-domain browser exceptions.
 
 ## Required production services
 
@@ -24,7 +24,7 @@ Set the following **Production** environment variables in the Vercel dashboard. 
 | `APP_URL` | `https://your-production-domain` |
 | `CORS_ORIGIN` | Same value as `APP_URL` |
 | `GOOGLE_CLIENT_ID` | Production Google OAuth client ID |
-| `PLATFORM_ADMIN_EMAILS` | Comma-separated FuelLedger team email addresses allowed to view demo enquiries |
+| `PLATFORM_ADMIN_EMAILS` | Comma-separated FuelNerve team email addresses allowed to view demo enquiries |
 | `VITE_API_URL` | `/api` (or leave unset) |
 | `VITE_GOOGLE_CLIENT_ID` | Production Google OAuth client ID |
 | `WHATSAPP_ACCESS_TOKEN` | Meta WhatsApp Cloud API system-user access token |
@@ -48,7 +48,7 @@ Add the production domain to Google OAuth's Authorized JavaScript Origins. Use a
 
 ## WhatsApp owner alerts
 
-FuelLedger can alert an opted-in owner about missing morning density readings, low tank stock, cash variances, open shifts, the daily summary and overdue customer payments. The app records each delivery attempt, so the owner can see whether an alert was sent or failed.
+FuelNerve can alert an opted-in owner about missing morning density readings, low tank stock, cash variances, open shifts, the daily summary and overdue customer payments. The app records each delivery attempt, so the owner can see whether an alert was sent or failed.
 
 1. In Meta Business Manager, connect the sending WhatsApp number and create an approved utility template named `fuelledger_alert` with one body variable: `{{1}}`. The application sends the complete alert as that variable.
 2. Add the WhatsApp and `CRON_SECRET` variables above to Vercel's **Production** environment, then redeploy.

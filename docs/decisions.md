@@ -42,7 +42,7 @@ An invoice establishes a payable; it never adds inventory by itself. A purchase 
 
 ## ADR-009: Physical stock never overwrites book stock
 
-Inventory changes are append-only ledger movements. A physical tank/dip reading is evidence of what was measured, not an implicit adjustment. FuelLedger calculates and displays the variance, then requires a separate documented adjustment if the business decides book stock needs changing. This makes wet-stock discrepancies explainable and auditable.
+Inventory changes are append-only ledger movements. A physical tank/dip reading is evidence of what was measured, not an implicit adjustment. FuelNerve calculates and displays the variance, then requires a separate documented adjustment if the business decides book stock needs changing. This makes wet-stock discrepancies explainable and auditable.
 
 ## ADR-010: Reconciliation is a one-way lock
 

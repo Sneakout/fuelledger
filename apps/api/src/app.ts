@@ -64,7 +64,7 @@ export function createApp() {
         new AppError(
           403,
           "ORIGIN_NOT_ALLOWED",
-          "This request did not come from the FuelLedger application.",
+          "This request did not come from the FuelNerve application.",
         ),
       );
     }

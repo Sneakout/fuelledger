@@ -114,7 +114,7 @@ export function LoginPage() {
           <span className="brand-mark">
             <Fuel size={24} />
           </span>
-          FuelLedger
+          <span>FuelNerve<small className="brand-legacy">formerly FuelLedger</small></span>
         </div>
         <div>
           <span className="eyebrow light">Fuel station business OS</span>
@@ -151,17 +151,17 @@ export function LoginPage() {
             </button>
           </div>
           <span className="eyebrow">
-            {mode === "signup" ? "Start your FuelLedger" : "Welcome back"}
+            {mode === "signup" ? "Start your FuelNerve" : "Welcome back"}
           </span>
           <h2>
             {mode === "signup"
               ? "Create your business account"
-              : "Sign in to FuelLedger"}
+              : "Sign in to FuelNerve"}
           </h2>
           <p>
             {mode === "signup"
               ? "You’ll be the owner and can build your first fuel station next."
-              : "Use your FuelLedger account to continue."}
+              : "Use your FuelNerve account to continue."}
           </p>
           {error && (
             <div className="form-error" role="alert">

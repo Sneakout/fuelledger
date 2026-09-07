@@ -66,7 +66,7 @@ async function main() {
       (await prisma.station.create({
         data: {
           organizationId: owner.organizationId,
-          name: "FuelLedger Demo Petrol Pump",
+          name: "FuelNerve Demo Petrol Pump",
           code: "DEMO-PUMP",
           addressLine1: "Avinashi Road",
           city: "Coimbatore",

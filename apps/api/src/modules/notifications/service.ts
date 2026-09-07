@@ -116,14 +116,14 @@ export async function sendTestNotification(organizationId: string) {
   const settings = await getSettings(organizationId);
   if (!settings.whatsappOptedIn || !settings.whatsappNumber) throw new AppError(400, 'WHATSAPP_OPT_IN_REQUIRED', 'Save an opted-in WhatsApp number before sending a test.');
   if (!settings.providerReady) throw new AppError(503, 'WHATSAPP_NOT_CONFIGURED', 'WhatsApp delivery is not configured yet.');
-  return sendOwnerNotification({ organizationId, type: 'SYSTEM_TEST', dedupeKey: `test:${organizationId}:${Date.now()}`, message: `FuelLedger test message\n\nWhatsApp alerts are connected for ${indiaDate()}. You will receive only the alerts you enable in FuelLedger.\n\nOpen FuelLedger: ${env.APP_URL}` });
+  return sendOwnerNotification({ organizationId, type: 'SYSTEM_TEST', dedupeKey: `test:${organizationId}:${Date.now()}`, message: `FuelNerve test message\n\nWhatsApp alerts are connected for ${indiaDate()}. You will receive only the alerts you enable in FuelNerve.\n\nOpen FuelNerve: ${env.APP_URL}` });
 }
 
 export async function notifyShiftVariance(organizationId: string, shift: { id: string; station: { id: string; name: string }; shiftNumber: number; totals: { variance: number } | null }) {
   const variance = Math.abs(shift.totals?.variance ?? 0);
   const settings = await getSettings(organizationId);
   if (variance < settings.varianceThreshold) return { status: 'SKIPPED' as const, reason: 'below_threshold' };
-  return sendOwnerNotification({ organizationId, stationId: shift.station.id, type: 'SHIFT_VARIANCE', dedupeKey: `shift-variance:${shift.id}`, message: `FuelLedger alert\n\n${shift.station.name}, Shift #${shift.shiftNumber} has a collection variance of ${money(variance)}.\n\nPlease review and reconcile it: ${env.APP_URL}/reconciliation` });
+  return sendOwnerNotification({ organizationId, stationId: shift.station.id, type: 'SHIFT_VARIANCE', dedupeKey: `shift-variance:${shift.id}`, message: `FuelNerve alert\n\n${shift.station.name}, Shift #${shift.shiftNumber} has a collection variance of ${money(variance)}.\n\nPlease review and reconcile it: ${env.APP_URL}/reconciliation` });
 }
 
 export async function notifyLowStock(organizationId: string, tankId: string) {
@@ -134,7 +134,7 @@ export async function notifyLowStock(organizationId: string, tankId: string) {
   const settings = await getSettings(organizationId);
   if (fillPercent > settings.lowStockPercent) return { status: 'SKIPPED' as const, reason: 'stock_healthy' };
   const date = indiaDate();
-  return sendOwnerNotification({ organizationId, stationId: tank.configuration.station.id, type: 'LOW_STOCK', dedupeKey: `low-stock:${tank.id}:${date}`, message: `FuelLedger stock alert\n\n${tank.configuration.station.name}: ${tank.product.code} tank ${tank.code} is at ${fillPercent.toFixed(1)}% (${Math.max(0, stock).toLocaleString('en-IN')} L).\n\nReview inventory: ${env.APP_URL}/inventory` });
+  return sendOwnerNotification({ organizationId, stationId: tank.configuration.station.id, type: 'LOW_STOCK', dedupeKey: `low-stock:${tank.id}:${date}`, message: `FuelNerve stock alert\n\n${tank.configuration.station.name}: ${tank.product.code} tank ${tank.code} is at ${fillPercent.toFixed(1)}% (${Math.max(0, stock).toLocaleString('en-IN')} L).\n\nReview inventory: ${env.APP_URL}/inventory` });
 }
 
 export async function runScheduledNotifications(now = new Date()) {
@@ -157,19 +157,19 @@ async function notifyMissingDensity(organizationId: string, date: string, now: D
   const tanks = await prisma.tank.findMany({ where: { status: 'ACTIVE', product: { category: 'FUEL' }, configuration: { active: true, station: { organizationId } }, densityReadings: { none: { recordedAt: { gte: indiaDayStart(now) } } } }, include: { product: { select: { code: true } }, configuration: { include: { station: { select: { id: true, name: true } } } } } });
   if (!tanks.length) return { status: 'SKIPPED' as const, reason: 'all_density_recorded' };
   const examples = tanks.slice(0, 3).map(tank => `${tank.configuration.station.name} · ${tank.product.code} ${tank.code}`).join(', ');
-  return sendOwnerNotification({ organizationId, type: 'DENSITY_MISSING', dedupeKey: `density-missing:${organizationId}:${date}`, message: `FuelLedger morning check\n\nDensity has not been entered for ${tanks.length} fuel tank${tanks.length === 1 ? '' : 's'} today.\n${examples}${tanks.length > 3 ? '…' : ''}\n\nOpen FuelLedger: ${env.APP_URL}/inventory` });
+  return sendOwnerNotification({ organizationId, type: 'DENSITY_MISSING', dedupeKey: `density-missing:${organizationId}:${date}`, message: `FuelNerve morning check\n\nDensity has not been entered for ${tanks.length} fuel tank${tanks.length === 1 ? '' : 's'} today.\n${examples}${tanks.length > 3 ? '…' : ''}\n\nOpen FuelNerve: ${env.APP_URL}/inventory` });
 }
 
 async function notifyUnclosedShifts(organizationId: string, date: string) {
   const shifts = await prisma.shift.findMany({ where: { status: 'OPEN', station: { organizationId } }, select: { id: true, shiftNumber: true, station: { select: { id: true, name: true } } } });
   if (!shifts.length) return { status: 'SKIPPED' as const, reason: 'no_open_shifts' };
   const examples = shifts.slice(0, 3).map(shift => `${shift.station.name} · Shift #${shift.shiftNumber}`).join(', ');
-  return sendOwnerNotification({ organizationId, type: 'SHIFT_OPEN', dedupeKey: `open-shifts:${organizationId}:${date}`, message: `FuelLedger closing check\n\n${shifts.length} shift${shifts.length === 1 ? ' is' : 's are'} still open: ${examples}${shifts.length > 3 ? '…' : ''}\n\nPlease close or review: ${env.APP_URL}/operations` });
+  return sendOwnerNotification({ organizationId, type: 'SHIFT_OPEN', dedupeKey: `open-shifts:${organizationId}:${date}`, message: `FuelNerve closing check\n\n${shifts.length} shift${shifts.length === 1 ? ' is' : 's are'} still open: ${examples}${shifts.length > 3 ? '…' : ''}\n\nPlease close or review: ${env.APP_URL}/operations` });
 }
 
 async function notifyDailySummary(organizationId: string, date: string) {
   const report = await buildReport(organizationId, { startDate: date, endDate: date });
-  return sendOwnerNotification({ organizationId, type: 'DAILY_SUMMARY', dedupeKey: `daily-summary:${organizationId}:${date}`, message: `FuelLedger daily summary — ${date}\n\nSales: ${money(report.summary.grossSales)} (${report.summary.transactions} transactions)\nFuel sold: ${Math.round(report.summary.meteredVolume).toLocaleString('en-IN')} L\nExpenses: ${money(report.summary.expenses)}\nNet result: ${money(report.summary.netProfit)}\n\nView reports: ${env.APP_URL}/reports` });
+  return sendOwnerNotification({ organizationId, type: 'DAILY_SUMMARY', dedupeKey: `daily-summary:${organizationId}:${date}`, message: `FuelNerve daily summary — ${date}\n\nSales: ${money(report.summary.grossSales)} (${report.summary.transactions} transactions)\nFuel sold: ${Math.round(report.summary.meteredVolume).toLocaleString('en-IN')} L\nExpenses: ${money(report.summary.expenses)}\nNet result: ${money(report.summary.netProfit)}\n\nView reports: ${env.APP_URL}/reports` });
 }
 
 async function notifyOverdueCustomers(organizationId: string, date: string) {
@@ -178,5 +178,5 @@ async function notifyOverdueCustomers(organizationId: string, date: string) {
   if (!overdue.length) return { status: 'SKIPPED' as const, reason: 'no_overdue_customers' };
   const total = overdue.reduce((sum, customer) => sum + customer.overdue, 0);
   const examples = overdue.slice(0, 3).map(customer => customer.customer).join(', ');
-  return sendOwnerNotification({ organizationId, type: 'OVERDUE_CUSTOMER', dedupeKey: `overdue-customers:${organizationId}:${date}`, message: `FuelLedger receivables alert\n\n${overdue.length} customer${overdue.length === 1 ? '' : 's'} have overdue payments totalling ${money(total)}.\n${examples}${overdue.length > 3 ? '…' : ''}\n\nReview customers: ${env.APP_URL}/customers` });
+  return sendOwnerNotification({ organizationId, type: 'OVERDUE_CUSTOMER', dedupeKey: `overdue-customers:${organizationId}:${date}`, message: `FuelNerve receivables alert\n\n${overdue.length} customer${overdue.length === 1 ? '' : 's'} have overdue payments totalling ${money(total)}.\n${examples}${overdue.length > 3 ? '…' : ''}\n\nReview customers: ${env.APP_URL}/customers` });
 }

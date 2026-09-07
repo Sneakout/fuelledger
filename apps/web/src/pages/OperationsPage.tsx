@@ -97,7 +97,7 @@ function ShiftTimes({
           </b>
         </i>
       </span>
-      <p>Times are captured by FuelLedger’s server and cannot be edited.</p>
+      <p>Times are captured by FuelNerve’s server and cannot be edited.</p>
     </section>
   );
 }
@@ -365,7 +365,7 @@ export function OperationsPage() {
           <article className="reading-panel">
             <h2>Close the shift</h2>
             <p>
-              FuelLedger compares these readings with the opening figures
+              FuelNerve compares these readings with the opening figures
               automatically.
             </p>
             <Field
@@ -687,7 +687,7 @@ export function OperationsPage() {
           <h2>A calm start. A clear finish.</h2>
           <p>
             Pick the fuel station and people, confirm cash and readings, then open.
-            At close, enter the final readings and FuelLedger makes the summary.
+            At close, enter the final readings and FuelNerve makes the summary.
           </p>
         </article>
       </section>

@@ -31,7 +31,7 @@ function startupFailure(error) {
   }
   return {
     code: "API_STARTUP_FAILED",
-    message: "FuelLedger could not connect to its server. Please try again shortly.",
+    message: "FuelNerve could not connect to its server. Please try again shortly.",
   };
 }
 
@@ -50,7 +50,7 @@ export default async function handler(request, response) {
     }
     return application(request, response);
   } catch (error) {
-    console.error("FuelLedger API failed to start", error);
+    console.error("FuelNerve API failed to start", error);
     const failure = startupFailure(error);
     return response.status(503).json({
       error: failure,
