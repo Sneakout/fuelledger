@@ -190,11 +190,6 @@ export const api = {
       body: JSON.stringify(input),
     }),
   inventoryBootstrap: () => request<InventoryBootstrap>("/inventory/bootstrap"),
-  createReceipt: (input: ReceiptForm) =>
-    request<{ receipt: unknown }>("/inventory/receipts", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
   createAdjustment: (input: AdjustmentForm) =>
     request<{ entry: unknown }>("/inventory/adjustments", {
       method: "POST",

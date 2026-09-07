@@ -23,7 +23,7 @@ export async function bootstrap(organizationId: string,stationIds?:string[]) {
   }
   const ledgerByTank = group(movements.filter(entry => entry.tankId), entry => entry.tankId!); const ledgerByStationProduct = group(movements.filter(entry => !entry.tankId), entry => `${entry.stationId}:${entry.productId}`);
   const tanks = stations.flatMap(station => station.configurations[0]?.tanks.map(tank => reconciliation({ station, tank, entries: ledgerByTank.get(tank.id) ?? [] })) ?? []);
-  const untanked = stations.flatMap(station => products.filter(product => !product.tankLinked).map(product => reconciliation({ station, product, entries: ledgerByStationProduct.get(`${station.id}:${product.id}`) ?? [] }))).filter(item => item.opening || item.receipts || item.sales || item.adjustments || item.physicalStock !== null);
+  const untanked = stations.flatMap(station => products.filter(product => !product.tankLinked).map(product => reconciliation({ station, product, entries: ledgerByStationProduct.get(`${station.id}:${product.id}`) ?? [] })));
   return { asOf, stations, products, tanks, untanked, ledger, receipts };
 }
 function reconciliation({ station, tank, product, entries }: { station?: { id: string; name: string; code: string }; tank?: { id: string; code: string; openingStock: Prisma.Decimal; product: { id: string; name: string; code: string; unit: string; category: string }; physicalReadings: Array<{ physicalStock: Prisma.Decimal; dipReading: Prisma.Decimal | null; recordedAt: Date }>; densityReadings: Array<{ density: Prisma.Decimal; recordedAt: Date }> }; product?: { id: string; name: string; code: string; unit: string }; entries: Array<{ type: string; quantityDelta: Prisma.Decimal; occurredAt: Date }> }) {
