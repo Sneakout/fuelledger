@@ -1,4 +1,4 @@
-import { ArrowRight, BadgeCheck, BanknoteArrowDown, Bot, Boxes, Check, ChevronDown, CircleHelp, Gauge, Layers3, MessageSquareText, Phone, ReceiptText, ShieldCheck, Sparkles, TrendingUp, UsersRound } from "lucide-react";
+import { ArrowRight, ArrowUpRight, BadgeCheck, BanknoteArrowDown, Bot, Boxes, Check, ChevronDown, CircleDot, CircleHelp, Gauge, Layers3, MessageSquareText, Phone, ReceiptText, ShieldCheck, Sparkles, TrendingUp, TriangleAlert, UsersRound } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import { useAuth } from "../components/AuthProvider";
 import { api, type SubscriptionStatus } from "../lib/api";
@@ -78,6 +78,28 @@ export function SubscriptionPage() {
         </table>
       </div>
       <div className="sp-table-note"><ShieldCheck size={18} /><span>Accurate stock, essential difference checks and account permissions belong in every plan.</span></div>
+    </section>
+
+    <section className="sp-intelligence-story" aria-labelledby="intelligence-story-title">
+      <div className="sp-intelligence-story-copy">
+        <span className="sp-kicker"><Sparkles size={14} /> OWNER INTELLIGENCE</span>
+        <h2 id="intelligence-story-title">Know the story<br /><span>behind the numbers.</span></h2>
+        <p>FuelLedger uses AI and machine learning to turn the day&apos;s operations into a clear owner briefing. It surfaces patterns, flags unusual movement and helps you ask better questions before a small issue becomes a costly one.</p>
+        <ul>
+          <li><Check /> Daily business health summary</li>
+          <li><Check /> Sales, stock and collection anomalies</li>
+          <li><Check /> Actionable attention prompts</li>
+        </ul>
+      </div>
+      <article className="sp-daily-brief" aria-label="Illustrative FuelLedger Intelligence daily brief">
+        <header><span>FUELLEDGER INTELLIGENCE</span><b><i /> DAILY BRIEF</b></header>
+        <p className="sp-brief-station">GREENWAY FUEL POINT · 01 SEP</p>
+        <h3>Your outlet is <span>healthy today.</span></h3>
+        <div className="sp-brief-signal sp-brief-positive"><span><ArrowUpRight /></span><p><b>Sales are 8.4% above</b> your 7-day average, led by HSD volume.</p></div>
+        <div className="sp-brief-signal sp-brief-warning"><span><TriangleAlert /></span><p><b>Collection gap needs review.</b> One shift remains open after the expected close time.</p></div>
+        <div className="sp-brief-signal"><span><CircleDot /></span><p><b>MS Tank 1 is trending low.</b> Plan the next replenishment before tomorrow evening.</p></div>
+        <footer><span>3 signals reviewed</span><b>Open daily brief <ArrowRight /></b></footer>
+      </article>
     </section>
 
     <section className="sp-agent-section">
