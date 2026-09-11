@@ -13,6 +13,8 @@ import {
 
 const prisma = new PrismaClient();
 const transactionOptions = { maxWait: 15_000, timeout: 60_000 };
+const demoOrganizationName = "FuelNerve Demo";
+const demoStationName = "FuelNerve Petroleum";
 const at = (daysAgo: number, hour: number) => {
   const date = new Date();
   date.setDate(date.getDate() - daysAgo);
@@ -50,6 +52,19 @@ async function main() {
     where: { organizationId: owner.organizationId, active: true },
     include: stationInclude,
   });
+  // Demo data is persistent in production. Reconcile existing records on every
+  // deployment so accounts created under an earlier brand never retain it.
+  await prisma.organization.update({
+    where: { id: owner.organizationId },
+    data: { name: demoOrganizationName },
+  });
+  if (station && station.name !== demoStationName) {
+    station = await prisma.station.update({
+      where: { id: station.id },
+      data: { name: demoStationName },
+      include: stationInclude,
+    });
+  }
   if (!station?.configurations[0]) {
     const products = await prisma.product.findMany({
       where: {
@@ -66,7 +81,7 @@ async function main() {
       (await prisma.station.create({
         data: {
           organizationId: owner.organizationId,
-          name: "FuelNerve Demo Petrol Pump",
+          name: demoStationName,
           code: "DEMO-PUMP",
           addressLine1: "Avinashi Road",
           city: "Coimbatore",
