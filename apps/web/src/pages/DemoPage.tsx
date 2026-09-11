@@ -38,11 +38,11 @@ export function DemoPage() {
         <Link to="/login" className="back-link"><ArrowLeft /> Back to sign in</Link>
         <span className="eyebrow">No account required</span>
         <h2>Start your private demo</h2>
-        <p>Enter a work email or mobile number. We use it to create and manage your 48-hour demo access.</p>
+        <p>Enter a work email or mobile number. Use the same contact to resume your demo from any computer or mobile during the 48-hour access period.</p>
         {error && <div className="form-error" role="alert">{error}</div>}
         <label>Email or mobile number<div className="input-wrap"><Mail /><input value={contact} onChange={event => setContact(event.target.value)} placeholder="you@company.com or +91…" autoComplete="email" required /></div></label>
         <button className="primary" disabled={busy}>{busy ? 'Preparing your demo…' : 'Explore FuelNerve'}</button>
-        <small className="demo-privacy">By continuing, you agree that FuelNerve may use this contact to support your demo. No password is required.</small>
+        <small className="demo-privacy">Your demo remains read-only and ends at its original expiry time. No password is required.</small>
       </form>
     </section>
   </main>;

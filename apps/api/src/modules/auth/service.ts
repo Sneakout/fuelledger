@@ -167,9 +167,16 @@ export async function startDemo(input: DemoAccessInput) {
       return tx.demoSession.create({ data: { contact, kind, expiresAt } });
     });
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")
-      throw new AppError(409, "DEMO_ALREADY_USED", "This email address or mobile number has already used its free demo. Sign in or contact us to continue.");
-    throw error;
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      demo = await prisma.demoSession.findFirst({
+        where: { contact, expiresAt: { gt: new Date() } },
+        orderBy: { createdAt: "desc" },
+      });
+      if (!demo)
+        throw new AppError(409, "DEMO_EXPIRED", "This contact has already used its free 48-hour demo. Contact FuelNerve to continue.");
+    } else {
+      throw error;
+    }
   }
   const token = jwt.sign(
     {
@@ -179,7 +186,7 @@ export async function startDemo(input: DemoAccessInput) {
       demoSessionId: demo.id,
     },
     env.JWT_SECRET,
-    { expiresIn: "48h" },
+    { expiresIn: Math.max(1, Math.floor((demo.expiresAt.getTime() - Date.now()) / 1000)) },
   );
   return { token, user: present(owner, expiresAt) };
 }
