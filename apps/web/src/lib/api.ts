@@ -350,7 +350,7 @@ export const api = {
     request<PlatformCustomersBootstrap>("/platform/customers"),
   updateCustomerSubscription: (
     id: string,
-    input: { setupFeePaid: boolean; lifetimeAccessPaid: boolean },
+    input: { plan: SubscriptionPlan; billingPeriod: SubscriptionBillingPeriod; paymentConfirmed: boolean; setupFeePaid: boolean },
   ) =>
     request<{
       customer: Pick<
@@ -360,6 +360,7 @@ export const api = {
         | "lifetimeAccessPaidAt"
         | "subscriptionUpdatedAt"
         | "subscriptionUpdatedBy"
+        | "subscriptionPlan" | "subscriptionBillingPeriod" | "subscriptionPricePaise" | "subscriptionActivatedAt" | "subscriptionExpiresAt"
       >;
     }>(`/platform/customers/${id}/subscription`, {
       method: "PUT",
@@ -416,14 +417,30 @@ export type PlatformCustomer = {
   lifetimeAccessPaidAt: string | null;
   subscriptionUpdatedAt: string | null;
   subscriptionUpdatedBy: string | null;
+  intelligenceEnabledAt: string | null;
+  intelligenceExpiresAt: string | null;
+  subscriptionPlan: SubscriptionPlan | null;
+  subscriptionBillingPeriod: SubscriptionBillingPeriod | null;
+  subscriptionPricePaise: number | null;
+  subscriptionActivatedAt: string | null;
+  subscriptionExpiresAt: string | null;
   owner: { name: string; email: string; lastLoginAt: string | null } | null;
   petrolPumps: number;
 };
 export type PlatformCustomersBootstrap = { customers: PlatformCustomer[] };
+export type SubscriptionPlan = "CORE" | "CORE_INTELLIGENCE";
+export type SubscriptionBillingPeriod = "MONTHLY" | "YEARLY" | "LIFETIME" | "FOUNDING_YEARLY";
 export type SubscriptionStatus = {
   setupFeePaidAt: string | null;
   lifetimeAccessPaidAt: string | null;
   subscriptionUpdatedAt: string | null;
+  intelligenceEnabledAt: string | null;
+  intelligenceExpiresAt: string | null;
+  subscriptionPlan: SubscriptionPlan | null;
+  subscriptionBillingPeriod: SubscriptionBillingPeriod | null;
+  subscriptionPricePaise: number | null;
+  subscriptionActivatedAt: string | null;
+  subscriptionExpiresAt: string | null;
 };
 export type Reading = { id: string; value: number };
 export type ClosingNozzleReading = Reading & {

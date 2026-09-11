@@ -44,17 +44,15 @@ export const demoAccessSchema = z
         message: "Enter a valid email address or mobile number",
       });
   });
-export const customerSubscriptionUpdateSchema = z
-  .object({ setupFeePaid: z.boolean(), lifetimeAccessPaid: z.boolean() })
-  .superRefine((value, context) => {
-    if (value.lifetimeAccessPaid && !value.setupFeePaid)
-      context.addIssue({
-        code: "custom",
-        path: ["setupFeePaid"],
-        message:
-          "Setup payment must be confirmed before lifetime access can be activated.",
-      });
-  });
+export const subscriptionPlans = ["CORE", "CORE_INTELLIGENCE"] as const;
+export const subscriptionBillingPeriods = ["MONTHLY", "YEARLY", "LIFETIME", "FOUNDING_YEARLY"] as const;
+export const customerSubscriptionUpdateSchema = z.object({
+  plan: z.enum(subscriptionPlans), billingPeriod: z.enum(subscriptionBillingPeriods),
+  paymentConfirmed: z.boolean(), setupFeePaid: z.boolean(),
+}).superRefine((value, context) => {
+  if (value.plan === "CORE" && value.billingPeriod === "FOUNDING_YEARLY") context.addIssue({ code: "custom", path: ["billingPeriod"], message: "The founding offer is available only with Core + Intelligence." });
+  if (value.plan === "CORE_INTELLIGENCE" && value.billingPeriod === "LIFETIME") context.addIssue({ code: "custom", path: ["billingPeriod"], message: "Lifetime access is available only for Core." });
+});
 export type User = z.infer<typeof userSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type SignupInput = z.infer<typeof signupSchema>;

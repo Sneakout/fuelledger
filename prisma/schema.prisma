@@ -129,6 +129,13 @@ model Organization {
   lifetimeAccessPaidAt   DateTime?                   @map("lifetime_access_paid_at")
   subscriptionUpdatedAt  DateTime?                   @map("subscription_updated_at")
   subscriptionUpdatedBy  String?                     @map("subscription_updated_by")
+  intelligenceEnabledAt     DateTime? @map("intelligence_enabled_at")
+  intelligenceExpiresAt     DateTime? @map("intelligence_expires_at")
+  subscriptionPlan          String?   @map("subscription_plan")
+  subscriptionBillingPeriod String?   @map("subscription_billing_period")
+  subscriptionPricePaise    Int?      @map("subscription_price_paise")
+  subscriptionActivatedAt   DateTime? @map("subscription_activated_at")
+  subscriptionExpiresAt     DateTime? @map("subscription_expires_at")
   createdAt              DateTime                    @default(now()) @map("created_at")
   updatedAt              DateTime                    @updatedAt @map("updated_at")
   users                  User[]
