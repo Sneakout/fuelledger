@@ -35,7 +35,7 @@ const invoiceInclude = {
     },
   },
   payments: { orderBy: { paidAt: 'desc' as const } },
-  receipt: { select: { id: true, receivedAt: true, receivedAtReason: true, createdAt: true, createdBy: { select: { name: true } } } },
+  receipt: { select: { id: true, receivedAt: true, receivedAtReason: true, createdAt: true, createdBy: { select: { name: true } }, lines: { select: { productId: true, quantity: true, product: { select: { name: true, unit: true } } } } } },
   attachments: {
     select: { id: true, fileName: true, mimeType: true, size: true },
   },
@@ -139,7 +139,7 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
   await prisma.expenseCategory.createMany({ data: defaultExpenseCategories.map(category => ({ organizationId, ...category })), skipDuplicates: true });
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
-  const [suppliers, invoices, stations, products, categories, expenses] = await Promise.all([
+  const [suppliers, invoices, stations, products, categories, expenses, unmatchedReceipts] = await Promise.all([
     prisma.supplier.findMany({
       where: { organizationId },
       orderBy: [{ active: 'desc' }, { name: 'asc' }],
@@ -208,6 +208,7 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
       orderBy: { incurredAt: 'desc' },
       include: expenseInclude,
     }),
+    prisma.purchaseReceipt.findMany({ where: { organizationId, invoiceId: null, ...(stationIds ? { stationId: { in: stationIds } } : {}) }, take: 100, orderBy: { receivedAt: 'desc' }, include: { lines: { include: { product: { select: { name: true, unit: true } } } } } }),
   ]);
   const shaped = invoices.map((invoice) => ({
     ...invoice,
@@ -228,6 +229,7 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
     })),
     categories,
     expenses,
+    unmatchedReceipts,
     summary: {
       payables: shaped.reduce((sum, x) => sum + x.outstanding, 0),
       overdue: shaped.filter((x) => x.overdue).reduce((sum, x) => sum + x.outstanding, 0),

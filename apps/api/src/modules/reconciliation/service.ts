@@ -24,11 +24,40 @@ const reconciliationInclude = {
 } as const;
 const shiftInclude = {
   nozzleAssignments: { include: { user: { select: { id: true, name: true } } } },
+  tankReadings: { select: { tankId: true, closingDip: true } },
+  nozzleReadings: { select: { nozzleId: true, closingMeter: true } },
   sales: { where: { paymentMethod: { in: ["CREDIT", "FLEET"] as ("CREDIT" | "FLEET")[] } } },
   station: { select: { id: true, name: true, code: true } },
   manager: { select: { id: true, name: true, role: true } },
   reconciliation: { include: reconciliationInclude },
 } as const;
+
+export const openShiftOverdueMinutes = 12 * 60;
+
+/** Read-only open-shift facts for Nerve. Closing fields are reported, never inferred. */
+export async function openShiftsForNerve(organizationId: string, stationId: string, asOf: Date) {
+  const shifts = await prisma.shift.findMany({
+    where: { station: { organizationId, id: stationId }, status: "OPEN" },
+    orderBy: { openedAt: "asc" },
+    include: {
+      station: { select: { id: true, name: true, code: true } },
+      manager: { select: { id: true, name: true } },
+      tankReadings: { select: { closingDip: true } },
+      nozzleReadings: { select: { closingMeter: true } },
+      nozzleAssignments: { select: { collectionAmount: true } },
+    },
+  });
+  return shifts.map(shift => {
+    const openMinutes = Math.max(0, Math.floor((asOf.getTime() - shift.openedAt.getTime()) / 60_000));
+    return {
+      shiftId: shift.id, shiftNumber: shift.shiftNumber, stationId: shift.station.id, stationName: shift.station.name,
+      stationCode: shift.station.code, managerName: shift.manager.name, openedAt: shift.openedAt, openMinutes,
+      overdue: openMinutes >= openShiftOverdueMinutes, closingCashMissing: shift.closingCash === null,
+      missingReadings: [...shift.tankReadings, ...shift.nozzleReadings].filter(row => "closingDip" in row ? row.closingDip === null : row.closingMeter === null).length,
+      missingCollections: shift.nozzleAssignments.filter(row => row.collectionAmount === null).length,
+    };
+  });
+}
 export async function bootstrap(organizationId: string, stationIds?: string[]) {
   const shifts = await prisma.shift.findMany({
     where: {

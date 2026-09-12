@@ -54,6 +54,9 @@ const NotificationsPage = lazy(() =>
     default: module.NotificationsPage,
   })),
 );
+const IntelligenceAgentsPage = lazy(() =>
+  import("./pages/IntelligenceAgentsPage").then((module) => ({ default: module.IntelligenceAgentsPage })),
+);
 const OperationsPage = lazy(() =>
   import("./pages/OperationsPage").then((module) => ({
     default: module.OperationsPage,
@@ -128,6 +131,9 @@ export default function App() {
           <Route path="reports" element={<ReportsPage />} />
           <Route path="staff" element={<StaffPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
+          <Route path="insights" element={<IntelligenceAgentsPage />} />
+          <Route path="insights/:agentKey" element={<IntelligenceAgentsPage />} />
+          <Route path="intelligence-agents" element={<IntelligenceAgentsPage />} />
           <Route path="subscription" element={<SubscriptionPage />} />
           <Route path="demo-leads" element={<DemoLeadsPage />} />
         </Route>

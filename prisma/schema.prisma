@@ -111,6 +111,7 @@ enum OwnerNotificationType {
   LOW_STOCK
   SHIFT_VARIANCE
   SHIFT_OPEN
+  APPROVAL_REQUIRED
   DAILY_SUMMARY
   OVERDUE_CUSTOMER
   SYSTEM_TEST
@@ -122,84 +123,112 @@ enum NotificationDeliveryStatus {
   FAILED
 }
 
+enum OwnerAlertSeverity {
+  INFORMATION
+  ATTENTION
+  URGENT
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum ApprovalActionType {
+  INVENTORY_ADJUSTMENT
+}
+
 model Organization {
-  id                     String                      @id @default(cuid())
-  name                   String
-  setupFeePaidAt         DateTime?                   @map("setup_fee_paid_at")
-  lifetimeAccessPaidAt   DateTime?                   @map("lifetime_access_paid_at")
-  subscriptionUpdatedAt  DateTime?                   @map("subscription_updated_at")
-  subscriptionUpdatedBy  String?                     @map("subscription_updated_by")
-  intelligenceEnabledAt     DateTime? @map("intelligence_enabled_at")
-  intelligenceExpiresAt     DateTime? @map("intelligence_expires_at")
-  subscriptionPlan          String?   @map("subscription_plan")
-  subscriptionBillingPeriod String?   @map("subscription_billing_period")
-  subscriptionPricePaise    Int?      @map("subscription_price_paise")
-  subscriptionActivatedAt   DateTime? @map("subscription_activated_at")
-  subscriptionExpiresAt     DateTime? @map("subscription_expires_at")
-  createdAt              DateTime                    @default(now()) @map("created_at")
-  updatedAt              DateTime                    @updatedAt @map("updated_at")
-  users                  User[]
-  stations               Station[]
-  products               Product[]
-  productCategories      ProductCategorySetting[]
-  taxCategories          TaxCategory[]
-  sales                  Sale[]
-  inventoryLedger        InventoryLedger[]
-  purchaseReceipts       PurchaseReceipt[]
-  tankReadings           TankReading[]
-  densityReadings        TankDensityReading[]
-  customers              Customer[]
-  customerReceipts       CustomerReceipt[]
-  customerLedger         CustomerLedgerEntry[]
-  suppliers              Supplier[]
-  purchaseInvoices       PurchaseInvoice[]
-  supplierPayments       SupplierPayment[]
-  expenseCategories      ExpenseCategory[]
-  expenses               Expense[]
-  chartAccounts          ChartAccount[]
-  journals               Journal[]
-  notificationSettings   OwnerNotificationSettings?
-  notificationDeliveries OwnerNotificationDelivery[]
-  stationSetupDrafts     StationSetupDraft[]
-  receiptTimingEvents    ReceiptTimingAuditEvent[]
+  id                         String                      @id @default(cuid())
+  name                       String
+  setupFeePaidAt             DateTime?                   @map("setup_fee_paid_at")
+  lifetimeAccessPaidAt       DateTime?                   @map("lifetime_access_paid_at")
+  subscriptionUpdatedAt      DateTime?                   @map("subscription_updated_at")
+  subscriptionUpdatedBy      String?                     @map("subscription_updated_by")
+  intelligenceEnabledAt      DateTime?                   @map("intelligence_enabled_at")
+  intelligenceExpiresAt      DateTime?                   @map("intelligence_expires_at")
+  subscriptionPlan           String?                     @map("subscription_plan")
+  subscriptionBillingPeriod  String?                     @map("subscription_billing_period")
+  subscriptionPricePaise     Int?                        @map("subscription_price_paise")
+  subscriptionActivatedAt    DateTime?                   @map("subscription_activated_at")
+  subscriptionExpiresAt      DateTime?                   @map("subscription_expires_at")
+  createdAt                  DateTime                    @default(now()) @map("created_at")
+  updatedAt                  DateTime                    @updatedAt @map("updated_at")
+  users                      User[]
+  stations                   Station[]
+  products                   Product[]
+  productCategories          ProductCategorySetting[]
+  taxCategories              TaxCategory[]
+  sales                      Sale[]
+  inventoryLedger            InventoryLedger[]
+  purchaseReceipts           PurchaseReceipt[]
+  tankReadings               TankReading[]
+  densityReadings            TankDensityReading[]
+  customers                  Customer[]
+  customerReceipts           CustomerReceipt[]
+  customerLedger             CustomerLedgerEntry[]
+  suppliers                  Supplier[]
+  purchaseInvoices           PurchaseInvoice[]
+  supplierPayments           SupplierPayment[]
+  expenseCategories          ExpenseCategory[]
+  expenses                   Expense[]
+  chartAccounts              ChartAccount[]
+  journals                   Journal[]
+  notificationSettings       OwnerNotificationSettings?
+  notificationDeliveries     OwnerNotificationDelivery[]
+  ownerAlerts                OwnerAlert[]
+  pushDevices                OwnerPushDevice[]
+  pushDeliveries             OwnerPushDelivery[]
+  dailyBriefings             DailyOwnerBriefing[]
+  intelligenceQuestions      IntelligenceQuestion[]
+  intelligenceInvestigations IntelligenceInvestigation[]
+  approvalRequests           ApprovalRequest[]
+  stationSetupDrafts         StationSetupDraft[]
+  receiptTimingEvents        ReceiptTimingAuditEvent[]
 
   @@map("organizations")
 }
 
 model Station {
-  id                     String                      @id @default(cuid())
-  organizationId         String                      @map("organization_id")
-  name                   String
-  code                   String
-  addressLine1           String                      @map("address_line_1")
-  city                   String
-  state                  String
-  postalCode             String                      @map("postal_code")
-  phone                  String?
-  gstin                  String?
-  openingTime            String?                     @map("opening_time")
-  closingTime            String?                     @map("closing_time")
-  active                 Boolean                     @default(true)
-  createdAt              DateTime                    @default(now()) @map("created_at")
-  updatedAt              DateTime                    @updatedAt @map("updated_at")
-  organization           Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  configurations         StationConfiguration[]
-  shifts                 Shift[]
-  sales                  Sale[]
-  inventoryLedger        InventoryLedger[]
-  purchaseReceipts       PurchaseReceipt[]
-  tankReadings           TankReading[]
-  densityReadings        TankDensityReading[]
-  customerReceipts       CustomerReceipt[]
-  customerLedger         CustomerLedgerEntry[]
-  purchaseInvoices       PurchaseInvoice[]
-  supplierPayments       SupplierPayment[]
-  expenses               Expense[]
-  journals               Journal[]
-  userAccess             UserStationAccess[]
-  notificationDeliveries OwnerNotificationDelivery[]
-  setupDraft             StationSetupDraft?
-  receiptTimingEvents    ReceiptTimingAuditEvent[]
+  id                         String                      @id @default(cuid())
+  organizationId             String                      @map("organization_id")
+  name                       String
+  code                       String
+  addressLine1               String                      @map("address_line_1")
+  city                       String
+  state                      String
+  postalCode                 String                      @map("postal_code")
+  phone                      String?
+  gstin                      String?
+  openingTime                String?                     @map("opening_time")
+  closingTime                String?                     @map("closing_time")
+  active                     Boolean                     @default(true)
+  createdAt                  DateTime                    @default(now()) @map("created_at")
+  updatedAt                  DateTime                    @updatedAt @map("updated_at")
+  organization               Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  configurations             StationConfiguration[]
+  shifts                     Shift[]
+  sales                      Sale[]
+  inventoryLedger            InventoryLedger[]
+  purchaseReceipts           PurchaseReceipt[]
+  tankReadings               TankReading[]
+  densityReadings            TankDensityReading[]
+  customerReceipts           CustomerReceipt[]
+  customerLedger             CustomerLedgerEntry[]
+  purchaseInvoices           PurchaseInvoice[]
+  supplierPayments           SupplierPayment[]
+  expenses                   Expense[]
+  journals                   Journal[]
+  userAccess                 UserStationAccess[]
+  notificationDeliveries     OwnerNotificationDelivery[]
+  ownerAlerts                OwnerAlert[]
+  intelligenceQuestions      IntelligenceQuestion[]
+  intelligenceInvestigations IntelligenceInvestigation[]
+  approvalRequests           ApprovalRequest[]
+  setupDraft                 StationSetupDraft?
+  receiptTimingEvents        ReceiptTimingAuditEvent[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -261,6 +290,174 @@ model OwnerNotificationDelivery {
   @@index([organizationId, createdAt])
   @@index([stationId, createdAt])
   @@map("owner_notification_deliveries")
+}
+
+model OwnerAlert {
+  id                 String                @id @default(cuid())
+  organizationId     String                @map("organization_id")
+  stationId          String?               @map("station_id")
+  type               OwnerNotificationType
+  severity           OwnerAlertSeverity
+  dedupeKey          String                @unique @map("dedupe_key")
+  title              String
+  message            String
+  evidenceLabel      String                @map("evidence_label")
+  evidencePath       String                @map("evidence_path")
+  evidenceSourceType String?               @map("evidence_source_type")
+  evidenceSourceId   String?               @map("evidence_source_id")
+  packet             Json?
+  readAt             DateTime?             @map("read_at")
+  acknowledgedAt     DateTime?             @map("acknowledged_at")
+  acknowledgedById   String?               @map("acknowledged_by_id")
+  resolvedAt         DateTime?             @map("resolved_at")
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @updatedAt @map("updated_at")
+  organization       Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  station            Station?              @relation(fields: [stationId], references: [id], onDelete: Restrict)
+  acknowledgedBy     User?                 @relation("alert_acknowledger", fields: [acknowledgedById], references: [id], onDelete: Restrict)
+  pushDeliveries     OwnerPushDelivery[]
+
+  @@index([organizationId, createdAt])
+  @@index([stationId, createdAt])
+  @@index([organizationId, acknowledgedAt, createdAt])
+  @@map("owner_alerts")
+}
+
+model OwnerPushDevice {
+  id             String              @id @default(cuid())
+  organizationId String              @map("organization_id")
+  userId         String              @map("user_id")
+  token          String              @unique
+  platform       String              @default("IOS")
+  environment    String              @default("PRODUCTION")
+  active         Boolean             @default(true)
+  lastSeenAt     DateTime            @default(now()) @map("last_seen_at")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries     OwnerPushDelivery[]
+
+  @@index([organizationId, active])
+  @@index([userId, active])
+  @@map("owner_push_devices")
+}
+
+model OwnerPushDelivery {
+  id                String                     @id @default(cuid())
+  organizationId    String                     @map("organization_id")
+  alertId           String                     @map("alert_id")
+  deviceId          String                     @map("device_id")
+  status            NotificationDeliveryStatus @default(PENDING)
+  providerMessageId String?                    @map("provider_message_id")
+  errorMessage      String?                    @map("error_message")
+  sentAt            DateTime?                  @map("sent_at")
+  createdAt         DateTime                   @default(now()) @map("created_at")
+  organization      Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  alert             OwnerAlert                 @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  device            OwnerPushDevice            @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([alertId, deviceId])
+  @@index([organizationId, createdAt])
+  @@map("owner_push_deliveries")
+}
+
+model DailyOwnerBriefing {
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
+  stationScope   String       @map("station_scope")
+  briefingDate   DateTime     @map("briefing_date") @db.Date
+  calculatedAt   DateTime     @map("calculated_at")
+  facts          Json
+  narrative      Json
+  narrativeMode  String       @map("narrative_mode")
+  model          String?
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, stationScope, briefingDate])
+  @@index([organizationId, briefingDate])
+  @@map("daily_owner_briefings")
+}
+
+model IntelligenceQuestion {
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
+  requestKey     String       @map("request_key")
+  userId         String       @map("user_id")
+  stationId      String?      @map("station_id")
+  question       String
+  intent         String
+  periodStart    DateTime     @map("period_start")
+  periodEnd      DateTime     @map("period_end")
+  facts          Json
+  answer         Json
+  answerMode     String       @map("answer_mode")
+  model          String?
+  createdAt      DateTime     @default(now()) @map("created_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+  station        Station?     @relation(fields: [stationId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, requestKey])
+  @@index([organizationId, createdAt])
+  @@index([userId, createdAt])
+  @@map("intelligence_questions")
+}
+
+model IntelligenceInvestigation {
+  id             String       @id @default(cuid())
+  organizationId String       @map("organization_id")
+  stationId      String       @map("station_id")
+  userId         String       @map("user_id")
+  requestKey     String       @map("request_key")
+  findingIds     Json         @map("finding_ids")
+  subject        String
+  factSnapshot   Json         @map("fact_snapshot")
+  snapshotHash   String       @map("snapshot_hash")
+  result         Json
+  narrativeMode  String       @map("narrative_mode")
+  model          String?
+  createdAt      DateTime     @default(now()) @map("created_at")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  station        Station      @relation(fields: [stationId], references: [id], onDelete: Restrict)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, requestKey])
+  @@index([organizationId, stationId, createdAt])
+  @@index([userId, createdAt])
+  @@map("intelligence_investigations")
+}
+
+model ApprovalRequest {
+  id             String             @id @default(cuid())
+  organizationId String             @map("organization_id")
+  stationId      String             @map("station_id")
+  actionType     ApprovalActionType @map("action_type")
+  status         ApprovalStatus     @default(PENDING)
+  requestKey     String             @map("request_key")
+  requestedById  String             @map("requested_by_id")
+  requestedAt    DateTime           @default(now()) @map("requested_at")
+  reason         String
+  payload        Json
+  evidence       Json
+  decidedById    String?            @map("decided_by_id")
+  decidedAt      DateTime?          @map("decided_at")
+  decisionNote   String?            @map("decision_note")
+  executedAt     DateTime?          @map("executed_at")
+  executionType  String?            @map("execution_type")
+  executionId    String?            @map("execution_id")
+  version        Int                @default(1)
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  station        Station            @relation(fields: [stationId], references: [id], onDelete: Restrict)
+  requestedBy    User               @relation("ApprovalRequester", fields: [requestedById], references: [id], onDelete: Restrict)
+  decidedBy      User?              @relation("ApprovalDecider", fields: [decidedById], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, requestKey])
+  @@index([organizationId, status, requestedAt])
+  @@index([stationId, status, requestedAt])
+  @@map("approval_requests")
 }
 
 model Product {
@@ -663,6 +860,8 @@ model CustomerLedgerEntry {
   shiftCreditAllocationId String?                @unique @map("shift_credit_allocation_id")
   description             String
   dueDate                 DateTime?              @map("due_date")
+  disputedAt              DateTime?              @map("disputed_at")
+  disputeReason           String?                @map("dispute_reason")
   occurredAt              DateTime               @default(now()) @map("occurred_at")
   createdById             String                 @map("created_by_id")
   organization            Organization           @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -1096,6 +1295,12 @@ model User {
   stationAccess              UserStationAccess[]
   sessions                   UserSession[]
   receiptTimingEvents        ReceiptTimingAuditEvent[]
+  acknowledgedAlerts         OwnerAlert[]                @relation("alert_acknowledger")
+  pushDevices                OwnerPushDevice[]
+  intelligenceQuestions      IntelligenceQuestion[]
+  intelligenceInvestigations IntelligenceInvestigation[]
+  approvalRequestsMade       ApprovalRequest[]           @relation("ApprovalRequester")
+  approvalDecisions          ApprovalRequest[]           @relation("ApprovalDecider")
 
   @@index([organizationId])
   @@map("users")
@@ -1147,7 +1352,6 @@ model DemoSession {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@index([expiresAt])
-  @@index([contact, expiresAt])
   @@map("demo_sessions")
 }
 

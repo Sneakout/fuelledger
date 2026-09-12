@@ -191,7 +191,7 @@ export const api = {
     }),
   inventoryBootstrap: () => request<InventoryBootstrap>("/inventory/bootstrap"),
   createAdjustment: (input: AdjustmentForm) =>
-    request<{ entry: unknown }>("/inventory/adjustments", {
+    request<{ approval: { id: string; status: "PENDING" } }>("/inventory/adjustments", {
       method: "POST",
       body: JSON.stringify(input),
     }),
@@ -335,6 +335,14 @@ export const api = {
       body: JSON.stringify({ assignments }),
     }),
   notificationSettings: () => request<NotificationBootstrap>("/notifications"),
+  dailyBriefing: (stationId?: string) => request<DailyBriefingResponse>(`/intelligence/daily-briefing${stationId ? `?stationId=${encodeURIComponent(stationId)}` : ""}`),
+  nerveAgents: (stationId: string) => request<NerveAgentsResponse>(`/intelligence/agents?stationId=${encodeURIComponent(stationId)}`),
+  askFuelNerve: (input: { requestId: string; question: string; stationId?: string; asOf?: string }) =>
+    request<AskFuelNerveResponse>("/intelligence/ask", { method: "POST", body: JSON.stringify(input) }),
+  investigateFinding: (input: { requestId: string; stationId: string; findingIds: string[] }) =>
+    request<InvestigationResponse>("/intelligence/investigations", { method: "POST", body: JSON.stringify(input) }),
+  investigationFollowUp: (investigationId: string, input: { stationId: string; prompt: InvestigationFollowUpPrompt }) =>
+    request<InvestigationFollowUpResponse>(`/intelligence/investigations/${encodeURIComponent(investigationId)}/follow-ups`, { method: "POST", body: JSON.stringify(input) }),
   updateNotificationSettings: (input: OwnerNotificationSettingsInput) =>
     request<{ settings: NotificationSettings }>("/notifications", {
       method: "PUT",
@@ -360,7 +368,11 @@ export const api = {
         | "lifetimeAccessPaidAt"
         | "subscriptionUpdatedAt"
         | "subscriptionUpdatedBy"
-        | "subscriptionPlan" | "subscriptionBillingPeriod" | "subscriptionPricePaise" | "subscriptionActivatedAt" | "subscriptionExpiresAt"
+        | "subscriptionPlan"
+        | "subscriptionBillingPeriod"
+        | "subscriptionPricePaise"
+        | "subscriptionActivatedAt"
+        | "subscriptionExpiresAt"
       >;
     }>(`/platform/customers/${id}/subscription`, {
       method: "PUT",
@@ -1340,6 +1352,113 @@ export type DashboardBootstrap = {
     physicalReadingAt: string | null;
     status: "EMPTY" | "LOW" | "HEALTHY";
   }>;
+};
+export type DailyBriefingFact = {
+  id: string;
+  category: string;
+  severity: "URGENT" | "ATTENTION" | "POSITIVE" | "INFORMATION";
+  label: string;
+  value: string;
+  context: string;
+  evidenceLabel: string;
+  evidencePath: string;
+};
+export type DailyBriefingResponse = {
+  date: string;
+  calculatedAt: string;
+  facts: DailyBriefingFact[];
+  narrative: { headline: string; summary: string; items: Array<{ factId: string; explanation: string; action: string }> };
+  narrativeMode: string;
+  model: string | null;
+};
+export type NerveFinding = {
+  findingId: string;
+  type: string;
+  severity: "INFORMATION" | "ATTENTION" | "URGENT";
+  title: string;
+  agent: NerveAgentPresentation;
+  whyItMatters: string;
+  recommendedNextStep: string;
+  displayValue: unknown;
+  calculatedAt: string;
+  priorityRank?: number;
+  priorityReason?: string;
+  recordsToCompare?: string[];
+  relatedContext?: Record<string, unknown>;
+  unverified?: string[];
+  evidence: Array<{ label: string; resolverPath: string }>;
+};
+export type NerveAgentPresentation = {
+  agentKey: string;
+  name: string;
+  purpose: string;
+  icon: "shift" | "stock" | "profit" | "assistant" | "specialist";
+};
+export type NerveAgentsResponse = {
+  mode: "READ_ONLY";
+  sourceMode: "SHADOW" | "VERIFIED_DEMO";
+  generatedAt: string;
+  stale: boolean;
+  safety: { evidenceVerified: boolean; crossTenantDenied: boolean; crossStationDenied: boolean; offlineSafe: boolean; proposalsEnabled: false; actionsEnabled: false };
+  summary: { agents: number; findings: number; urgent: number };
+  agents: Array<NerveAgentPresentation & { runId: string; status: "ALL_CLEAR" | "FINDINGS" | "NEEDS_ATTENTION"; lastCompletedAt: string; findings: NerveFinding[] }>;
+};
+export type AskFuelNerveResponse = {
+  id: string;
+  intent: string;
+  scope: { date: string; stationId: string | null };
+  answer: {
+    title: string;
+    explanation: string;
+    action: string;
+    facts: Array<{ id: string; label: string; value: string; context: string; evidenceLabel: string; evidencePath: string; priorityRank?: number; priorityReason?: string; supportingRecords?: Array<{ evidenceId: string; evidenceType: string; label: string; resolverPath: string }> }>;
+  };
+  answerMode: string;
+  stationId?: string;
+  snapshotDate?: string;
+  stale?: boolean;
+  inconsistentSnapshot?: boolean;
+  missingInformation?: string[];
+  supportedFollowUps?: Array<"Give me details" | "Why first?" | "Show the records">;
+  usage: { used: number; limit: number; remaining: number };
+};
+export type InvestigationCitation = {
+  title: string;
+  detail: string;
+  value?: string;
+  occurredAt?: string;
+  factIds: string[];
+  evidenceIds: string[];
+};
+export type InvestigationResponse = {
+  investigationId: string;
+  agent: NerveAgentPresentation;
+  subject: string;
+  headline: string;
+  summary: string;
+  status: "READ_ONLY";
+  generatedAt: string;
+  recordsReviewed: number;
+  snapshotHash: string;
+  narrativeMode: string;
+  observations: InvestigationCitation[];
+  timeline: InvestigationCitation[];
+  possibleExplanations: Array<{ text: string; confidence: "POSSIBLE" | "SUPPORTED"; factIds: string[]; evidenceIds: string[] }>;
+  unknowns: InvestigationCitation[];
+  nextChecks: Array<{ label: string; detail: string; resolverPath: string; evidenceIds: string[] }>;
+  evidence: Array<{ evidenceId: string; evidenceType: string; label: string; observedAt: string; resolverPath: string }>;
+};
+export type InvestigationFollowUpPrompt = "WHY_HIGHEST_PRIORITY" | "RECORDS_COMPARED" | "CHANGED_SINCE_PREVIOUS" | "UNCONFIRMED" | "RELEVANT_RECEIPT";
+export type InvestigationFollowUpResponse = {
+  investigationId: string;
+  agent: NerveAgentPresentation;
+  prompt: InvestigationFollowUpPrompt;
+  question: string;
+  status: "READ_ONLY";
+  snapshotHash: string;
+  supported: boolean;
+  answer: string;
+  citations: Array<{ evidenceId: string; label: string; resolverPath: string }>;
 };
 export type AccessStation = {
   id: string;

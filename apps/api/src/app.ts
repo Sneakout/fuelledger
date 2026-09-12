@@ -25,6 +25,7 @@ import { dashboardRouter } from "./routes/dashboard.js";
 import { accessRouter } from "./routes/access.js";
 import { platformRouter } from "./routes/platform.js";
 import { notificationsRouter } from "./routes/notifications.js";
+import { intelligenceRouter } from "./routes/intelligence.js";
 
 export function createApp() {
   const app = express();
@@ -105,6 +106,7 @@ export function createApp() {
   app.use("/api/access", accessRouter);
   app.use("/api/platform", platformRouter);
   app.use("/api/notifications", notificationsRouter);
+  app.use("/api/intelligence", intelligenceRouter);
   app.use("/api", (_req, _res) => {
     throw new AppError(
       404,
