@@ -1,5 +1,3 @@
-ALTER TABLE "organizations" ADD COLUMN "intelligence_enabled_at" TIMESTAMP(3), ADD COLUMN "intelligence_expires_at" TIMESTAMP(3);
-
 CREATE TABLE "daily_owner_briefings" (
   "id" TEXT NOT NULL,
   "organization_id" TEXT NOT NULL,

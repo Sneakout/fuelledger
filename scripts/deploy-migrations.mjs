@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { PrismaClient } from "@prisma/client";
 
 const prismaCli = fileURLToPath(
   new URL("../node_modules/prisma/build/index.js", import.meta.url),
@@ -49,7 +50,43 @@ function runMigration() {
   });
 }
 
+function resolveKnownRolledBackMigration(migrationName) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      process.execPath,
+      [prismaCli, "migrate", "resolve", "--rolled-back", migrationName],
+      { cwd: process.cwd(), env: migrationEnvironment, stdio: "inherit" },
+    );
+    child.on("error", () => resolve(false));
+    child.on("close", (code) => resolve(code === 0));
+  });
+}
+
+async function isVerifiedDailyBriefingCollision(output, migrationName) {
+  if (
+    output.includes("P3018") &&
+    new RegExp(`Migration name:\\s*\`?${migrationName}\`?`).test(output) &&
+    output.includes('column "intelligence_enabled_at"') &&
+    output.includes("already exists")
+  ) return true;
+  if (!output.includes("P3009")) return false;
+  const prisma = new PrismaClient({ datasourceUrl: migrationEnvironment.DATABASE_URL });
+  try {
+    const rows = await prisma.$queryRawUnsafe(
+      'SELECT logs FROM "_prisma_migrations" WHERE migration_name = $1 AND finished_at IS NULL AND rolled_back_at IS NULL ORDER BY started_at DESC LIMIT 1',
+      migrationName,
+    );
+    const logs = String(rows[0]?.logs ?? "");
+    return logs.includes('column "intelligence_enabled_at"') && logs.includes("already exists");
+  } catch {
+    return false;
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
 let finalExitCode = 1;
+let recoveredDailyBriefingMigration = false;
 
 for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
   if (retryDelaysMs[attempt] > 0) {
@@ -64,6 +101,22 @@ for (let attempt = 0; attempt < retryDelaysMs.length; attempt += 1) {
   if (result.code === 0) {
     finalExitCode = 0;
     break;
+  }
+
+  const dailyBriefingMigration = "20260907180000_daily_owner_briefing";
+  const isKnownDailyBriefingFailure =
+    !recoveredDailyBriefingMigration &&
+    await isVerifiedDailyBriefingCollision(result.output, dailyBriefingMigration);
+  if (isKnownDailyBriefingFailure) {
+    process.stdout.write(
+      `Recovering the known rolled-back ${dailyBriefingMigration} attempt before retrying.\n`,
+    );
+    if (await resolveKnownRolledBackMigration(dailyBriefingMigration)) {
+      recoveredDailyBriefingMigration = true;
+      const retry = await runMigration();
+      finalExitCode = retry.code;
+      break;
+    }
   }
 
   const isAdvisoryLockTimeout =
