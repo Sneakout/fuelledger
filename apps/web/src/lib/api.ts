@@ -1308,7 +1308,7 @@ export type ReportsBootstrap = {
     investigationPacks: Array<{station:string;subject:string;requestedBy:string;createdAt:string;findings:string;informationMissing:string;nextStep:string}>;
     anomalyTrends: Array<{station:string;severity:string;title:string;message:string;supportingRecord:string;createdAt:string;status:string;resolvedAt:string|null}>;
   };
-  quality: {periodComplete:boolean;incompleteReason:string|null;missingCostOfSales:boolean;missingCostReason:string|null;salesToPostedRevenueDifference:number;netProfitReconciliationDifference:number};
+  quality: {periodComplete:boolean;incompleteReason:string|null;missingCostOfSales:boolean;missingCostReason:string|null;salesToPostedRevenueDifference:number;netProfitReconciliationDifference:number;unavailableReportSections:string[]};
 };
 export type DashboardBootstrap = {
   asOf: string;

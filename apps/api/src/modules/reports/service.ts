@@ -9,6 +9,14 @@ const sum = <T>(rows: T[], pick: (row: T) => number) => rows.reduce((total, row)
 const add = <T>(map: Map<string, T>, key: string, make: () => T, update: (row: T) => void) => {
   const row = map.get(key) ?? make(); update(row); map.set(key, row);
 };
+const optionalReportRows = async <T>(query: PromiseLike<T[]>): Promise<{ rows: T[]; available: boolean }> => {
+  try { return { rows: await query, available: true }; }
+  catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+    if (code === 'P2021' || code === 'P2022') return { rows: [], available: false };
+    throw error;
+  }
+};
 
 export async function buildReport(organizationId: string, filter: ReportFilter) {
   const asOf = filter.asOf ?? new Date();
@@ -20,7 +28,7 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
   const station = filter.stationId ? await prisma.station.findFirst({ where: { id: filter.stationId, organizationId,...(filter.permittedStationIds?{id:{in:filter.permittedStationIds}}:{}) } }) : null;
   if (filter.stationId && !station) throw new Error('REPORT_STATION_NOT_FOUND');
 
-  const [stations, sales, expenses, periodInvoices, openInvoices, inventoryEntries, tanks, customers, journalLines, shifts, tankReadings, densityReadings, purchaseDetails, approvals, customerLedger, supplierPayments, investigations, briefings, alerts] = await Promise.all([
+  const [stations, sales, expenses, periodInvoices, openInvoices, inventoryEntries, tanks, customers, journalLines, shifts, tankReadings, densityReadings, purchaseDetails, approvalRows, customerLedger, supplierPayments, investigationRows, briefingRows, alertRows] = await Promise.all([
     prisma.station.findMany({ where: { organizationId, active: true,...(stationIds?{id:{in:stationIds}}:{}) }, select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } }),
     prisma.sale.findMany({ where: { organizationId, ...stationWhere, occurredAt: period }, include: { station: { select: { id: true, name: true, code: true } }, product: { select: { id: true, name: true, code: true, unit: true, category: true, hsnCode: true, taxCategory: { select: { name: true, rate: true } } } } }, orderBy: { occurredAt: 'asc' } }),
     prisma.expense.findMany({
@@ -58,11 +66,11 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
       include: { station: { select: { name: true, code: true } }, supplier: { select: { name: true, code: true } }, lines: { include: { product: { select: { name: true, code: true, unit: true } } } }, payments: { select: { amount: true } }, receipt: { include: { lines: { include: { product: { select: { name: true, code: true, unit: true } } } } } } },
       orderBy: { invoiceDate: 'desc' },
     }),
-    prisma.approvalRequest.findMany({
+    optionalReportRows(prisma.approvalRequest.findMany({
       where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), requestedAt: period },
       include: { station: { select: { name: true, code: true } }, requestedBy: { select: { name: true } }, decidedBy: { select: { name: true } } },
       orderBy: { requestedAt: 'desc' },
-    }),
+    })),
     prisma.customerLedgerEntry.findMany({
       where: { organizationId, ...stationWhere, occurredAt: period },
       include: { station: { select: { name: true, code: true } }, customer: { select: { name: true, code: true } }, sale: { select: { id: true } }, receipt: { select: { id: true, referenceNo: true } }, createdBy: { select: { name: true } } },
@@ -73,10 +81,12 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
       include: { station: { select: { name: true, code: true } }, supplier: { select: { name: true, code: true } }, invoice: { select: { invoiceNumber: true } }, createdBy: { select: { name: true } } },
       orderBy: { paidAt: 'asc' },
     }),
-    prisma.intelligenceInvestigation.findMany({ where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), createdAt: period }, include: { station: { select: { name: true, code: true } }, user: { select: { name: true } } }, orderBy: { createdAt: 'desc' } }),
-    prisma.dailyOwnerBriefing.findMany({ where: { organizationId, briefingDate: period }, orderBy: { calculatedAt: 'desc' } }),
-    prisma.ownerAlert.findMany({ where: { organizationId, ...(stationIds ? { OR: [{ stationId: { in: stationIds } }, { stationId: null }] } : {}), createdAt: period }, include: { station: { select: { name: true, code: true } } }, orderBy: { createdAt: 'desc' } }),
+    optionalReportRows(prisma.intelligenceInvestigation.findMany({ where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), createdAt: period }, include: { station: { select: { name: true, code: true } }, user: { select: { name: true } } }, orderBy: { createdAt: 'desc' } })),
+    optionalReportRows(prisma.dailyOwnerBriefing.findMany({ where: { organizationId, briefingDate: period }, orderBy: { calculatedAt: 'desc' } })),
+    optionalReportRows(prisma.ownerAlert.findMany({ where: { organizationId, ...(stationIds ? { OR: [{ stationId: { in: stationIds } }, { stationId: null }] } : {}), createdAt: period }, include: { station: { select: { name: true, code: true } } }, orderBy: { createdAt: 'desc' } })),
   ]);
+  const approvals = approvalRows.rows, investigations = investigationRows.rows, briefings = briefingRows.rows, alerts = alertRows.rows;
+  const unavailableReportSections = [!approvalRows.available ? 'Approval history' : null, !investigationRows.available ? 'Owner investigations' : null, !briefingRows.available ? 'Nerve Intelligence reports' : null, !alertRows.available ? 'Attention history' : null].filter((value): value is string => Boolean(value));
 
   const salesByProduct = new Map<string, { key: string; product: string; code: string; unit: string; category: string; quantity: number; revenue: number }>();
   const salesByPayment = new Map<string, { key: string; method: string; transactions: number; amount: number }>();
@@ -254,6 +264,6 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
     },
     tax: { rows: tax, stateVatTurnover: sum(tax.filter(row => row.treatment === 'STATE_PETROLEUM_TAX'), row => row.turnover), gstReviewTurnover: sum(tax.filter(row => row.treatment !== 'STATE_PETROLEUM_TAX'), row => row.turnover), warning: 'Fuel-category turnover is separated for state petroleum-tax review. GST treatment for every other product must be confirmed from its configured tax category before filing.' },
     intelligence: { specialistReports, runoutForecasts, cashFlowForecast, stationComparison, investigationPacks, anomalyTrends },
-    quality: { periodComplete, incompleteReason: periodComplete ? null : 'The selected period includes the current or a future business day.', missingCostOfSales, missingCostReason: missingCostOfSales ? 'Sales are recorded but no positive cost-of-sales posting is present for the selected period.' : null, salesToPostedRevenueDifference: revenue - grossSales, netProfitReconciliationDifference },
+    quality: { periodComplete, incompleteReason: periodComplete ? null : 'The selected period includes the current or a future business day.', missingCostOfSales, missingCostReason: missingCostOfSales ? 'Sales are recorded but no positive cost-of-sales posting is present for the selected period.' : null, salesToPostedRevenueDifference: revenue - grossSales, netProfitReconciliationDifference, unavailableReportSections },
   };
 }

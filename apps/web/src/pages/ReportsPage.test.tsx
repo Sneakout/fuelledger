@@ -16,7 +16,7 @@ vi.mock('../lib/api', () => ({
     operations:{shifts:[],tankReadings:[],densityReadings:[],purchases:[],approvals:[],customerLedger:[],supplierPayments:[],accountingEntries:[]},
     intelligence:{specialistReports:[],runoutForecasts:[],cashFlowForecast:{asOf:'2026-09-01T00:00:00.000Z',openingLiquidPosition:0,supplierPaymentsDueIn7Days:0,supplierPaymentsDueIn30Days:0,conservativePositionAfter7Days:0,conservativePositionAfter30Days:0,customerReceiptsIncluded:false,assumption:'Conservative forecast.',warning:'Review before use.'},stationComparison:[],investigationPacks:[],anomalyTrends:[]},
     tax:{rows:[{product:'Motor Spirit',code:'MS',hsnCode:null,treatment:'STATE_PETROLEUM_TAX',quantity:10,turnover:1020}],stateVatTurnover:1020,gstReviewTurnover:0,warning:'Review tax treatment.'},
-    quality:{periodComplete:true,incompleteReason:null,missingCostOfSales:false,missingCostReason:null,salesToPostedRevenueDifference:0,netProfitReconciliationDifference:0},
+    quality:{periodComplete:true,incompleteReason:null,missingCostOfSales:false,missingCostReason:null,salesToPostedRevenueDifference:0,netProfitReconciliationDifference:0,unavailableReportSections:[]},
   }) },
 }));
 
