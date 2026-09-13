@@ -11,7 +11,7 @@ const definitions = [
   { agentKey: "business-assistant", categories: ["*"] },
 ] as const;
 
-export function demoAgentFindings(input: { organizationId: string; stationId: string; generatedAt: string; facts: BriefingFact[] }) {
+export function demoAgentFindings(input: { organizationId: string; stationId: string; generatedAt: string; facts: BriefingFact[]; sourceMode?: "VERIFIED_DEMO" | "VERIFIED_BRIEFING" }) {
   const agents = definitions.map(definition => {
     const agent = agentPresentation(definition.agentKey);
     const matchedFacts = definition.categories[0] === "*" ? input.facts.slice(0, 1) : input.facts.filter(fact => (definition.categories as readonly string[]).includes(fact.category));
@@ -31,7 +31,7 @@ export function demoAgentFindings(input: { organizationId: string; stationId: st
     return { ...agent, runId: stableUuid(`${input.organizationId}:${input.stationId}:${definition.agentKey}:${input.generatedAt.slice(0, 10)}`), status: findings.some(finding => finding.severity === "URGENT") ? "NEEDS_ATTENTION" as const : findings.length ? "FINDINGS" as const : "ALL_CLEAR" as const, lastCompletedAt: input.generatedAt, findings };
   });
   const findings = agents.flatMap(agent => agent.findings);
-  return { mode: "READ_ONLY" as const, sourceMode: "VERIFIED_DEMO" as const, generatedAt: input.generatedAt, stale: false, safety: { evidenceVerified: true, crossTenantDenied: true, crossStationDenied: true, offlineSafe: true, proposalsEnabled: false as const, actionsEnabled: false as const }, summary: { agents: agents.length, findings: findings.length, urgent: findings.filter(finding => finding.severity === "URGENT").length }, agents };
+  return { mode: "READ_ONLY" as const, sourceMode: input.sourceMode ?? "VERIFIED_DEMO", generatedAt: input.generatedAt, stale: false, safety: { evidenceVerified: true, crossTenantDenied: true, crossStationDenied: true, offlineSafe: true, proposalsEnabled: false as const, actionsEnabled: false as const }, summary: { agents: agents.length, findings: findings.length, urgent: findings.filter(finding => finding.severity === "URGENT").length }, agents };
 }
 
 function stableUuid(value: string) {

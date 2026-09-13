@@ -1,0 +1,27 @@
+{
+  "evaluation": {
+    "minimumPrecision": 0.98,
+    "minimumRecall": 0.95,
+    "minimumToolSelectionAccuracy": 0.99,
+    "maximumUnsupportedNumbers": 0,
+    "minimumEvidenceLinkValidity": 1,
+    "requireAllSecurityChecks": true,
+    "minimumIssueIdentification": 1,
+    "minimumPriorityClarity": 1,
+    "minimumEvidenceOpenability": 1,
+    "minimumFindingPreservationOnModelFailure": 1
+  },
+  "serviceObjectives": {
+    "reconciliation-review": { "minimumSuccessRate": 0.995, "maximumP95LatencyMs": 5000, "maximumFallbackRate": 0.05 },
+    "inventory-watch": { "minimumSuccessRate": 0.995, "maximumP95LatencyMs": 5000, "maximumFallbackRate": 0.05 },
+    "receivables-watch": { "minimumSuccessRate": 0.995, "maximumP95LatencyMs": 5000, "maximumFallbackRate": 0.05 },
+    "profit-insight": { "minimumSuccessRate": 0.995, "maximumP95LatencyMs": 7000, "maximumFallbackRate": 0.05 },
+    "business-assistant": { "minimumSuccessRate": 0.99, "maximumP95LatencyMs": 7000, "maximumFallbackRate": 0.10 }
+  },
+  "mandatoryExternalEvidence": [
+    "independent-penetration-test",
+    "production-backup-restore-drill",
+    "regional-failover-drill",
+    "dependency-advisory-scan-from-built-artifact"
+  ]
+}

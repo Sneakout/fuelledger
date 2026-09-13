@@ -12,7 +12,7 @@ const options = [
   ['dailySummaryEnabled', 'Daily business summary', 'Sales, fuel sold, expenses and net result at your selected time.', BellRing],
   ['overdueCustomerEnabled', 'Overdue customer payments', 'A daily alert when customer credit has become overdue.', CircleAlert],
 ] as const;
-const deliveryLabel: Record<string, string> = { DENSITY_MISSING: 'Missing density', LOW_STOCK: 'Low stock', SHIFT_VARIANCE: 'Shift variance', SHIFT_OPEN: 'Open shift', DAILY_SUMMARY: 'Daily summary', OVERDUE_CUSTOMER: 'Overdue customers', SYSTEM_TEST: 'Test message' };
+const deliveryLabel: Record<string, string> = { DENSITY_MISSING: 'Missing density', LOW_STOCK: 'Low stock', SHIFT_VARIANCE: 'Shift variance', SHIFT_OPEN: 'Open shift', APPROVAL_REQUIRED: 'Owner decision', DAILY_SUMMARY: 'Daily summary', OVERDUE_CUSTOMER: 'Overdue customers', SYSTEM_TEST: 'Test message' };
 
 export function NotificationsPage() {
   const { user } = useAuth();

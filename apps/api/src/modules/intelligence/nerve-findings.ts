@@ -2,6 +2,8 @@ import { readFile, stat } from "node:fs/promises";
 import { z } from "zod";
 import { AppError } from "../../lib/errors.js";
 import { agentPresentation } from "./agent-presentation.js";
+import { demoAgentFindings } from "./demo-agent-findings.js";
+import type { BriefingFact } from "./daily-briefing.js";
 
 const evidenceSchema = z.object({ evidenceId: z.string().optional(), evidenceType: z.string().optional(), applicationId: z.string().optional(), tenantId: z.string().optional(), resourceId: z.string().optional(), label: z.string(), observedAt: z.string().optional(), resolverPath: z.string().startsWith("/") });
 const findingSchema = z.object({
@@ -48,6 +50,33 @@ export async function nerveFindingSources(input: { reportPath?: string; organiza
   const selected = input.findingIds.map(id => byId.get(id));
   if (selected.some(item => !item)) throw new AppError(404, "NERVE_FINDING_NOT_FOUND", "One or more findings are no longer available. Refresh Insights and try again.");
   return selected.map(item => ({ ...item!.finding, agent: item!.agent, detail: parseDetail(item!.finding.summary) }));
+}
+
+/** Converts an application-owned daily briefing into the verified source
+ * contract used by specialist investigations. Opening the page does not run
+ * the standalone agent runtime or call a model provider. */
+export function briefingFindingSources(input: { organizationId: string; stationId: string; generatedAt: string; facts: BriefingFact[]; findingIds: string[] }) {
+  const overview = demoAgentFindings({ ...input, sourceMode: "VERIFIED_BRIEFING" });
+  const byId = new Map(overview.agents.flatMap(agent => agent.findings.map(finding => [finding.findingId, { finding, agent }] as const)));
+  const selected = input.findingIds.map(id => byId.get(id));
+  if (selected.some(item => !item)) throw new AppError(404, "NERVE_FINDING_NOT_FOUND", "One or more findings are no longer available. Refresh Nerve Intelligence and try again.");
+  const periodDate = input.generatedAt.slice(0, 10);
+  return selected.map(item => {
+    const { finding, agent } = item!;
+    const detail = {
+      findingType: finding.type, severity: finding.severity, whyItMatters: finding.whyItMatters,
+      recommendedNextStep: finding.recommendedNextStep, displayValue: finding.displayValue,
+      calculatedAt: finding.calculatedAt, priorityRank: finding.priorityRank,
+      priorityReason: finding.priorityReason, recordsToCompare: finding.recordsToCompare,
+      periodStart: periodDate, periodEnd: periodDate,
+    };
+    return {
+      findingId: finding.findingId, type: finding.type, title: finding.title,
+      summary: JSON.stringify(detail), detectedAt: finding.calculatedAt,
+      evidence: finding.evidence, proposalIds: [] as [], actionIds: [] as [], visibility: "SHADOW" as const,
+      agent, detail,
+    };
+  });
 }
 
 async function loadNerveReport(input: { reportPath?: string; organizationId: string; stationId: string }) {

@@ -29,7 +29,7 @@ const modelSchema = z.object({
   connections: z.array(z.object({ text: z.string().min(8).max(220), confidence: z.enum(["POSSIBLE", "SUPPORTED"]), factIds: z.array(z.string()).min(1).max(4), evidenceIds: z.array(z.string()).min(1).max(4) })).max(4),
 });
 
-export async function investigateFinding(input: { organizationId: string; stationId: string; userId: string; requestId: string; findingIds: string[]; reportPath?: string }) {
+export async function investigateFinding(input: { organizationId: string; stationId: string; userId: string; requestId: string; findingIds: string[]; reportPath?: string; sourceFindings?: SourceFinding[] }) {
   await requireIntelligenceAccess(input.organizationId);
   const existing = await prisma.intelligenceInvestigation.findUnique({ where: { organizationId_requestKey: { organizationId: input.organizationId, requestKey: input.requestId } } });
   if (existing) { assertIdempotentMatch(existing, input); return stored(existing); }
@@ -37,7 +37,7 @@ export async function investigateFinding(input: { organizationId: string; statio
   const used = await prisma.intelligenceInvestigation.count({ where: { organizationId: input.organizationId, createdAt: { gte: monthStart } } });
   if (used >= env.INTELLIGENCE_INVESTIGATION_MONTHLY_LIMIT) throw new AppError(429, "INVESTIGATION_LIMIT_REACHED", "This month’s investigation allowance has been used. It resets at the start of next month.");
 
-  const sources = await nerveFindingSources({ organizationId: input.organizationId, stationId: input.stationId, findingIds: input.findingIds, ...(input.reportPath ? { reportPath: input.reportPath } : {}) });
+  const sources = input.sourceFindings ?? await nerveFindingSources({ organizationId: input.organizationId, stationId: input.stationId, findingIds: input.findingIds, ...(input.reportPath ? { reportPath: input.reportPath } : {}) });
   const plan = investigationPlan(sources);
   const now = new Date();
   const snapshots = await Promise.all(plan.map(async ({ key, capability, startDate, endDate }) => ({
@@ -77,6 +77,8 @@ function investigationPlan(sources: SourceFinding[]): Array<{ key: string; capab
     return [{ key: "profit", capability: "profit", ...(period?.startDate ? { startDate: period.startDate } : {}), ...(period?.endDate ? { endDate: period.endDate } : {}) }];
   }
   if ([...kinds].some(kind => kind.includes("SHIFT") || kind.includes("RECONCILIATION"))) return [{ key: "reconciliation", capability: "reconciliation" }, { key: "dashboard", capability: "dashboard" }];
+  if ([...kinds].some(kind => kind.includes("CREDIT") || kind.includes("RECEIVABLE"))) return [{ key: "receivables", capability: "receivables" }];
+  if ([...kinds].some(kind => kind.includes("PURCHASE") || kind.includes("PAYABLE"))) return [{ key: "purchase-review", capability: "purchase-review" }, { key: "payables", capability: "payables" }];
   if ([...kinds].every(kind => kind.includes("RECEIPT_TIMING"))) return [{ key: "receipt-timing", capability: "receipt-timing" }];
   return [{ key: "inventory", capability: "inventory" }, { key: "receipt-timing", capability: "receipt-timing" }];
 }
@@ -108,6 +110,35 @@ function buildInvestigation(sources: SourceFinding[], snapshots: Array<{ key: st
     for (const [index, shift] of shifts.filter(row => row.status === "RECONCILIATION_REQUIRED").entries()) { const fact = addFact({ factId: `shift-${index + 1}`, label: `Shift ${String(shift.shiftNumber ?? "")}`, value: shift, context: "Closed shift awaiting reconciliation.", evidenceIds: [evidenceId] }); observations.push(cited(`Shift ${String(shift.shiftNumber ?? "")}`, `Closed under ${String(shift.managerName ?? "the recorded manager")} and still awaiting reconciliation.`, money(shift.salesTotal), fact)); if (typeof shift.closedAt === "string") timeline.push(cited("Shift closed", `Shift ${String(shift.shiftNumber ?? "")} entered the reconciliation queue.`, undefined, fact, shift.closedAt)); }
     fallbackConnections.push(connection("The available records show completed shifts waiting for owner review; they do not indicate that a discrepancy has been approved or resolved.", "SUPPORTED", [summary]));
     unknowns.push(cited("Handover context", "The records cannot confirm any explanation that was communicated outside FuelNerve.", undefined, summary));
+  } else if (kinds.some(kind => kind.includes("CREDIT") || kind.includes("RECEIVABLE"))) {
+    const receivables = arrayItems(snapshotByKey(snapshots, "receivables")); const evidenceId = evidenceByCapability("receivables")!;
+    for (const customer of receivables) {
+      const overdue = arrayObjects(customer.invoices).filter(invoice => String(invoice.status).includes("OVERDUE"));
+      const rows = overdue.length ? overdue : [{ invoiceId: customer.customerId, invoiceNumber: "Customer balance", outstanding: customer.outstanding, daysOverdue: 0, status: "OUTSTANDING", priorityReason: "The recorded customer balance remains outstanding." }];
+      for (const [index, invoice] of rows.entries()) {
+        const fact = addFact({ factId: `receivable-${String(invoice.invoiceId ?? customer.customerId)}-${index}`, label: `${String(customer.customer ?? "Customer")} · ${String(invoice.invoiceNumber ?? "balance")}`, value: invoice, context: String(invoice.priorityReason ?? "The recorded customer balance remains outstanding."), evidenceIds: [evidenceId] });
+        observations.push(cited(fact.label, fact.context, money(invoice.outstanding), fact));
+      }
+    }
+    if (factList.length) {
+      fallbackConnections.push(connection("The customer balances and due dates shown here come from saved FuelNerve ledger records. Confirm disputes and receipts before sending a reminder.", "SUPPORTED", factList));
+      unknowns.push(cited("Payments outside FuelNerve", "This review cannot confirm receipts or disputes that have not been recorded.", undefined, factList[0]!));
+    }
+  } else if (kinds.some(kind => kind.includes("PURCHASE") || kind.includes("PAYABLE"))) {
+    const reviewItems = arrayItems(snapshotByKey(snapshots, "purchase-review")); const reviewEvidence = evidenceByCapability("purchase-review")!;
+    const payableItems = arrayItems(snapshotByKey(snapshots, "payables")); const payableEvidence = evidenceByCapability("payables")!;
+    for (const [index, item] of reviewItems.entries()) {
+      const fact = addFact({ factId: `purchase-review-${String(item.invoiceId ?? item.receiptId ?? index)}`, label: String(item.title ?? "Purchase record needs review"), value: item, context: String(item.explanation ?? "The purchase record needs review."), evidenceIds: [reviewEvidence] });
+      observations.push(cited(fact.label, fact.context, typeof item.outstanding === "number" ? money(item.outstanding) : undefined, fact));
+    }
+    for (const [index, item] of payableItems.filter(item => numberValue(item.outstanding) > .005).entries()) {
+      const fact = addFact({ factId: `payable-${String(item.invoiceId ?? index)}`, label: `${String(item.supplier ?? "Supplier")} · ${String(item.invoiceNumber ?? "invoice")}`, value: item, context: item.overdue ? "The recorded supplier balance is past its due date." : "The recorded supplier balance remains payable.", evidenceIds: [payableEvidence] });
+      observations.push(cited(fact.label, fact.context, money(item.outstanding), fact));
+    }
+    if (factList.length) {
+      fallbackConnections.push(connection("Invoice, receipt, rate and payment findings are review candidates from saved FuelNerve records; they are not automatic corrections.", "SUPPORTED", factList));
+      unknowns.push(cited("Supplier documents outside FuelNerve", "This review cannot confirm documents, deliveries or payments that have not been recorded.", undefined, factList[0]!));
+    }
   } else {
     const inventorySnapshot = snapshots.find(row => row.key === "inventory")?.snapshot;
     const inventory = inventorySnapshot ? arrayItems(inventorySnapshot) : []; const inventoryEvidence = evidenceByCapability("inventory"); const sourceKeys = new Set(sources.map(source => source.detail.sourceKey).filter((value): value is string => typeof value === "string"));

@@ -6,7 +6,7 @@ import { authenticate } from '../middleware/authenticate.js';
 import { dailyBriefing } from '../modules/intelligence/daily-briefing.js';
 import { askFuelNerve } from '../modules/intelligence/ask.js';
 import { env } from '../config/env.js';
-import { nerveFindings } from '../modules/intelligence/nerve-findings.js';
+import { briefingFindingSources, nerveFindings } from '../modules/intelligence/nerve-findings.js';
 import { investigateFinding } from '../modules/intelligence/investigation.js';
 import { answerInvestigationFollowUp, investigationFollowUpPrompts } from '../modules/intelligence/investigation-follow-up.js';
 import { demoAgentFindings } from '../modules/intelligence/demo-agent-findings.js';
@@ -25,24 +25,25 @@ intelligenceRouter.get('/agents', async (req, res) => {
   const parsed = z.object({ stationId: z.string().cuid() }).safeParse(req.query);
   if (!parsed.success) throw new AppError(400, 'STATION_INVALID', 'Choose a valid fuel station.');
   assertStationAccess(req.user!, parsed.data.stationId);
-  if (req.user!.demoExpiresAt) {
-    const briefing = await dailyBriefing(req.user!.organization.id, permittedStationIds(req.user!), parsed.data.stationId, { demoAccess: true });
-    return res.json(demoAgentFindings({ organizationId: req.user!.organization.id, stationId: parsed.data.stationId, generatedAt: briefing.calculatedAt, facts: briefing.facts }));
+  if (env.NERVE_LOCAL_SHADOW_ENABLED && env.NODE_ENV !== 'production' && !req.user!.demoExpiresAt) {
+    return res.json(await nerveFindings({ ...(env.NERVE_LOCAL_REPORT_PATH ? { reportPath: env.NERVE_LOCAL_REPORT_PATH } : {}), organizationId: req.user!.organization.id, stationId: parsed.data.stationId }));
   }
-  if (!env.NERVE_LOCAL_SHADOW_ENABLED || env.NODE_ENV === 'production') throw new AppError(404, 'NOT_FOUND', 'The requested resource was not found.');
-  res.json(await nerveFindings({ ...(env.NERVE_LOCAL_REPORT_PATH ? { reportPath: env.NERVE_LOCAL_REPORT_PATH } : {}), organizationId: req.user!.organization.id, stationId: parsed.data.stationId }));
+  const briefing = await dailyBriefing(req.user!.organization.id, permittedStationIds(req.user!), parsed.data.stationId, { demoAccess: Boolean(req.user!.demoExpiresAt) });
+  res.json(demoAgentFindings({ organizationId: req.user!.organization.id, stationId: parsed.data.stationId, generatedAt: briefing.calculatedAt, facts: briefing.facts, sourceMode: req.user!.demoExpiresAt ? 'VERIFIED_DEMO' : 'VERIFIED_BRIEFING' }));
 });
 intelligenceRouter.post('/investigations', async (req, res) => {
   requireOwner(req.user!);
-  if (!env.NERVE_LOCAL_SHADOW_ENABLED || env.NODE_ENV === 'production') throw new AppError(404, 'NOT_FOUND', 'The requested resource was not found.');
   const parsed = z.object({ requestId: z.string().uuid(), stationId: z.string().cuid(), findingIds: z.array(z.string().uuid()).min(1).max(10) }).strict().safeParse(req.body);
   if (!parsed.success) throw new AppError(400, 'INVESTIGATION_REQUEST_INVALID', 'Choose up to ten current findings to investigate.');
   assertStationAccess(req.user!, parsed.data.stationId);
-  res.json(await investigateFinding({ organizationId: req.user!.organization.id, stationId: parsed.data.stationId, userId: req.user!.id, requestId: parsed.data.requestId, findingIds: [...new Set(parsed.data.findingIds)], ...(env.NERVE_LOCAL_REPORT_PATH ? { reportPath: env.NERVE_LOCAL_REPORT_PATH } : {}) }));
+  const useLocalShadow = env.NERVE_LOCAL_SHADOW_ENABLED && env.NODE_ENV !== 'production';
+  const findingIds = [...new Set(parsed.data.findingIds)];
+  const briefing = useLocalShadow ? null : await dailyBriefing(req.user!.organization.id, permittedStationIds(req.user!), parsed.data.stationId);
+  const sourceFindings = briefing ? briefingFindingSources({ organizationId: req.user!.organization.id, stationId: parsed.data.stationId, generatedAt: briefing.calculatedAt, facts: briefing.facts, findingIds }) : undefined;
+  res.json(await investigateFinding({ organizationId: req.user!.organization.id, stationId: parsed.data.stationId, userId: req.user!.id, requestId: parsed.data.requestId, findingIds, ...(useLocalShadow && env.NERVE_LOCAL_REPORT_PATH ? { reportPath: env.NERVE_LOCAL_REPORT_PATH } : {}), ...(sourceFindings ? { sourceFindings } : {}) }));
 });
 intelligenceRouter.post('/investigations/:investigationId/follow-ups', async (req, res) => {
   requireOwner(req.user!);
-  if (!env.NERVE_LOCAL_SHADOW_ENABLED || env.NODE_ENV === 'production') throw new AppError(404, 'NOT_FOUND', 'The requested resource was not found.');
   const parameters = z.object({ investigationId: z.string().cuid() }).safeParse(req.params);
   const body = z.object({ stationId: z.string().cuid(), prompt: z.enum(investigationFollowUpPrompts) }).strict().safeParse(req.body);
   if (!parameters.success || !body.success) throw new AppError(400, 'FOLLOW_UP_INVALID', 'Choose one of the available questions for this agent briefing.');

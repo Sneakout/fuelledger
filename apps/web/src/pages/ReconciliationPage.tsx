@@ -9,7 +9,7 @@ import {
   Smartphone,
   UsersRound,
 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   ApiRequestError,
   api,
@@ -54,6 +54,8 @@ type CreditAllocation = {
 };
 
 export function ReconciliationPage() {
+  const [searchParams] = useSearchParams();
+  const requestedShiftId = searchParams.get("shiftId");
   const [data, setData] = useState<ReconciliationBootstrap | null>(null);
   const [shiftId, setShiftId] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
@@ -73,6 +75,7 @@ export function ReconciliationPage() {
       .then((result) => {
         setData(result);
         const next =
+          result.shifts.find((s) => s.id === requestedShiftId) ??
           result.shifts.find((s) => s.status === "RECONCILIATION_REQUIRED") ??
           result.shifts[0];
         if (next && !shiftId) choose(next);

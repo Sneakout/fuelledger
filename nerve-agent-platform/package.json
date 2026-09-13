@@ -1,0 +1,19 @@
+{
+  "name": "@nerve/platform-sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node --no-warnings --test --experimental-strip-types tests/*.test.ts",
+    "typecheck": "../node_modules/.bin/tsc -p tsconfig.json --noEmit",
+    "security:scan": "node scripts/security-scan.mjs",
+    "check": "npm run typecheck && npm test && npm run security:scan",
+    "shadow:fuelnerve": "node --no-warnings --experimental-strip-types scripts/local-fuelnerve-shadow.ts"
+  }
+}
