@@ -1245,6 +1245,7 @@ export type ReportsBootstrap = {
     code: string;
     unit: string;
     station: string;
+    stationCode: string;
     quantity: number;
     value: number;
     purchasePrice: number;
@@ -1288,6 +1289,26 @@ export type ReportsBootstrap = {
     grossProfit: number;
     netProfit: number;
   };
+  operations: {
+    shifts: Array<{ id:string;shiftNumber:number;station:string;stationCode:string;manager:string;status:string;openedAt:string;closedAt:string|null;openingCash:number;closingCash:number|null;sales:number;expectedCollection:number;actualCollection:number;variance:number;reconciledAt:string|null;reconciledBy:string|null;notes:string|null;collections:Array<{paymentMethod:string;expected:number;actual:number;adjustment:number;variance:number;reason:string|null}>;nozzles:Array<{dispenser:string;nozzle:string;product:string;productCode:string;opening:number;closing:number|null;testing:number;testingReturned:boolean}>;tanks:Array<{tank:string;product:string;productCode:string;opening:number;closing:number|null}> }>;
+    tankReadings: Array<{id:string;station:string;stationCode:string;tank:string;product:string;productCode:string;unit:string;physicalStock:number;dipReading:number|null;recordedAt:string;recordedBy:string;notes:string|null}>;
+    densityReadings: Array<{id:string;station:string;stationCode:string;tank:string;product:string;productCode:string;density:number;recordedAt:string;recordedBy:string}>;
+    purchases: Array<{id:string;invoiceNumber:string;station:string;stationCode:string;supplier:string;supplierCode:string;invoiceDate:string;dueDate:string;subtotal:number;taxAmount:number;totalAmount:number;paidAmount:number;status:string;receivedAt:string|null;lines:Array<{description:string;product:string|null;productCode:string|null;unit:string|null;quantity:number;unitCost:number;taxRate:number;hsnCode:string|null;lineTotal:number}>;receivedLines:Array<{product:string;productCode:string;unit:string;quantity:number;unitCost:number}>}>;
+    approvals: Array<{id:string;station:string;actionType:string;status:string;reason:string;requestedBy:string;requestedAt:string;decidedBy:string|null;decidedAt:string|null;decisionNote:string|null;executedAt:string|null;version:number}>;
+    customerLedger: Array<{id:string;station:string;stationCode:string;customer:string;customerCode:string;type:string;description:string;amount:number;dueDate:string|null;disputedAt:string|null;occurredAt:string;sourceType:string;sourceId:string|null;referenceNo:string|null;createdBy:string}>;
+    supplierPayments: Array<{id:string;station:string;stationCode:string;supplier:string;supplierCode:string;invoiceNumber:string|null;amount:number;paymentMethod:string;referenceNo:string|null;paidAt:string;createdBy:string}>;
+    accountingEntries: Array<{id:string;journalId:string;date:string;station:string;stationCode:string|null;reference:string;description:string;sourceType:string;sourceId:string;accountCode:string;accountName:string;accountType:string;debit:number;credit:number;memo:string|null;createdBy:string}>;
+  };
+  tax: { rows:Array<{product:string;code:string;hsnCode:string|null;treatment:string;quantity:number;turnover:number}>;stateVatTurnover:number;gstReviewTurnover:number;warning:string };
+  intelligence: {
+    specialistReports: Array<{briefingDate:string;calculatedAt:string;station:string;headline:string;summary:string;priority:string;finding:string;explanation:string;nextStep:string;supportingRecord:string}>;
+    runoutForecasts: Array<{station:string;stationCode:string;product:string;productCode:string;unit:string;currentQuantity:number;sellingDaysObserved:number;lookbackDays:number;averageDailyConsumption:number|null;estimatedDaysRemaining:number|null;status:string;assumption:string}>;
+    cashFlowForecast: {asOf:string;openingLiquidPosition:number;supplierPaymentsDueIn7Days:number;supplierPaymentsDueIn30Days:number;conservativePositionAfter7Days:number;conservativePositionAfter30Days:number;customerReceiptsIncluded:boolean;assumption:string;warning:string};
+    stationComparison: Array<{station:string;stationCode:string;sales:number;transactions:number;inventoryValue:number;receivables:number;payables:number;shiftVariance:number;shiftsReviewed:number}>;
+    investigationPacks: Array<{station:string;subject:string;requestedBy:string;createdAt:string;findings:string;informationMissing:string;nextStep:string}>;
+    anomalyTrends: Array<{station:string;severity:string;title:string;message:string;supportingRecord:string;createdAt:string;status:string;resolvedAt:string|null}>;
+  };
+  quality: {periodComplete:boolean;incompleteReason:string|null;missingCostOfSales:boolean;missingCostReason:string|null;salesToPostedRevenueDifference:number;netProfitReconciliationDifference:number};
 };
 export type DashboardBootstrap = {
   asOf: string;

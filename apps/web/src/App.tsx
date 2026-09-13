@@ -82,6 +82,11 @@ const ReportsPage = lazy(() =>
     default: module.ReportsPage,
   })),
 );
+const DownloadReportsPage = lazy(() =>
+  import("./pages/DownloadReportsPage").then((module) => ({
+    default: module.DownloadReportsPage,
+  })),
+);
 const SalesPage = lazy(() =>
   import("./pages/SalesPage").then((module) => ({ default: module.SalesPage })),
 );
@@ -129,6 +134,7 @@ export default function App() {
           <Route path="expenses" element={<ExpensesPage />} />
           <Route path="accounting" element={<AccountingPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="reports/downloads" element={<DownloadReportsPage />} />
           <Route path="staff" element={<StaffPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="insights" element={<IntelligenceAgentsPage />} />
