@@ -9,3 +9,7 @@ test-results
 *.tsbuildinfo
 .DS_Store
 apps/web/.vite
+apps/ios/*.xcodeproj/xcuserdata
+apps/ios/*.xcworkspace/xcuserdata
+apps/ios/DerivedData
+apps/ios/**/xcuserdata

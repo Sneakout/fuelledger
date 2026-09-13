@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { ownerNotificationSettingsSchema } from '@fuelledger/shared';
+import { z } from 'zod';
 import { env } from '../config/env.js';
 import { AppError } from '../lib/errors.js';
-import { requireOwner } from '../lib/station-access.js';
+import { assertStationAccess, permittedStationIds, requireOwner } from '../lib/station-access.js';
 import { authenticate } from '../middleware/authenticate.js';
-import { getSettings, recentDeliveries, runScheduledNotifications, sendTestNotification, updateSettings } from '../modules/notifications/service.js';
+import { getSettings, listAlerts, markAlert, recentDeliveries, registerPushDevice, runScheduledNotifications, sendTestNotification, unregisterPushDevice, updateSettings } from '../modules/notifications/service.js';
 
 export const notificationsRouter = Router();
 
@@ -14,6 +15,34 @@ notificationsRouter.get('/cron/daily', async (req, res) => {
 });
 
 notificationsRouter.use(authenticate);
+notificationsRouter.get('/alerts', async (req, res) => {
+  requireOwner(req.user!);
+  const stationId = typeof req.query.stationId === 'string' ? req.query.stationId : undefined;
+  if (stationId) assertStationAccess(req.user!, stationId);
+  res.json({ alerts: await listAlerts(req.user!.organization.id, permittedStationIds(req.user!), stationId) });
+});
+notificationsRouter.post('/alerts/:id/read', async (req, res) => {
+  requireOwner(req.user!);
+  res.json({ alert: await markAlert(req.user!.organization.id, req.user!.id, req.params.id, 'read', permittedStationIds(req.user!)) });
+});
+notificationsRouter.post('/alerts/:id/acknowledge', async (req, res) => {
+  requireOwner(req.user!);
+  res.json({ alert: await markAlert(req.user!.organization.id, req.user!.id, req.params.id, 'acknowledge', permittedStationIds(req.user!)) });
+});
+const deviceSchema = z.object({ token: z.string().regex(/^[a-fA-F0-9]{32,}$/), environment: z.enum(['DEVELOPMENT', 'PRODUCTION']).default('PRODUCTION') });
+notificationsRouter.post('/devices', async (req, res) => {
+  requireOwner(req.user!);
+  const parsed = deviceSchema.safeParse(req.body);
+  if (!parsed.success) throw new AppError(400, 'PUSH_DEVICE_INVALID', 'This device could not be registered for alerts.');
+  res.status(201).json({ device: await registerPushDevice(req.user!.organization.id, req.user!.id, parsed.data.token.toLowerCase(), parsed.data.environment) });
+});
+notificationsRouter.delete('/devices', async (req, res) => {
+  requireOwner(req.user!);
+  const parsed = deviceSchema.pick({ token: true }).safeParse(req.body);
+  if (!parsed.success) throw new AppError(400, 'PUSH_DEVICE_INVALID', 'This device could not be removed from alerts.');
+  await unregisterPushDevice(req.user!.organization.id, req.user!.id, parsed.data.token.toLowerCase());
+  res.status(204).send();
+});
 notificationsRouter.get('/', async (req, res) => {
   requireOwner(req.user!);
   const [settings, deliveries] = await Promise.all([getSettings(req.user!.organization.id), recentDeliveries(req.user!.organization.id)]);

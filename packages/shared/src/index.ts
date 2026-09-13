@@ -106,6 +106,62 @@ export const ownerNotificationSettingsSchema = z
 export type OwnerNotificationSettingsInput = z.infer<
   typeof ownerNotificationSettingsSchema
 >;
+
+export const ownerNotificationActions = [
+  "ACKNOWLEDGE",
+  "REMIND_LATER",
+  "VIEW_RECORD",
+  "GIVE_DETAILS",
+  "COMPARE_RECORDS",
+  "PREPARE_DRAFT",
+  "SUBMIT_PROPOSAL",
+  "APPROVE",
+] as const;
+
+const notificationEvidenceSchema = z.object({
+  label: z.string().trim().min(2).max(120),
+  path: z.string().regex(/^\/(dashboard|operations|reconciliation|inventory|sales|customers|suppliers|purchases|expenses|reports|notifications)(\/[^?#]*)?$/, "Use a recognized FuelNerve evidence path"),
+  recordType: z.string().trim().min(2).max(80),
+  recordId: z.string().trim().min(1).max(120).nullable(),
+});
+
+export const ownerNotificationPacketSchema = z.object({
+  schemaVersion: z.literal(1),
+  subjectName: z.string().trim().min(1).max(160),
+  recordType: z.string().trim().min(2).max(80),
+  product: z.object({ name: z.string().trim().min(1).max(120), code: z.string().trim().min(1).max(40) }).nullable(),
+  eventDate: z.iso.datetime(),
+  dueDate: z.iso.datetime().nullable(),
+  amount: z.object({ value: z.number().finite(), currency: z.literal("INR") }).nullable(),
+  quantity: z.object({ value: z.number().finite(), unit: z.string().trim().min(1).max(24) }).nullable(),
+  status: z.string().trim().min(1).max(80),
+  daysOverdueOrWaiting: z.number().int().min(0).nullable(),
+  station: z.object({ id: z.string().trim().min(1).max(120).nullable(), name: z.string().trim().min(1).max(160) }),
+  evidence: z.array(notificationEvidenceSchema).min(1).max(8),
+  availableActions: z.array(z.enum(ownerNotificationActions)).min(1).max(8),
+  responsibleAgent: z.object({
+    key: z.string().trim().min(1).max(80),
+    name: z.string().trim().min(1).max(80),
+    responsibility: z.string().trim().min(1).max(180),
+  }).nullable(),
+}).superRefine((packet, context) => {
+  if (packet.availableActions.includes("APPROVE") && !["INVENTORY_ADJUSTMENT_REQUEST", "PRODUCT_PRICE_CHANGE_REQUEST"].includes(packet.recordType)) {
+    context.addIssue({ code: "custom", path: ["availableActions"], message: "Approval is only valid for an exact approval request" });
+  }
+  if (packet.availableActions.includes("COMPARE_RECORDS") && packet.evidence.length < 2) {
+    context.addIssue({ code: "custom", path: ["availableActions"], message: "Record comparison requires at least two verified evidence records" });
+  }
+  if (packet.availableActions.includes("SUBMIT_PROPOSAL") && !packet.availableActions.includes("PREPARE_DRAFT")) {
+    context.addIssue({ code: "custom", path: ["availableActions"], message: "A proposal cannot be submitted before a draft is prepared" });
+  }
+  if (packet.dueDate && !packet.daysOverdueOrWaiting) {
+    const due = new Date(packet.dueDate).getTime();
+    const event = new Date(packet.eventDate).getTime();
+    if (due < event) context.addIssue({ code: "custom", path: ["dueDate"], message: "Due date cannot precede the underlying event" });
+  }
+});
+
+export type OwnerNotificationPacket = z.infer<typeof ownerNotificationPacketSchema>;
 export const stationAccessInputSchema = z.object({
   stationIds: z.array(z.string().cuid()).max(100),
 });
@@ -841,6 +897,7 @@ export const purchaseInvoiceInputSchema = z
           tankId: z.string().cuid().nullable().optional(),
           description: z.string().trim().min(2).max(160),
           quantity: z.coerce.number().positive(),
+          sourceUnit: z.string().trim().toUpperCase().max(20).optional(),
           unitCost: z.coerce.number().min(0),
           taxRate: z.coerce.number().min(0).max(100).default(0),
           hsnCode: z.string().trim().max(20).optional(),
@@ -849,6 +906,19 @@ export const purchaseInvoiceInputSchema = z
       .min(1),
   })
   .superRefine((invoice, context) => {
+    const calculatedTotal = invoice.lines.reduce(
+      (sum, line) => sum + line.quantity * line.unitCost,
+      invoice.taxAmount,
+    );
+    if (
+      invoice.invoiceTotal !== undefined &&
+      Math.abs(invoice.invoiceTotal - calculatedTotal) >= 0.02
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Invoice total must match the line items and tax.",
+        path: ["invoiceTotal"],
+      });
     if (new Date(invoice.dueDate) < new Date(invoice.invoiceDate))
       context.addIssue({
         code: "custom",

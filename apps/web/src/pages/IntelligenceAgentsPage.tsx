@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { AlertTriangle, ArrowLeft, ArrowRight, Bot, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Droplets, FileCheck2, MessageCircleQuestion, RefreshCw, SearchCheck, ShieldCheck, Sparkles, TrendingUp, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Bot, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Droplets, FileCheck2, FileText, MessageCircleQuestion, Paperclip, Plus, RefreshCw, SearchCheck, Send, ShieldCheck, Sparkles, TrendingUp, X } from "lucide-react";
 import { useAuth } from "../components/AuthProvider";
 import { useStation } from "../components/StationProvider";
-import { api, ApiRequestError, type InvestigationFollowUpPrompt, type InvestigationFollowUpResponse, type InvestigationResponse, type NerveAgentPresentation, type NerveAgentsResponse, type NerveFinding } from "../lib/api";
+import { createEditableInvoiceDraft, EditableInvoiceReviewDialog, type EditableInvoiceDraft } from "../components/EditableInvoiceReviewDialog";
+import { InvoiceChangePreviewDialog } from "../components/InvoiceChangePreviewDialog";
+import { ConfirmedPurchaseDialog } from "../components/ConfirmedPurchaseDialog";
+import { api, ApiRequestError, type AskFuelNerveResponse, type CatalogProduct, type InvestigationFollowUpPrompt, type InvestigationFollowUpResponse, type InvestigationResponse, type NerveAgentPresentation, type NerveAgentsResponse, type NerveFinding } from "../lib/api";
+import type { ParsedIndianInvoice } from "../lib/indian-invoice-parser";
+import { assessInvoiceStation, assessSingleProductInvoicePrice } from "../lib/invoice-local-safety";
+import { flushInvoiceImportPerformance, rememberInvoiceImportPerformance } from "../lib/invoice-import-performance";
 
 type FindingGroup = { key: string; title: string; severity: NerveFinding["severity"]; agent: NerveAgentPresentation; findings: NerveFinding[] };
 type TeamAgent = NerveAgentPresentation & {
@@ -87,10 +93,283 @@ export function IntelligenceAgentsPage() {
 
     {data && <section className="nerve-team" aria-label={`Nerve Intelligence specialists for ${selectedStation?.name ?? "the selected station"}`}><div className="nerve-team-heading"><div><span className="eyebrow">Your specialist team</span><h2>Six agents, one clear owner view</h2><p>Each agent watches a specific part of the business. The Owner Assistant connects their findings.</p></div><span>{reviewedAgentCount} reviewed · {team.length - reviewedAgentCount} awaiting review</span></div><div className="nerve-team-grid">{team.map(agent => <AgentTeamCard key={agent.agentKey} agent={agent}/>)}</div></section>}
 
+    <AskNerveBar stationId={selectedStationId} stationName={selectedStation?.name} isDemo={Boolean(user?.demoExpiresAt)}/>
+
     {error && <section className="nerve-unavailable"><MessageCircleQuestion/><div><h2>Nerve Intelligence is temporarily unavailable</h2><p>{error}</p><small>FuelNerve continues working normally.</small></div><button className="secondary" onClick={() => void load()}><RefreshCw/> Try again</button></section>}
     {loading && <div className="loading-inline nerve-loading"><span/><p>Checking the latest records…</p></div>}
     {data?.stale && <div className="nerve-stale"><Clock3/> These reviews are more than 24 hours old. Open an agent to see its latest saved findings.</div>}
   </main>;
+}
+
+type LocalInvoice = {
+  id: string;
+  file: File;
+  status: "checking" | "ocr" | "ready" | "error";
+  extractedText?: string;
+  pageCount?: number;
+  characterCount?: number;
+  truncated?: boolean;
+  source?: "pdf_text" | "ocr";
+  confidence?: number;
+  progress?: number;
+  progressLabel?: string;
+  parsed?: ParsedIndianInvoice;
+  draft?: EditableInvoiceDraft;
+  reviewed?: boolean;
+  submitted?: { id: string; invoiceNumber: string };
+};
+
+function AskNerveBar({ stationId, stationName, isDemo }: { stationId: string | null; stationName?: string | undefined; isDemo: boolean }) {
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<AskFuelNerveResponse | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [error, setError] = useState("");
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
+  const [invoices, setInvoices] = useState<LocalInvoice[]>([]);
+  const [reviewingId, setReviewingId] = useState<string | null>(null);
+  const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const [submittingId, setSubmittingId] = useState<string | null>(null);
+  const [importEnabled, setImportEnabled] = useState(false);
+  const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const attachmentMenu = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!attachmentMenuOpen) return;
+    const close = (event: MouseEvent) => {
+      if (!attachmentMenu.current?.contains(event.target as Node)) setAttachmentMenuOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setAttachmentMenuOpen(false); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
+  }, [attachmentMenuOpen]);
+
+  useEffect(() => { setAnswer(null); setError(""); setInvoices([]); setReviewingId(null); setPreviewingId(null); setSubmittingId(null); }, [stationId]);
+  useEffect(() => {
+    let active = true;
+    setCatalogProducts([]);
+    if (!stationId) return () => { active = false; };
+    void api.catalog().then(catalog => { if (active) setCatalogProducts(catalog.products.filter(product => product.active)); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [stationId]);
+  useEffect(() => {
+    let active = true;
+    setImportEnabled(false);
+    if (isDemo || !stationId) return () => { active = false; };
+    void api.invoiceImportPolicy().then(policy => {
+      if (active) setImportEnabled(policy.enabled);
+      return flushInvoiceImportPerformance(policy.monitored);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [isDemo, stationId]);
+
+  const processInvoices = async (items: LocalInvoice[]) => {
+    const pdfItems = items.filter(item => isPdfFile(item.file));
+    const ocrItems = items.filter(item => !isPdfFile(item.file));
+    if (pdfItems.length) {
+      try {
+        const { extractLocalPdfText } = await import("../lib/local-pdf-text");
+        for (const item of pdfItems) {
+          const startedAt = performance.now();
+          try {
+            const result = await extractLocalPdfText(item.file);
+            if (result.text.trim()) {
+              const { parseIndianInvoice } = await import("../lib/indian-invoice-parser");
+              const parsed = parseIndianInvoice(result.text);
+              const draft = createEditableInvoiceDraft(parsed);
+              setInvoices(current => current.map(invoice => invoice.id !== item.id ? invoice : { ...invoice, status: "ready", source: "pdf_text", extractedText: result.text, pageCount: result.pageCount, characterCount: result.characterCount, truncated: result.truncated, parsed, draft }));
+              rememberInvoiceImportPerformance("PDF_TEXT", startedAt, "SUCCESS");
+            } else {
+              ocrItems.push(item);
+              setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "ocr", pageCount: result.pageCount, progress: 0, progressLabel: "Preparing scanned pages" } : invoice));
+              rememberInvoiceImportPerformance("PDF_TEXT", startedAt, "WITHHELD");
+            }
+          } catch {
+            setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "error" } : invoice));
+            rememberInvoiceImportPerformance("PDF_TEXT", startedAt, "FAILED");
+          }
+        }
+      } catch {
+        const failedIds = new Set(pdfItems.map(item => item.id));
+        setInvoices(current => current.map(invoice => failedIds.has(invoice.id) ? { ...invoice, status: "error" } : invoice));
+      }
+    }
+
+    if (!ocrItems.length) return;
+    const ocrStartedAt = performance.now();
+    try {
+      const { recognizeLocalInvoices } = await import("../lib/local-invoice-ocr");
+      const results = await recognizeLocalInvoices(ocrItems.map(item => ({ id: item.id, file: item.file })), (id, progress) => {
+        setInvoices(current => current.map(invoice => invoice.id === id ? { ...invoice, status: "ocr", progress: progress.progress, progressLabel: progress.status } : invoice));
+      });
+      for (const result of results) {
+        if (!result.text.trim()) {
+          setInvoices(current => current.map(invoice => invoice.id === result.id ? { ...invoice, status: "error", pageCount: result.pageCount, progress: 1, progressLabel: "No readable text was found" } : invoice));
+          continue;
+        }
+        const parsed = (await import("../lib/indian-invoice-parser")).parseIndianInvoice(result.text);
+        const draft = createEditableInvoiceDraft(parsed);
+        setInvoices(current => current.map(invoice => invoice.id === result.id
+          ? { ...invoice, status: "ready", source: "ocr", extractedText: result.text, pageCount: result.pageCount, characterCount: result.text.length, confidence: result.confidence, truncated: result.truncated, progress: 1, parsed, draft }
+          : invoice));
+      }
+      rememberInvoiceImportPerformance("OCR", ocrStartedAt, results.some(result => result.text.trim()) ? "SUCCESS" : "WITHHELD");
+    } catch {
+      const failedIds = new Set(ocrItems.map(item => item.id));
+      setInvoices(current => current.map(invoice => failedIds.has(invoice.id) ? { ...invoice, status: "error", progressLabel: "Local OCR could not finish" } : invoice));
+      rememberInvoiceImportPerformance("OCR", ocrStartedAt, "FAILED");
+    }
+  };
+
+  const chooseInvoices = (files: FileList | null) => {
+    if (!files) return;
+    setError("");
+    const accepted = Array.from(files).filter(isInvoiceFile);
+    const withinLimit = accepted.filter(file => file.size <= 10 * 1024 * 1024);
+    if (accepted.length !== files.length) setError("Choose PDF, JPEG, PNG or WebP invoices.");
+    else if (withinLimit.length !== accepted.length) setError("Each invoice must be 10 MB or smaller.");
+    const existing = new Set(invoices.map(item => `${item.file.name}:${item.file.size}:${item.file.lastModified}`));
+    const uniqueFiles = withinLimit.filter(file => !existing.has(`${file.name}:${file.size}:${file.lastModified}`));
+    const additions: LocalInvoice[] = uniqueFiles
+      .slice(0, Math.max(0, 5 - invoices.length))
+      .map(file => isPdfFile(file)
+        ? { id: crypto.randomUUID(), file, status: "checking", progress: 0 }
+        : { id: crypto.randomUUID(), file, status: "ocr", progress: 0, progressLabel: "Preparing image" });
+    if (uniqueFiles.length > additions.length) setError("You can check up to five invoices at a time.");
+    setInvoices(current => [...current, ...additions].slice(0, 5));
+    void processInvoices(additions);
+    setAttachmentMenuOpen(false);
+    if (fileInput.current) fileInput.current.value = "";
+  };
+
+  const ask = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const value = question.trim();
+    if (!stationId || value.length < 3 || asking) return;
+    setAsking(true); setError("");
+    try {
+      setAnswer(await api.askFuelNerve({ requestId: crypto.randomUUID(), question: value, stationId }));
+    } catch (caught) {
+      setError(caught instanceof ApiRequestError ? caught.message : "Nerve Intelligence could not answer right now.");
+    } finally { setAsking(false); }
+  };
+
+  const reviewingInvoice = invoices.find(invoice => invoice.id === reviewingId && invoice.draft);
+  const previewingInvoice = invoices.find(invoice => invoice.id === previewingId && invoice.draft && invoice.reviewed);
+  const submittingInvoice = invoices.find(invoice => invoice.id === submittingId && invoice.draft && invoice.reviewed && !invoice.submitted);
+
+  return <section className="nerve-ask-bar" aria-label="Ask Nerve Intelligence">
+    <div className="nerve-ask-heading"><div><Sparkles/><span><strong>Ask Nerve Intelligence</strong><small>Ask about {stationName ?? "this station"}, or select invoices to check next.</small></span></div><span><ShieldCheck/> Documents stay on this device</span></div>
+    {invoices.length > 0 && <div className="nerve-local-invoices" aria-label="Invoices selected on this device" aria-live="polite">
+      {invoices.map(invoice => <div key={invoice.id} className={invoice.status}><InvoiceStatusIcon status={invoice.status}/><span><strong>{invoice.file.name}</strong><small>{invoiceStatusText(invoice)}</small></span><button type="button" aria-label={`Remove ${invoice.file.name}`} onClick={() => setInvoices(current => current.filter(item => item.id !== invoice.id))}><X/></button>{invoice.parsed && invoice.draft && <InvoiceDetails invoice={invoice.parsed} draft={invoice.draft} stationName={stationName} catalogProducts={catalogProducts} reviewed={Boolean(invoice.reviewed)} submitted={invoice.submitted} onReview={() => setReviewingId(invoice.id)} onPreview={() => setPreviewingId(invoice.id)}/>} {invoice.extractedText && <details className="nerve-text-preview"><summary>View the text read from this document</summary><p>{invoice.extractedText.slice(0, 1_200)}{invoice.extractedText.length > 1_200 ? "…" : ""}</p></details>}</div>)}
+    </div>}
+    <form onSubmit={ask}>
+      <div className="nerve-attach" ref={attachmentMenu}>
+        <button type="button" className="nerve-add-button" aria-label="Add invoice" aria-expanded={attachmentMenuOpen} onClick={() => setAttachmentMenuOpen(open => !open)}><Plus/></button>
+        {attachmentMenuOpen && <div className="nerve-attach-menu" role="menu"><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><Paperclip/><span><strong>Upload invoices</strong><small>PDF, JPEG, PNG or WebP · Up to 10 MB each</small></span></button></div>}
+        <input ref={fileInput} type="file" hidden multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={event => chooseInvoices(event.target.files)}/>
+      </div>
+      <input aria-label="Ask Nerve Intelligence" value={question} onChange={event => setQuestion(event.target.value)} placeholder="Ask what needs your attention…"/>
+      <button type="submit" className="nerve-send-button" disabled={!stationId || question.trim().length < 3 || asking}>{asking ? <RefreshCw className="spinning"/> : <Send/>}<span>{asking ? "Checking" : "Ask"}</span></button>
+    </form>
+    {error && <p className="ask-error" role="alert">{error}</p>}
+    {answer && <div className="ask-answer"><header><Sparkles/><div><small>{answer.answerMode === "AI_EXPLAINED" ? "Nerve Intelligence" : "Verified answer"}</small><h3>{answer.answer.title}</h3></div></header><p>{answer.answer.explanation}</p>{answer.answer.facts.length > 0 && <div className="ask-facts">{answer.answer.facts.slice(0, 3).map(fact => <Link key={fact.id} to={fact.evidencePath}><span><small>{fact.label}</small><strong>{fact.value}</strong><em>{fact.context}</em></span><ArrowRight/></Link>)}</div>}<footer>{answer.answer.action}</footer></div>}
+    {reviewingInvoice?.draft && <EditableInvoiceReviewDialog
+      fileName={reviewingInvoice.file.name}
+      initialDraft={reviewingInvoice.draft}
+      onCancel={() => setReviewingId(null)}
+      onKeep={draft => {
+        setInvoices(current => current.map(invoice => invoice.id === reviewingInvoice.id ? { ...invoice, draft, reviewed: true } : invoice));
+        setReviewingId(null);
+      }}
+    />}
+    {previewingInvoice?.draft && <InvoiceChangePreviewDialog
+      fileName={previewingInvoice.file.name}
+      draft={previewingInvoice.draft}
+      stationName={stationName ?? "the selected fuel station"}
+      isDemo={isDemo}
+      catalogProducts={catalogProducts}
+      onBack={() => { setPreviewingId(null); setReviewingId(previewingInvoice.id); }}
+      onClose={() => setPreviewingId(null)}
+      {...(importEnabled && assessInvoiceStation(previewingInvoice.draft.consigneeName, stationName).status === "MATCH" ? { onContinue: () => { setPreviewingId(null); setSubmittingId(previewingInvoice.id); } } : {})}
+    />}
+    {submittingInvoice?.draft && stationId && <ConfirmedPurchaseDialog
+      draft={submittingInvoice.draft}
+      stationId={stationId}
+      stationName={stationName ?? "the selected fuel station"}
+      isDemo={isDemo}
+      onBack={() => { setSubmittingId(null); setPreviewingId(submittingInvoice.id); }}
+      onClose={() => setSubmittingId(null)}
+      onSubmitted={created => setInvoices(current => current.map(invoice => invoice.id === submittingInvoice.id ? { ...invoice, submitted: { id: created.id, invoiceNumber: created.invoiceNumber } } : invoice))}
+    />}
+  </section>;
+}
+
+function fileSize(bytes: number) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function isInvoiceFile(file: File) {
+  return file.type === "application/pdf" || ["image/jpeg", "image/png", "image/webp"].includes(file.type) || /\.(pdf|jpe?g|png|webp)$/i.test(file.name);
+}
+
+function isPdfFile(file: File) {
+  return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+}
+
+function InvoiceStatusIcon({ status }: { status: LocalInvoice["status"] }) {
+  if (status === "checking" || status === "ocr") return <RefreshCw className="spinning"/>;
+  if (status === "ready") return <CheckCircle2/>;
+  if (status === "error") return <AlertTriangle/>;
+  return <FileText/>;
+}
+
+function invoiceStatusText(invoice: LocalInvoice) {
+  if (invoice.status === "checking") return `${fileSize(invoice.file.size)} · Opening invoice…`;
+  if (invoice.status === "ocr") return invoice.progressLabel ?? "Reading invoice…";
+  if (invoice.status === "ready") return `${invoice.pageCount} page${invoice.pageCount === 1 ? "" : "s"} · ${new Intl.NumberFormat("en-IN").format(invoice.characterCount ?? 0)} characters ${invoice.source === "ocr" ? "read with OCR—please review" : "found"}${invoice.truncated ? " · Preview limited" : ""}`;
+  if (invoice.progressLabel) return invoice.progressLabel;
+  return `This ${isPdfFile(invoice.file) ? "PDF" : "image"} could not be read on this device.`;
+}
+
+function InvoiceDetails({ invoice, draft, stationName, catalogProducts, reviewed, submitted, onReview, onPreview }: { invoice: ParsedIndianInvoice; draft: EditableInvoiceDraft; stationName?: string | undefined; catalogProducts: CatalogProduct[]; reviewed: boolean; submitted?: LocalInvoice["submitted"]; onReview: () => void; onPreview: () => void }) {
+  const stationAssessment = assessInvoiceStation(draft.consigneeName, stationName);
+  const priceAssessment = assessSingleProductInvoicePrice(draft, catalogProducts);
+  const productSummary = draft.lines.length
+    ? draft.lines.slice(0, 2).map(line => `${line.description || "Unnamed product"} · ${formatInvoiceNumber(Number(line.quantity) || 0)}${line.unit ? ` ${line.unit}` : ""} · ${formatInvoiceMoney((Number(line.quantity) || 0) * (Number(line.unitRate) || 0))}`).join("; ")
+    : "Not clearly found";
+  return <section className={`nerve-invoice-details ${invoice.status === "NEEDS_REVIEW" ? "needs-review" : ""}`} aria-label="Invoice details found">
+    <header><div><strong>{submitted ? "This invoice is now in Purchases" : reviewed ? "You reviewed this invoice" : invoice.status === "READY_FOR_REVIEW" ? "I found a new invoice" : "I found an invoice, but some details need checking"}</strong><small>{submitted ? `Invoice ${submitted.invoiceNumber} was created as unpaid. Stock and payment were not changed.` : reviewed ? "Your edits are kept only in this browser tab." : "No FuelNerve record has been changed."}</small></div><span>{submitted ? "Created" : reviewed ? "Reviewed" : invoice.status === "READY_FOR_REVIEW" ? "Ready to review" : "Check details"}</span></header>
+    <dl>
+      <div><dt>Supplier</dt><dd>{draft.supplierName || "Not clearly found"}</dd></div>
+      <div><dt>Delivered to</dt><dd>{draft.consigneeName || "Not clearly found"}</dd></div>
+      <div><dt>Invoice number</dt><dd>{draft.invoiceNumber || "Not clearly found"}</dd></div>
+      <div><dt>Invoice date</dt><dd>{draft.invoiceDate ? formatInvoiceDate(draft.invoiceDate) : "Not clearly found"}</dd></div>
+      <div><dt>Total</dt><dd>{Number(draft.totalAmount) > 0 ? formatInvoiceMoney(Number(draft.totalAmount)) : "Not clearly found"}</dd></div>
+      <div><dt>Taxes & charges</dt><dd>{draft.taxAmount !== "" ? formatInvoiceMoney(Number(draft.taxAmount) || 0) : "Not clearly found"}</dd></div>
+      <div><dt>Products</dt><dd>{productSummary}</dd></div>
+    </dl>
+    <div className={`nerve-invoice-station ${stationAssessment.status.toLowerCase()}`}><ShieldCheck/><p>{stationAssessment.message}</p></div>
+    {priceAssessment && priceAssessment.direction !== "UNCHANGED" && <div className={`nerve-invoice-price ${priceAssessment.direction.toLowerCase()}`}><TrendingUp/><div><strong>{priceAssessment.productName} purchase price {priceAssessment.direction === "INCREASE" ? "increased" : "decreased"}</strong><p>{formatInvoiceMoney(priceAssessment.previousPrice)} to {formatInvoiceMoney(priceAssessment.invoicePrice)} per {priceAssessment.unit}. Review and update the retail selling price if required before the next sale.</p></div></div>}
+    {!reviewed && invoice.warnings.length > 0 && <div className="nerve-invoice-warnings"><AlertTriangle/>{invoice.warnings.slice(0, 2).map(warning => <p key={warning}>{warning}</p>)}</div>}
+    <div className="nerve-invoice-actions">{submitted ? <Link className="nerve-purchase-link" to="/purchases"><FileCheck2/> View in Purchases</Link> : <><button type="button" className="nerve-review-invoice" onClick={onReview}><FileCheck2/>{reviewed ? "Edit reviewed details" : "Review and edit details"}</button>{reviewed && stationAssessment.status === "MATCH" && <button type="button" className="nerve-preview-invoice" onClick={onPreview}><ShieldCheck/> Preview record changes</button>}</>}</div>
+  </section>;
+}
+
+function formatInvoiceMoney(value: number) {
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
+}
+
+function formatInvoiceNumber(value: number) {
+  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 3 }).format(value);
+}
+
+function formatInvoiceDate(value: string) {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return value;
+  return new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, month - 1, day)));
 }
 
 function AgentTeamCard({ agent }: { agent: TeamAgent }) {

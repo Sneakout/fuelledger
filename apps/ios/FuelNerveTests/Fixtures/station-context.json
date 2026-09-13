@@ -1,0 +1,4 @@
+{
+  "allStations": false,
+  "stations": [{ "id": "station-c", "name": "Station C", "code": "C", "city": "Kochi", "state": "Kerala" }]
+}

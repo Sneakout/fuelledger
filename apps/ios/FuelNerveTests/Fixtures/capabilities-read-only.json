@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "readOnly": true,
+  "approvals": false,
+  "alertAcknowledgement": false,
+  "pushRegistration": false,
+  "proposals": false,
+  "execution": false
+}

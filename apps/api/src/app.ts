@@ -26,6 +26,7 @@ import { accessRouter } from "./routes/access.js";
 import { platformRouter } from "./routes/platform.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { intelligenceRouter } from "./routes/intelligence.js";
+import { approvalsRouter } from "./routes/approvals.js";
 
 export function createApp() {
   const app = express();
@@ -107,6 +108,7 @@ export function createApp() {
   app.use("/api/platform", platformRouter);
   app.use("/api/notifications", notificationsRouter);
   app.use("/api/intelligence", intelligenceRouter);
+  app.use("/api/approvals", approvalsRouter);
   app.use("/api", (_req, _res) => {
     throw new AppError(
       404,

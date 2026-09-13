@@ -138,6 +138,7 @@ enum ApprovalStatus {
 
 enum ApprovalActionType {
   INVENTORY_ADJUSTMENT
+  PRODUCT_PRICE_CHANGE
 }
 
 model Organization {

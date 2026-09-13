@@ -1,0 +1,15 @@
+{
+  "user": {
+    "id": "sanitized-owner-1",
+    "email": "owner@example.invalid",
+    "name": "Sanitized Owner",
+    "role": "OWNER",
+    "organization": { "id": "sanitized-org-1", "name": "Example Fuels" },
+    "allStations": true,
+    "stations": [],
+    "isPlatformAdmin": false,
+    "mustChangePassword": false,
+    "demoExpiresAt": null,
+    "futureOptionalField": "ignored safely"
+  }
+}

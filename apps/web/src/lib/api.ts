@@ -253,6 +253,18 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  invoiceImportPolicy: () =>
+    request<InvoiceImportPolicy>("/purchases/invoice-import/policy"),
+  createImportedPurchaseInvoice: (input: PurchaseInvoiceInput) =>
+    request<{ invoice: PurchaseInvoice }>("/purchases/invoice-import", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  recordInvoiceImportMetric: (input: InvoiceImportMetric) =>
+    request<void>("/purchases/invoice-import/metrics", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   updatePurchaseInvoice: (id: string, input: PurchaseInvoiceUpdateInput) =>
     request<{ invoice: PurchaseInvoice }>(`/purchases/invoices/${id}`, {
       method: "PUT",
@@ -358,7 +370,9 @@ export const api = {
     request<PlatformCustomersBootstrap>("/platform/customers"),
   updateCustomerSubscription: (
     id: string,
-    input: { plan: SubscriptionPlan; billingPeriod: SubscriptionBillingPeriod; paymentConfirmed: boolean; setupFeePaid: boolean },
+    input:
+      | { plan: SubscriptionPlan; billingPeriod: SubscriptionBillingPeriod; paymentConfirmed: boolean; setupFeePaid: boolean }
+      | { setupFeePaid: boolean; lifetimeAccessPaid: boolean },
   ) =>
     request<{
       customer: Pick<
@@ -1142,6 +1156,12 @@ export type PurchasesBootstrap = {
   categories: ExpenseCategory[];
   expenses: Expense[];
   summary: { payables: number; overdue: number; expensesThisMonth: number };
+};
+export type InvoiceImportPolicy = { enabled: boolean; monitored: boolean };
+export type InvoiceImportMetric = {
+  stage: "PDF_TEXT" | "OCR" | "PURCHASE_CHECK" | "SUBMISSION";
+  durationMs: number;
+  outcome: "SUCCESS" | "FAILED" | "WITHHELD";
 };
 export type AccountBalance = {
   id: string;

@@ -1,0 +1,10 @@
+{
+  "asOf": "2026-09-08T10:30:15.123Z",
+  "today": { "grossSales": 387633, "transactions": 148, "meteredVolume": 4010, "netProfit": 28740 },
+  "collections": [{ "method": "CASH", "amount": 174400 }],
+  "operations": { "openShifts": 1, "pendingReconciliations": 3 },
+  "actions": [],
+  "stationHealth": [{ "id": "station-c", "name": "Station C", "code": "C", "openShifts": 1, "status": "RUNNING" }],
+  "tankStocks": [{ "id": "tank-1", "code": "T-1", "productCode": "MS", "bookStock": 6240, "workingCapacity": 19000, "fillPercent": 32.8, "status": "HEALTHY", "station": { "id": "station-c" } }],
+  "futureOptionalField": { "ignored": true }
+}

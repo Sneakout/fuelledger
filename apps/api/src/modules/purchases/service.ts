@@ -187,6 +187,7 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
         unit: true,
         hsnCode: true,
         purchasePrice: true,
+        sellingPrice: true,
         purchasePriceHistory: {
           orderBy: { effectiveFrom: 'desc' },
           select: { id: true, price: true, effectiveFrom: true, createdAt: true },
@@ -313,8 +314,17 @@ export async function createInvoice(organizationId: string, userId: string, inpu
   if (!station) throw new AppError(404, 'STATION_NOT_FOUND', 'Choose an active fuel station.');
   if (!supplier) throw new AppError(404, 'SUPPLIER_NOT_FOUND', 'Choose an active supplier.');
   if (input.receiveNow && products.length !== new Set(input.lines.map((x) => x.productId)).size) throw new AppError(400, 'PRODUCT_NOT_INVENTORIED', 'Every received invoice line needs an active inventory product.');
-  const subtotal = input.lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0);
+  const lines = input.lines.map(line => {
+    const product = products.find(item => item.id === line.productId);
+    if (!product || !line.sourceUnit) return line;
+    const source = line.sourceUnit.trim().toUpperCase().replace(/[^A-Z]/g, '');
+    if (source === 'KL' && product.unit === 'LITRE') return { ...line, quantity: line.quantity * 1_000, unitCost: line.unitCost / 1_000 };
+    return line;
+  });
+  const subtotal = lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0);
   const total = subtotal + input.taxAmount;
+  if (input.invoiceTotal !== undefined && Math.abs(input.invoiceTotal - total) >= 0.02)
+    throw new AppError(400, 'INVOICE_TOTAL_MISMATCH', 'The confirmed invoice total does not match the line items and tax. Review the invoice before posting.');
   try {
     return await safeTransaction(prisma, async (tx) => {
       const invoice = await tx.purchaseInvoice.create({
@@ -324,19 +334,20 @@ export async function createInvoice(organizationId: string, userId: string, inpu
           supplierId: supplier.id,
           invoiceNumber: input.invoiceNumber,
           invoiceDate: new Date(input.invoiceDate),
-          dueDate: calculatedDueDate(input.invoiceDate, supplier.paymentTerms),
+          dueDate: new Date(input.dueDate),
           subtotal: new Prisma.Decimal(subtotal),
           taxAmount: new Prisma.Decimal(input.taxAmount),
           totalAmount: new Prisma.Decimal(total),
           notes: input.notes || null,
           createdById: userId,
           lines: {
-            create: input.lines.map((line) => ({
+            create: lines.map((line) => ({
               productId: line.productId || null,
               description: line.description,
               quantity: new Prisma.Decimal(line.quantity),
               unitCost: new Prisma.Decimal(line.unitCost),
               taxRate: new Prisma.Decimal(line.taxRate),
+              hsnCode: line.hsnCode || null,
               lineTotal: new Prisma.Decimal(line.quantity * line.unitCost),
             })),
           },
@@ -386,7 +397,7 @@ export async function createInvoice(organizationId: string, userId: string, inpu
               changedById: userId,
             },
           });
-        for (const line of input.lines) {
+        for (const line of lines) {
           const product = products.find((x) => x.id === line.productId)!;
           const tank = line.tankId
             ? await tx.tank.findFirst({
