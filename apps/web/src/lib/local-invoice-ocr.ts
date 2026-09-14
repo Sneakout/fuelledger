@@ -9,6 +9,7 @@ const MAX_OCR_CHARACTERS = 500_000;
 const WORKER_START_TIMEOUT_MS = 45_000;
 const RECOGNITION_TIMEOUT_MS = 45_000;
 const INVOICE_TIMEOUT_MS = 75_000;
+const LANGUAGE_CACHE_PATH = "fuelnerve-ocr-v1";
 
 type OcrWorker = Awaited<ReturnType<typeof createWorker>>;
 let workerPromise: Promise<OcrWorker> | null = null;
@@ -139,6 +140,7 @@ async function getWorker(signal?: AbortSignal) {
       workerPath: workerUrl,
       corePath: supportsSimd ? simdCoreUrl : coreUrl,
       langPath: languagePath,
+      cachePath: LANGUAGE_CACHE_PATH,
       gzip: true,
       workerBlobURL: false,
       logger: message => workerProgress?.(message),
