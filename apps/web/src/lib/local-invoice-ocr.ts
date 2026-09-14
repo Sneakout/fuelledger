@@ -1,11 +1,21 @@
 import { createWorker, OEM, type LoggerMessage } from "tesseract.js";
+import { simd } from "wasm-feature-detect";
 import workerUrl from "tesseract.js/dist/worker.min.js?url";
 import coreUrl from "tesseract.js-core/tesseract-core-lstm.wasm.js?url";
+import simdCoreUrl from "tesseract.js-core/tesseract-core-simd-lstm.wasm.js?url";
 import englishDataUrl from "@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz?url";
 
 const MAX_OCR_CHARACTERS = 500_000;
+const WORKER_START_TIMEOUT_MS = 45_000;
+const RECOGNITION_TIMEOUT_MS = 45_000;
+const INVOICE_TIMEOUT_MS = 75_000;
 
-export type LocalOcrInput = { id: string; file: File };
+type OcrWorker = Awaited<ReturnType<typeof createWorker>>;
+let workerPromise: Promise<OcrWorker> | null = null;
+let workerProgress: ((message: LoggerMessage) => void) | null = null;
+let workerQueue: Promise<void> = Promise.resolve();
+
+export type LocalOcrInput = { id: string; file: File; signal?: AbortSignal };
 export type LocalOcrProgress = { status: string; progress: number };
 export type LocalOcrResult = {
   id: string;
@@ -21,59 +31,64 @@ export async function recognizeLocalInvoices(
   onProgress?: (id: string, progress: LocalOcrProgress) => void,
 ): Promise<LocalOcrResult[]> {
   if (!inputs.length) return [];
-  const languageAssetUrl = new URL(englishDataUrl, window.location.href);
-  const languagePath = new URL(".", languageAssetUrl).href;
-  let activeId = inputs[0]!.id;
-  const logger = (message: LoggerMessage) => onProgress?.(activeId, { status: humanOcrStatus(message.status), progress: clampProgress(message.progress) });
-  const worker = await createWorker("eng", OEM.LSTM_ONLY, {
-    workerPath: workerUrl,
-    corePath: coreUrl,
-    langPath: languagePath,
-    gzip: true,
-    workerBlobURL: false,
-    logger,
-  });
-
-  try {
+  return enqueueWorkerTask(async () => {
     const results: LocalOcrResult[] = [];
     for (const input of inputs) {
-      activeId = input.id;
-      onProgress?.(activeId, { status: "Preparing document", progress: 0 });
-      const prepared = await prepareImages(input.file);
+      const deadline = createDeadlineSignal(input.signal);
+      try {
+      throwIfAborted(deadline.signal);
+      workerProgress = message => onProgress?.(input.id, { status: humanOcrStatus(message.status), progress: clampProgress(message.progress) });
+      onProgress?.(input.id, { status: workerPromise ? "Preparing document…" : "Starting document reader…", progress: 0 });
+      const [worker, prepared] = await Promise.all([
+        getWorker(deadline.signal),
+        prepareImages(input.file),
+      ]);
       const text: string[] = [];
       const confidence: number[] = [];
       let characters = 0;
       let truncated = prepared.truncated;
 
       for (let index = 0; index < prepared.images.length && characters < MAX_OCR_CHARACTERS; index += 1) {
-        onProgress?.(activeId, { status: `Reading page ${index + 1} of ${prepared.images.length}`, progress: index / prepared.images.length });
+        throwIfAborted(deadline.signal);
         const image = prepared.images[index]!;
-        const recognized = await worker.recognize(image);
+        const firstPassText: string[] = [];
+        onProgress?.(input.id, { status: `Reading invoice header · page ${index + 1} of ${prepared.images.length}`, progress: index / prepared.images.length });
+        const header = await cropImageForOcr(image, { top: 0, height: 0.38 });
+        const headerResult = await recognizeWithLimit(worker, header, deadline.signal);
+        firstPassText.push(headerResult.data.text);
+        confidence.push(headerResult.data.confidence);
+
+        onProgress?.(input.id, { status: `Reading products and totals · page ${index + 1} of ${prepared.images.length}`, progress: Math.min(0.78, (index + 0.55) / prepared.images.length) });
+        const body = await cropImageForOcr(image, { top: 0.3, height: 0.52 });
+        const bodyResult = await recognizeWithLimit(worker, body, deadline.signal);
+        firstPassText.push(bodyResult.data.text);
+        confidence.push(bodyResult.data.confidence);
+
+        let pageText = firstPassText.join("\n");
+        if (needsFullPagePass(pageText)) {
+          onProgress?.(input.id, { status: `Checking the full page · ${index + 1} of ${prepared.images.length}`, progress: Math.min(0.88, (index + 0.75) / prepared.images.length) });
+          const recognized = await recognizeWithLimit(worker, image, deadline.signal);
+          pageText = `${pageText}\n${recognized.data.text}`;
+          confidence.push(recognized.data.confidence);
+        }
         const remaining = MAX_OCR_CHARACTERS - characters;
-        const pageText = recognized.data.text.replace(/\s+\n/g, "\n").trim();
-        text.push(pageText.slice(0, remaining));
-        characters += Math.min(pageText.length, remaining);
-        confidence.push(recognized.data.confidence);
-        if (pageText.length > remaining) truncated = true;
+        const cleanedPageText = pageText.replace(/\s+\n/g, "\n").trim();
+        text.push(cleanedPageText.slice(0, remaining));
+        characters += Math.min(cleanedPageText.length, remaining);
+        if (cleanedPageText.length > remaining) truncated = true;
 
         const supplementalText: string[] = [];
         if (index === 0 && needsInvoiceHeaderPass(pageText)) {
-          onProgress?.(activeId, { status: "Checking invoice header…", progress: Math.min(0.92, (index + 0.7) / prepared.images.length) });
-          const header = await cropImageForOcr(image, { top: 0, height: 0.36 });
-          const headerResult = await worker.recognize(header);
-          supplementalText.push(headerResult.data.text);
-          confidence.push(headerResult.data.confidence);
-          if (needsInvoiceHeaderPass(`${pageText}\n${headerResult.data.text}`)) {
-            const dateRow = await cropImageForOcr(image, { left: 0.39, width: 0.39, top: 0.04, height: 0.15, scale: 3 });
-            const dateResult = await worker.recognize(dateRow);
-            supplementalText.push(dateResult.data.text);
-            confidence.push(dateResult.data.confidence);
-          }
+          onProgress?.(input.id, { status: "Checking invoice date…", progress: 0.91 });
+          const dateRow = await cropImageForOcr(image, { left: 0.36, width: 0.44, top: 0.03, height: 0.18, scale: 2 });
+          const dateResult = await recognizeWithLimit(worker, dateRow, deadline.signal);
+          supplementalText.push(dateResult.data.text);
+          confidence.push(dateResult.data.confidence);
         }
         if (index === prepared.images.length - 1 && needsInvoiceTotalPass([...text, ...supplementalText].join("\n"))) {
-          onProgress?.(activeId, { status: "Checking invoice totals…", progress: 0.94 });
-          const totals = await cropImageForOcr(image, { top: 0.36, height: 0.38 });
-          const totalsResult = await worker.recognize(totals);
+          onProgress?.(input.id, { status: "Checking invoice total…", progress: 0.95 });
+          const totals = await cropImageForOcr(image, { top: 0.52, height: 0.3, scale: 1.5 });
+          const totalsResult = await recognizeWithLimit(worker, totals, deadline.signal);
           supplementalText.push(totalsResult.data.text);
           confidence.push(totalsResult.data.confidence);
         }
@@ -99,12 +114,96 @@ export async function recognizeLocalInvoices(
         pagesProcessed: prepared.images.length,
         truncated,
       });
-      onProgress?.(activeId, { status: "Finished", progress: 1 });
+      onProgress?.(input.id, { status: "Finished", progress: 1 });
+      } finally {
+        deadline.dispose();
+      }
     }
     return results;
-  } finally {
-    await worker.terminate();
+  });
+}
+
+export function needsFullPagePass(text: string) {
+  const hasInvoiceIdentity = /\b(?:tax\s+)?invoice\b/i.test(text) && /\b[A-Z0-9][A-Z0-9/.-]{7,}\b/.test(text);
+  const hasFuelProduct = /\b(?:HSD|MS|PETROL|DIESEL|XP\s*95|XP\s*100|POWER|SPEED)\b/i.test(text);
+  const hasQuantityOrAmount = /\b\d+(?:[.,]\d+)?\s*(?:KL|LTR|LITRE|LITER|L)\b/i.test(text) || /\b\d[\d,]{4,}(?:\.\d{1,3})?\b/.test(text);
+  return text.replace(/\s/g, "").length < 240 || !hasInvoiceIdentity || !hasFuelProduct || !hasQuantityOrAmount;
+}
+
+async function getWorker(signal?: AbortSignal) {
+  throwIfAborted(signal);
+  if (!workerPromise) {
+    const languageAssetUrl = new URL(englishDataUrl, window.location.href);
+    const languagePath = new URL(".", languageAssetUrl).href;
+    const creation = simd().then(supportsSimd => createWorker("eng", OEM.LSTM_ONLY, {
+      workerPath: workerUrl,
+      corePath: supportsSimd ? simdCoreUrl : coreUrl,
+      langPath: languagePath,
+      gzip: true,
+      workerBlobURL: false,
+      logger: message => workerProgress?.(message),
+    }));
+    workerPromise = withLimit(creation, WORKER_START_TIMEOUT_MS, signal, "The document reader took too long to start.");
+    workerPromise.catch(() => {
+      if (workerPromise) workerPromise = null;
+      void creation.then(worker => worker.terminate()).catch(() => undefined);
+    });
   }
+  return withLimit(workerPromise, WORKER_START_TIMEOUT_MS, signal, "The document reader took too long to start.");
+}
+
+async function recognizeWithLimit(worker: OcrWorker, image: File | Blob, signal?: AbortSignal) {
+  try {
+    return await withLimit(worker.recognize(image), RECOGNITION_TIMEOUT_MS, signal, "This page took too long to read.");
+  } catch (error) {
+    await discardWorker(worker);
+    throw error;
+  }
+}
+
+async function discardWorker(worker: OcrWorker) {
+  workerPromise = null;
+  await worker.terminate().catch(() => undefined);
+}
+
+async function enqueueWorkerTask<T>(task: () => Promise<T>) {
+  const previous = workerQueue;
+  let release: () => void = () => {};
+  workerQueue = new Promise<void>(resolve => { release = resolve; });
+  await previous;
+  try { return await task(); }
+  finally { workerProgress = null; release(); }
+}
+
+function withLimit<T>(promise: Promise<T>, timeoutMs: number, signal: AbortSignal | undefined, message: string) {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (action: () => void) => { if (settled) return; settled = true; window.clearTimeout(timer); signal?.removeEventListener("abort", abort); action(); };
+    const abort = () => finish(() => reject(signal?.reason instanceof Error ? signal.reason : new DOMException("The document check was cancelled.", "AbortError")));
+    const timer = window.setTimeout(() => finish(() => reject(new Error(message))), timeoutMs);
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) return abort();
+    promise.then(value => finish(() => resolve(value)), error => finish(() => reject(error)));
+  });
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new DOMException("The document check was cancelled.", "AbortError");
+}
+
+function createDeadlineSignal(source?: AbortSignal) {
+  const controller = new AbortController();
+  const forwardAbort = () => controller.abort(source?.reason);
+  source?.addEventListener("abort", forwardAbort, { once: true });
+  if (source?.aborted) forwardAbort();
+  const timer = window.setTimeout(() => controller.abort(new Error("This invoice took too long to read.")), INVOICE_TIMEOUT_MS);
+  return {
+    signal: controller.signal,
+    dispose: () => {
+      window.clearTimeout(timer);
+      source?.removeEventListener("abort", forwardAbort);
+    },
+  };
 }
 
 export function needsInvoiceHeaderPass(text: string) {
@@ -203,6 +302,9 @@ function clampProgress(value: number) {
 }
 
 function humanOcrStatus(status: string) {
+  if (status.includes("loading tesseract core")) return "Loading document reader…";
+  if (status.includes("loading language traineddata")) return "Loading English text model…";
+  if (status.includes("initializing")) return "Starting document reader…";
   if (status.includes("recognizing")) return "Reading invoice…";
-  return "Getting invoice ready…";
+  return "Preparing invoice…";
 }

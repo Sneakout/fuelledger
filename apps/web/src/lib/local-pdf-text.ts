@@ -6,7 +6,7 @@ GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 const MAX_PAGES_TO_READ = 50;
 const MAX_TEXT_CHARACTERS = 500_000;
 const MAX_OCR_PDF_PAGES = 5;
-const MAX_RENDER_PIXELS = 4_000_000;
+const MAX_RENDER_PIXELS = 3_000_000;
 
 export type LocalPdfTextResult = {
   text: string;

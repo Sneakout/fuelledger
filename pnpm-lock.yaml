@@ -129,6 +129,9 @@ importers:
       tesseract.js-core:
         specifier: ^6.1.2
         version: 6.1.2
+      wasm-feature-detect:
+        specifier: ^1.9.0
+        version: 1.9.0
     devDependencies:
       '@testing-library/jest-dom':
         specifier: ^6.8.0

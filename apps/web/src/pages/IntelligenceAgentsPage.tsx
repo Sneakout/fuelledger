@@ -133,6 +133,7 @@ function AskNerveBar({ stationId, stationName, isDemo }: { stationId: string | n
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const attachmentMenu = useRef<HTMLDivElement | null>(null);
+  const invoiceChecks = useRef(new Map<string, AbortController>());
 
   useEffect(() => {
     if (!attachmentMenuOpen) return;
@@ -145,7 +146,15 @@ function AskNerveBar({ stationId, stationName, isDemo }: { stationId: string | n
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, [attachmentMenuOpen]);
 
-  useEffect(() => { setAnswer(null); setError(""); setInvoices([]); setReviewingId(null); setPreviewingId(null); setSubmittingId(null); }, [stationId]);
+  useEffect(() => {
+    for (const controller of invoiceChecks.current.values()) controller.abort();
+    invoiceChecks.current.clear();
+    setAnswer(null); setError(""); setInvoices([]); setReviewingId(null); setPreviewingId(null); setSubmittingId(null);
+  }, [stationId]);
+  useEffect(() => () => {
+    for (const controller of invoiceChecks.current.values()) controller.abort();
+    invoiceChecks.current.clear();
+  }, []);
   useEffect(() => {
     let active = true;
     setCatalogProducts([]);
@@ -179,6 +188,7 @@ function AskNerveBar({ stationId, stationName, isDemo }: { stationId: string | n
               const parsed = parseIndianInvoice(result.text);
               const draft = createEditableInvoiceDraft(parsed);
               setInvoices(current => current.map(invoice => invoice.id !== item.id ? invoice : { ...invoice, status: "ready", source: "pdf_text", extractedText: result.text, pageCount: result.pageCount, characterCount: result.characterCount, truncated: result.truncated, parsed, draft }));
+              invoiceChecks.current.delete(item.id);
               rememberInvoiceImportPerformance("PDF_TEXT", startedAt, "SUCCESS");
             } else {
               ocrItems.push(item);
@@ -187,12 +197,14 @@ function AskNerveBar({ stationId, stationName, isDemo }: { stationId: string | n
             }
           } catch {
             setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "error" } : invoice));
+            invoiceChecks.current.delete(item.id);
             rememberInvoiceImportPerformance("PDF_TEXT", startedAt, "FAILED");
           }
         }
       } catch {
         const failedIds = new Set(pdfItems.map(item => item.id));
         setInvoices(current => current.map(invoice => failedIds.has(invoice.id) ? { ...invoice, status: "error" } : invoice));
+        for (const id of failedIds) invoiceChecks.current.delete(id);
       }
     }
 
@@ -200,24 +212,40 @@ function AskNerveBar({ stationId, stationName, isDemo }: { stationId: string | n
     const ocrStartedAt = performance.now();
     try {
       const { recognizeLocalInvoices } = await import("../lib/local-invoice-ocr");
-      const results = await recognizeLocalInvoices(ocrItems.map(item => ({ id: item.id, file: item.file })), (id, progress) => {
-        setInvoices(current => current.map(invoice => invoice.id === id ? { ...invoice, status: "ocr", progress: progress.progress, progressLabel: progress.status } : invoice));
-      });
-      for (const result of results) {
-        if (!result.text.trim()) {
-          setInvoices(current => current.map(invoice => invoice.id === result.id ? { ...invoice, status: "error", pageCount: result.pageCount, progress: 1, progressLabel: "No readable text was found" } : invoice));
-          continue;
+      let readableResult = false;
+      for (const item of ocrItems) {
+        const controller = invoiceChecks.current.get(item.id);
+        if (!controller || controller.signal.aborted) continue;
+        try {
+          const [result] = await recognizeLocalInvoices([{ id: item.id, file: item.file, signal: controller.signal }], (id, progress) => {
+            setInvoices(current => current.map(invoice => invoice.id === id ? { ...invoice, status: "ocr", progress: progress.progress, progressLabel: progress.status } : invoice));
+          });
+          if (!result?.text.trim()) {
+            setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "error", ...(result ? { pageCount: result.pageCount } : {}), progress: 1, progressLabel: "No readable text was found" } : invoice));
+            continue;
+          }
+          readableResult = true;
+          const parsed = (await import("../lib/indian-invoice-parser")).parseIndianInvoice(result.text);
+          const draft = createEditableInvoiceDraft(parsed);
+          setInvoices(current => current.map(invoice => invoice.id === result.id
+            ? { ...invoice, status: "ready", source: "ocr", extractedText: result.text, pageCount: result.pageCount, characterCount: result.text.length, confidence: result.confidence, truncated: result.truncated, progress: 1, parsed, draft }
+            : invoice));
+        } catch (caught) {
+          if (!controller.signal.aborted) {
+            const message = caught instanceof Error && /too long/i.test(caught.message)
+              ? "This invoice is taking too long. Try again with a clearer image."
+              : "Local OCR could not finish";
+            setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "error", progressLabel: message } : invoice));
+          }
+        } finally {
+          invoiceChecks.current.delete(item.id);
         }
-        const parsed = (await import("../lib/indian-invoice-parser")).parseIndianInvoice(result.text);
-        const draft = createEditableInvoiceDraft(parsed);
-        setInvoices(current => current.map(invoice => invoice.id === result.id
-          ? { ...invoice, status: "ready", source: "ocr", extractedText: result.text, pageCount: result.pageCount, characterCount: result.text.length, confidence: result.confidence, truncated: result.truncated, progress: 1, parsed, draft }
-          : invoice));
       }
-      rememberInvoiceImportPerformance("OCR", ocrStartedAt, results.some(result => result.text.trim()) ? "SUCCESS" : "WITHHELD");
+      rememberInvoiceImportPerformance("OCR", ocrStartedAt, readableResult ? "SUCCESS" : "WITHHELD");
     } catch {
       const failedIds = new Set(ocrItems.map(item => item.id));
       setInvoices(current => current.map(invoice => failedIds.has(invoice.id) ? { ...invoice, status: "error", progressLabel: "Local OCR could not finish" } : invoice));
+      for (const id of failedIds) invoiceChecks.current.delete(id);
       rememberInvoiceImportPerformance("OCR", ocrStartedAt, "FAILED");
     }
   };
@@ -236,6 +264,7 @@ function AskNerveBar({ stationId, stationName, isDemo }: { stationId: string | n
       .map(file => isPdfFile(file)
         ? { id: crypto.randomUUID(), file, status: "checking", progress: 0 }
         : { id: crypto.randomUUID(), file, status: "ocr", progress: 0, progressLabel: "Preparing image" });
+    for (const addition of additions) invoiceChecks.current.set(addition.id, new AbortController());
     if (uniqueFiles.length > additions.length) setError("You can check up to five invoices at a time.");
     setInvoices(current => [...current, ...additions].slice(0, 5));
     void processInvoices(additions);
@@ -262,7 +291,7 @@ function AskNerveBar({ stationId, stationName, isDemo }: { stationId: string | n
   return <section className="nerve-ask-bar" aria-label="Ask Nerve Intelligence">
     <div className="nerve-ask-heading"><div><Sparkles/><span><strong>Ask Nerve Intelligence</strong><small>Ask about {stationName ?? "this station"}, or select invoices to check next.</small></span></div><span><ShieldCheck/> Documents stay on this device</span></div>
     {invoices.length > 0 && <div className="nerve-local-invoices" aria-label="Invoices selected on this device" aria-live="polite">
-      {invoices.map(invoice => <div key={invoice.id} className={invoice.status}><InvoiceStatusIcon status={invoice.status}/><span><strong>{invoice.file.name}</strong><small>{invoiceStatusText(invoice)}</small></span><button type="button" aria-label={`Remove ${invoice.file.name}`} onClick={() => setInvoices(current => current.filter(item => item.id !== invoice.id))}><X/></button>{invoice.parsed && invoice.draft && <InvoiceDetails invoice={invoice.parsed} draft={invoice.draft} stationName={stationName} catalogProducts={catalogProducts} reviewed={Boolean(invoice.reviewed)} submitted={invoice.submitted} onReview={() => setReviewingId(invoice.id)} onPreview={() => setPreviewingId(invoice.id)}/>} {invoice.extractedText && <details className="nerve-text-preview"><summary>View the text read from this document</summary><p>{invoice.extractedText.slice(0, 1_200)}{invoice.extractedText.length > 1_200 ? "…" : ""}</p></details>}</div>)}
+      {invoices.map(invoice => <div key={invoice.id} className={invoice.status}><InvoiceStatusIcon status={invoice.status}/><span><strong>{invoice.file.name}</strong><small>{invoiceStatusText(invoice)}</small></span><button type="button" aria-label={`Remove ${invoice.file.name}`} onClick={() => { invoiceChecks.current.get(invoice.id)?.abort(); invoiceChecks.current.delete(invoice.id); setInvoices(current => current.filter(item => item.id !== invoice.id)); }}><X/></button>{invoice.parsed && invoice.draft && <InvoiceDetails invoice={invoice.parsed} draft={invoice.draft} stationName={stationName} catalogProducts={catalogProducts} reviewed={Boolean(invoice.reviewed)} submitted={invoice.submitted} onReview={() => setReviewingId(invoice.id)} onPreview={() => setPreviewingId(invoice.id)}/>} {invoice.extractedText && <details className="nerve-text-preview"><summary>View the text read from this document</summary><p>{invoice.extractedText.slice(0, 1_200)}{invoice.extractedText.length > 1_200 ? "…" : ""}</p></details>}</div>)}
     </div>}
     <form onSubmit={ask}>
       <div className="nerve-attach" ref={attachmentMenu}>
