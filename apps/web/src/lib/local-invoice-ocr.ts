@@ -10,6 +10,7 @@ const WORKER_START_TIMEOUT_MS = 45_000;
 const RECOGNITION_TIMEOUT_MS = 45_000;
 const INVOICE_TIMEOUT_MS = 75_000;
 const LANGUAGE_CACHE_PATH = "fuelnerve-ocr-v1";
+const OCR_RUNTIME_VERSION = "csp-v2";
 
 type OcrWorker = Awaited<ReturnType<typeof createWorker>>;
 let workerPromise: Promise<OcrWorker> | null = null;
@@ -136,9 +137,16 @@ async function getWorker(signal?: AbortSignal) {
   if (!workerPromise) {
     const languageAssetUrl = new URL(englishDataUrl, window.location.href);
     const languagePath = new URL(".", languageAssetUrl).href;
+    const versionRuntimeUrl = (assetUrl: string) => {
+      const url = new URL(assetUrl, window.location.href);
+      url.searchParams.set("runtime", OCR_RUNTIME_VERSION);
+      return url.href;
+    };
     const creation = simd().then(supportsSimd => createWorker("eng", OEM.LSTM_ONLY, {
-      workerPath: workerUrl,
-      corePath: supportsSimd ? simdCoreUrl : coreUrl,
+      // These assets are immutable in production. Version their URLs so a security-header
+      // update cannot leave Chrome running a worker cached with an obsolete CSP response.
+      workerPath: versionRuntimeUrl(workerUrl),
+      corePath: versionRuntimeUrl(supportsSimd ? simdCoreUrl : coreUrl),
       langPath: languagePath,
       cachePath: LANGUAGE_CACHE_PATH,
       gzip: true,
