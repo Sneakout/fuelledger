@@ -34,6 +34,13 @@ describe("local invoice safety", () => {
     });
   });
 
+  it("excludes deposits and unrelated adjustments from the landed price", () => {
+    expect(assessSingleProductInvoicePrice({ ...draft, purchasePriceExcludedAmount: "12079" }, [product])).toMatchObject({
+      invoicePrice: 99.58,
+      direction: "INCREASE",
+    });
+  });
+
   it("withholds a blended price when more than one product is supplied", () => {
     const secondLine: EditableInvoiceDraft["lines"][number] = {
       id: "line-2", product: "MS", description: "Motor Spirit", hsnCode: "27101241",

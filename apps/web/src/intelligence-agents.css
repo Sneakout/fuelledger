@@ -567,27 +567,27 @@ a.nerve-agent-card:hover{transform:translateY(-1px);border-color:#a9c9ba;box-sha
   .investigation-report>footer{align-items:center;flex-wrap:nowrap}
 }
 
-/* Readable type scale: operational copy must remain legible on laptop displays. */
-.nerve-page .eyebrow{font-size:12px}
-.today-heading h1{font-size:38px}
-.today-heading p{font-size:15px;line-height:1.5}
-.today-updated{font-size:13px}
-.nerve-team{padding:24px}
-.nerve-team-heading{margin-bottom:18px}
-.nerve-team-heading h2{font-size:21px}
-.nerve-team-heading>div>p{max-width:720px;margin:7px 0 0;color:#60756c;font-size:14px;line-height:1.5}
-.nerve-team-heading>span{font-size:12px;padding:8px 11px}
-.nerve-team-grid{gap:14px}
-.nerve-agent-card{grid-template-columns:44px minmax(0,1fr) 18px;gap:14px;min-height:138px;padding:18px}
-.nerve-agent-card>.agent-glyph{width:44px;height:44px}
-.nerve-agent-card>.agent-glyph svg{width:20px;height:20px}
-.nerve-agent-card h3{font-size:17px}
-.nerve-agent-card p{min-height:40px;margin:5px 0 11px;font-size:14px;line-height:1.45}
-.nerve-agent-card strong{padding:5px 8px;font-size:13px}
+/* Compact owner-dashboard scale: clear hierarchy without oversized card copy. */
+.nerve-page .eyebrow{font-size:10px}
+.today-heading h1{font-size:32px}
+.today-heading p{font-size:13px;line-height:1.45}
+.today-updated{font-size:12px}
+.nerve-team{padding:20px}
+.nerve-team-heading{margin-bottom:15px}
+.nerve-team-heading h2{font-size:18px}
+.nerve-team-heading>div>p{max-width:720px;margin:5px 0 0;color:#60756c;font-size:12px;line-height:1.45}
+.nerve-team-heading>span{font-size:11px;padding:7px 10px}
+.nerve-team-grid{gap:11px}
+.nerve-agent-card{grid-template-columns:38px minmax(0,1fr) 16px;gap:11px;min-height:116px;padding:15px}
+.nerve-agent-card>.agent-glyph{width:38px;height:38px}
+.nerve-agent-card>.agent-glyph svg{width:18px;height:18px}
+.nerve-agent-card h3{font-size:15px}
+.nerve-agent-card p{min-height:34px;margin:4px 0 9px;font-size:12px;line-height:1.4}
+.nerve-agent-card strong{padding:4px 7px;font-size:11px}
 .nerve-agent-card strong.awaiting_review{background:#f3f1ea;color:#756a50}
-.nerve-agent-card small{margin-top:7px;font-size:13px}
+.nerve-agent-card small{margin-top:6px;font-size:11px}
 .nerve-agent-card.awaiting-review{background:#fbfcfb}
-.agent-area{margin-bottom:5px;color:#628075;font-size:11px;font-weight:850;letter-spacing:.08em;text-transform:uppercase}
+.agent-area{margin-bottom:4px;color:#628075;font-size:9px;font-weight:850;letter-spacing:.08em;text-transform:uppercase}
 .agent-back{display:inline-flex;align-items:center;gap:8px;margin-bottom:22px;color:#286c57;font-size:14px;font-weight:800;text-decoration:none}
 .agent-back svg{width:18px}
 .agent-page-heading{display:grid;grid-template-columns:58px minmax(0,1fr) auto;gap:18px;align-items:center;margin-bottom:24px}

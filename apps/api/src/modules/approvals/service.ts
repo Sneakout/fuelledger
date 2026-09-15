@@ -1,5 +1,5 @@
 import { Prisma, type ApprovalStatus } from '@prisma/client';
-import type { InventoryAdjustmentInput, PurchaseInvoiceInput } from '@fuelledger/shared';
+import { calculateLandedPurchasePrices, type InventoryAdjustmentInput, type PurchaseInvoiceInput } from '@fuelledger/shared';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { bookStockAt } from '../../lib/stock.js';
@@ -66,19 +66,29 @@ export async function requestProductPriceChangeFromInvoice(
     prisma.user.findFirst({ where: { id: userId, organizationId }, select: { id: true, name: true, role: true } }),
   ]);
   if (!station || !requester) return [];
-  const subtotal = linkedLines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0);
-  if (!(subtotal > 0)) return [];
+  const landedPrices = calculateLandedPurchasePrices({
+    invoiceTotal: input.invoiceTotal,
+    ...(input.purchasePriceExcludedAmount !== undefined ? { excludedAmount: input.purchasePriceExcludedAmount } : {}),
+    lines: linkedLines.map(line => {
+      const product = products.find(candidate => candidate.id === line.productId);
+      return {
+        key: line.productId!,
+        quantity: line.quantity,
+        ...(line.sourceUnit ? { sourceUnit: line.sourceUnit } : {}),
+        productUnit: product?.unit ?? "",
+        baseAmount: line.quantity * line.unitCost,
+        taxRate: line.taxRate,
+      };
+    }),
+  });
+  if (!landedPrices) return [];
   const approvals = [];
-  for (const line of linkedLines) {
-    const product = products.find(candidate => candidate.id === line.productId);
+  for (const landed of landedPrices) {
+    const product = products.find(candidate => candidate.id === landed.key);
     if (!product) continue;
-    const quantity = quantityInProductUnit(line.quantity, line.sourceUnit, product.unit);
-    if (!(quantity > 0)) continue;
-    // Allocate invoice-level taxes and charges by each line's share of the subtotal.
-    // For a one-line fuel invoice this is exactly invoice total / supplied quantity.
-    const lineBaseAmount = line.quantity * line.unitCost;
-    const landedLineAmount = input.invoiceTotal * (lineBaseAmount / subtotal);
-    const proposedPurchasePrice = roundPrice(landedLineAmount / quantity);
+    const quantity = landed.normalizedQuantity;
+    const landedLineAmount = landed.taxInclusiveAmount;
+    const proposedPurchasePrice = roundPrice(landed.unitPrice);
     const currentPurchasePrice = Number(product.purchasePrice);
     const currentSellingPrice = Number(product.sellingPrice);
     if (Math.abs(proposedPurchasePrice - currentPurchasePrice) < 0.01) continue;
@@ -94,7 +104,7 @@ export async function requestProductPriceChangeFromInvoice(
     };
     const evidence = {
       product: { id: product.id, name: product.name, code: product.code, unit: product.unit },
-      invoice: { id: invoice.id, invoiceNumber: invoice.invoiceNumber, totalAmount: landedLineAmount, quantity, sourceUnit: line.sourceUnit ?? product.unit },
+      invoice: { id: invoice.id, invoiceNumber: invoice.invoiceNumber, totalAmount: landedLineAmount, quantity, sourceUnit: product.unit },
       currentPurchasePrice,
       proposedPurchasePrice,
       currentSellingPrice,
@@ -125,15 +135,6 @@ export async function requestProductPriceChangeFromInvoice(
     }
   }
   return approvals;
-}
-
-function quantityInProductUnit(quantity: number, sourceUnit: string | undefined, productUnit: string) {
-  const source = (sourceUnit ?? productUnit).trim().toUpperCase().replace(/[^A-Z]/g, '');
-  const target = productUnit.trim().toUpperCase().replace(/[^A-Z]/g, '');
-  if (source === target || (['L', 'LTR', 'LITRE', 'LITER'].includes(source) && target === 'LITRE')) return quantity;
-  if (source === 'KL' && target === 'LITRE') return quantity * 1_000;
-  if (['L', 'LTR', 'LITRE', 'LITER'].includes(source) && target === 'KILOLITRE') return quantity / 1_000;
-  return Number.NaN;
 }
 
 function roundPrice(value: number) { return Math.round((value + Number.EPSILON) * 100) / 100; }

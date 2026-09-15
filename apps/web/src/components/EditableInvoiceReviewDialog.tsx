@@ -22,6 +22,7 @@ export type EditableInvoiceDraft = {
   invoiceDate: string;
   dueDate: string;
   taxAmount: string;
+  purchasePriceExcludedAmount?: string;
   totalAmount: string;
   lines: EditableInvoiceLine[];
 };
@@ -36,6 +37,7 @@ export function createEditableInvoiceDraft(invoice: ParsedIndianInvoice): Editab
     invoiceDate: invoice.invoiceDate?.value ?? "",
     dueDate: invoice.dueDate?.value ?? "",
     taxAmount: invoice.tax.total === null ? "" : decimal(invoice.tax.total),
+    purchasePriceExcludedAmount: "",
     totalAmount: invoice.totalAmount ? decimal(invoice.totalAmount.value) : "",
     lines: invoice.lines.length ? invoice.lines.map(toEditableLine) : [emptyInvoiceLine()],
   };
@@ -51,6 +53,8 @@ export function validateEditableInvoiceDraft(draft: EditableInvoiceDraft) {
   if (draft.supplierGSTIN && !/^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/i.test(draft.supplierGSTIN.trim())) errors.push("Check the supplier GST number.");
   if (!positiveNumber(draft.totalAmount)) errors.push("Enter an invoice total greater than zero.");
   if (!nonNegativeNumber(draft.taxAmount, true)) errors.push("Enter a valid tax amount.");
+  if (draft.purchasePriceExcludedAmount && !nonNegativeNumber(draft.purchasePriceExcludedAmount, true)) errors.push("Enter a valid excluded adjustment amount.");
+  if (number(draft.purchasePriceExcludedAmount ?? "0") >= number(draft.totalAmount)) errors.push("Excluded adjustments must be less than the invoice total.");
   if (!draft.lines.length) errors.push("Add at least one product line.");
   draft.lines.forEach((line, index) => {
     const label = draft.lines.length > 1 ? `Product ${index + 1}` : "Product";
@@ -117,6 +121,7 @@ export function EditableInvoiceReviewDialog({ fileName, initialDraft, onCancel, 
           <label><span>Invoice date</span><input type="date" value={draft.invoiceDate} onChange={event => update("invoiceDate", event.target.value)}/></label>
           <label><span>Due date <em>Optional</em></span><input type="date" value={draft.dueDate} min={draft.invoiceDate || undefined} onChange={event => update("dueDate", event.target.value)}/></label>
           <label><span>Taxes and charges</span><input type="number" inputMode="decimal" min="0" step="0.01" value={draft.taxAmount} onChange={event => update("taxAmount", event.target.value)}/></label>
+          <label><span>Non-product adjustments <small>Optional</small></span><input type="number" inputMode="decimal" min="0" step="0.01" value={draft.purchasePriceExcludedAmount ?? ""} onChange={event => update("purchasePriceExcludedAmount", event.target.value)} placeholder="Deposits or unrelated charges"/></label>
           <label><span>Invoice total</span><input type="number" inputMode="decimal" min="0" step="0.01" value={draft.totalAmount} onChange={event => update("totalAmount", event.target.value)}/></label>
         </div></fieldset>
 

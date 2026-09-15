@@ -85,7 +85,9 @@ export function parseIndianInvoice(text: string): ParsedIndianInvoice {
   const explicitTax = findAmount(lines, /\b(?:total\s+tax|tax\s+amount)\b/i);
   const componentTax = [cgst, sgst, igst, cess].reduce((sum, item) => sum + (item?.value ?? 0), 0);
   const itemLines = parseItemLines(lines);
-  const productSubtotal = itemLines.reduce((sum, line) => sum + line.quantity * line.unitRate, 0);
+  // Prefer the amount printed for the product. Rebuilding it from an OCR-read
+  // rate can turn a small recognition error into a false tax amount.
+  const productSubtotal = itemLines.reduce((sum, line) => sum + (line.amount ?? line.quantity * line.unitRate), 0);
   const derivedCharges = totalAmount && productSubtotal > 0 ? totalAmount.value - productSubtotal : null;
   let taxTotal = explicitTax?.value ?? (componentTax > 0 ? componentTax : null);
   if (derivedCharges !== null && derivedCharges >= 0 && (taxTotal === null || Math.abs(taxTotal - derivedCharges) > 1)) {

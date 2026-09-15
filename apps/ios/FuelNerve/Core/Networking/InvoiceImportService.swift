@@ -39,6 +39,7 @@ struct InvoiceImportBootstrap: Decodable, Sendable {
 
 struct FlexibleNumber: Decodable, Sendable {
     let value: Double
+    init(_ value: Double) { self.value = value }
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let number = try? container.decode(Double.self) { value = number; return }
@@ -74,6 +75,7 @@ struct PurchaseInvoiceSubmission: Encodable, Sendable {
     let dueDate: String
     let invoiceTotal: Double?
     let taxAmount: Double
+    let purchasePriceExcludedAmount: Double?
     let notes: String?
     let receiveNow: Bool
     let paidNow: Bool
@@ -83,6 +85,17 @@ struct PurchaseInvoiceSubmission: Encodable, Sendable {
     let lines: [Line]
 }
 
+struct NewSupplierSubmission: Encodable, Sendable {
+    let name: String
+    let code: String
+    let phone: String
+    let email: String
+    let taxId: String
+    let address: String
+    let paymentTerms: Int
+    let active: Bool
+}
+
 struct PostedPurchaseInvoice: Decodable, Sendable {
     let id: String
     let invoiceNumber: String
@@ -90,6 +103,7 @@ struct PostedPurchaseInvoice: Decodable, Sendable {
 
 protocol InvoiceImportService: Sendable {
     func bootstrap() async throws -> InvoiceImportBootstrap
+    func createSupplier(_ supplier: NewSupplierSubmission, idempotencyKey: String) async throws -> InvoiceImportBootstrap.Supplier
     func post(_ invoice: PurchaseInvoiceSubmission, idempotencyKey: String) async throws -> PostedPurchaseInvoice
 }
 
@@ -97,6 +111,10 @@ struct LiveInvoiceImportService: InvoiceImportService {
     let client: APIClient
     func bootstrap() async throws -> InvoiceImportBootstrap {
         try await client.get("purchases/bootstrap", as: InvoiceImportBootstrap.self)
+    }
+    func createSupplier(_ supplier: NewSupplierSubmission, idempotencyKey: String) async throws -> InvoiceImportBootstrap.Supplier {
+        struct Response: Decodable, Sendable { let supplier: InvoiceImportBootstrap.Supplier }
+        return try await client.send("purchases/suppliers", body: supplier, idempotencyKey: idempotencyKey, as: Response.self).supplier
     }
     func post(_ invoice: PurchaseInvoiceSubmission, idempotencyKey: String) async throws -> PostedPurchaseInvoice {
         struct Response: Decodable, Sendable { let invoice: PostedPurchaseInvoice }
@@ -106,5 +124,6 @@ struct LiveInvoiceImportService: InvoiceImportService {
 
 struct PreviewInvoiceImportService: InvoiceImportService {
     func bootstrap() async throws -> InvoiceImportBootstrap { .init(suppliers: [], stations: [], products: []) }
+    func createSupplier(_ supplier: NewSupplierSubmission, idempotencyKey: String) async throws -> InvoiceImportBootstrap.Supplier { throw APIError.actionDisabled }
     func post(_ invoice: PurchaseInvoiceSubmission, idempotencyKey: String) async throws -> PostedPurchaseInvoice { throw APIError.actionDisabled }
 }

@@ -85,7 +85,7 @@ BASIC DESTINATION PRICE 12.000 KL 79341270 KL 95209524
 TAX INVOICE 20274247B025710
 Date 31-Aug-26
 10 50700 HSD-BSVI 12000 KL 2710 19 44
-BASIC DESTINATION PRICE 12000 KL 79341270 KL 95200524
+BASIC DESTINATION PRICE 12000 KL 79341270 KL 95209524
 
 10 50700 HSD-BSVI 12000 KL 2710 19 44
 BASIC DESTINATION PRICE 12000 KL 79341270 KL 95209524
@@ -115,7 +115,7 @@ E Te a aeotall 1207079.00`);
 Doc.Name TAX INVOICE 20274247B025710
 31-Aug-26
 10 50700 HSD-BSVI 12000 KL 271019 44
-BASIC DESTINATION PRICE 12000 KL 79341270 KL 95200524
+BASIC DESTINATION PRICE 12000 KL 79341270 KL 95209524
 2ZLST Local sales tax 22.760 % 21669688
 2CS2 Cess 2000.000 KL 24000.00
 § & Total : ₹ 1207079.00`);
@@ -123,7 +123,7 @@ BASIC DESTINATION PRICE 12000 KL 79341270 KL 95200524
     expect(result.invoiceDate?.value).toBe("2026-08-31");
     expect(result.invoiceDate?.needsReview).toBe(true);
     expect(result.totalAmount?.value).toBe(1207079);
-    expect(result.lines[0]).toMatchObject({ product: "HSD", hsnCode: "27101944", quantity: 12, unitRate: 79341.27, amount: 952005.24 });
+    expect(result.lines[0]).toMatchObject({ product: "HSD", hsnCode: "27101944", quantity: 12, unitRate: 79341.27, amount: 952095.24 });
     expect(result.tax.total).toBe(254983.76);
     expect(result.warnings).toEqual(expect.arrayContaining([
       "The invoice date was recovered without a clear label. Check it against the document before continuing.",

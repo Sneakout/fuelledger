@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export * from "./stock-rules.js";
+export * from "./purchase-price.js";
 
 export const roles = ["OWNER", "MANAGER", "ACCOUNTANT", "STAFF"] as const;
 export const userSchema = z.object({
@@ -884,6 +885,7 @@ export const purchaseInvoiceInputSchema = z
     dueDate: z.string().datetime(),
     invoiceTotal: z.coerce.number().positive().optional(),
     taxAmount: z.coerce.number().min(0).default(0),
+    purchasePriceExcludedAmount: z.coerce.number().finite().min(0).optional(),
     notes: z.string().trim().max(500).optional(),
     receiveNow: z.boolean(),
     paidNow: z.boolean().optional().default(false),
@@ -918,6 +920,16 @@ export const purchaseInvoiceInputSchema = z
         code: "custom",
         message: "Invoice total must match the line items and tax.",
         path: ["invoiceTotal"],
+      });
+    if (
+      invoice.invoiceTotal !== undefined &&
+      invoice.purchasePriceExcludedAmount !== undefined &&
+      invoice.invoiceTotal - invoice.purchasePriceExcludedAmount <= 0
+    )
+      context.addIssue({
+        code: "custom",
+        message: "Excluded adjustments cannot remove the full invoice value from purchase pricing.",
+        path: ["purchasePriceExcludedAmount"],
       });
     if (new Date(invoice.dueDate) < new Date(invoice.invoiceDate))
       context.addIssue({

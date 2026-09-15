@@ -1,5 +1,6 @@
 import type { CatalogProduct } from "./api";
 import type { EditableInvoiceDraft } from "../components/EditableInvoiceReviewDialog";
+import { calculateLandedPurchasePrices } from "@fuelledger/shared";
 
 export type InvoiceStationAssessment = {
   status: "MATCH" | "MISMATCH" | "UNKNOWN";
@@ -50,7 +51,19 @@ export function assessSingleProductInvoicePrice(draft: EditableInvoiceDraft, pro
   if (!(quantity > 0) || !(total > 0)) return null;
   const product = matchProduct(line.description, line.product, line.hsnCode, products);
   if (!product) return null;
-  const invoicePrice = convertUnitPrice(total / quantity, line.unit, product.unit);
+  const landed = calculateLandedPurchasePrices({
+    invoiceTotal: total,
+    excludedAmount: Number(draft.purchasePriceExcludedAmount || 0),
+    lines: [{
+      key: product.id,
+      quantity,
+      sourceUnit: line.unit,
+      productUnit: product.unit,
+      baseAmount: quantity * Number(line.unitRate),
+      taxRate: Number(line.taxRate || 0),
+    }],
+  })?.[0];
+  const invoicePrice = landed?.unitPrice ?? Number.NaN;
   const previousPrice = Number(product.purchasePrice);
   if (!Number.isFinite(invoicePrice) || invoicePrice <= 0 || !Number.isFinite(previousPrice) || previousPrice <= 0) return null;
   const difference = roundMoney(invoicePrice - previousPrice);
@@ -96,15 +109,6 @@ function normalizeFuelFamily(value: string) {
   if (/^(?:HSD|HIGHSPEEDDIESEL)/.test(normalized)) return "HSD";
   if (/^(?:MS|MOTORSPIRIT)/.test(normalized)) return "MS";
   return normalized;
-}
-
-function convertUnitPrice(value: number, fromUnit: string, toUnit: string) {
-  const from = normalize(fromUnit);
-  const to = normalize(toUnit);
-  if (!from || !to || from === to) return value;
-  if (from === "KL" && (to === "L" || to === "LTR" || to === "LITRE" || to === "LITER")) return value / 1000;
-  if ((from === "L" || from === "LTR" || from === "LITRE" || from === "LITER") && to === "KL") return value * 1000;
-  return Number.NaN;
 }
 
 function normalize(value: string | null | undefined) {

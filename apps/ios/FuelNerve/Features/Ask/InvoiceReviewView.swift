@@ -8,11 +8,23 @@ struct InvoiceReviewView: View {
     @State private var references: InvoiceImportBootstrap?
     @State private var rawText = ""
     @State private var supplierId = ""
+    @State private var supplierName = ""
+    @State private var supplierCode = ""
+    @State private var supplierTaxId = ""
+    @State private var supplierPhone = ""
+    @State private var supplierEmail = ""
+    @State private var supplierAddress = ""
+    @State private var supplierPaymentTerms = 0
+    @State private var createNewSupplier = false
+    @State private var showSupplierContactFields = false
+    @State private var consigneeName = ""
     @State private var invoiceNumber = ""
-    @State private var invoiceDate = Date()
+    @State private var invoiceDate: Date?
     @State private var invoiceTotal = 0.0
     @State private var taxAmount = 0.0
+    @State private var purchasePriceExcludedAmount = 0.0
     @State private var lines: [DraftLine] = []
+    @State private var parserWarnings: [String] = []
     @State private var receiveNow = true
     @State private var paidNow = false
     @State private var paymentMethod = "UPI"
@@ -20,6 +32,7 @@ struct InvoiceReviewView: View {
     @State private var phase = Phase.checking
     @State private var errorMessage: String?
     @State private var postedNumber: String?
+    @State private var supplierAddedDuringConfirmation = false
     @State private var saveKey = UUID().uuidString
 
     private enum Phase { case checking, understanding, review, posting, complete }
@@ -34,6 +47,8 @@ struct InvoiceReviewView: View {
             }
             .navigationTitle(phase == .complete ? "Invoice updated" : "New invoice")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(FuelNerveTheme.canvas, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(phase == .complete ? "Done" : "Cancel") { dismiss() } }
             }
@@ -65,56 +80,434 @@ struct InvoiceReviewView: View {
     }
 
     private var reviewForm: some View {
-        Form {
-            Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label("New invoice found", systemImage: "checkmark.circle.fill")
-                        .font(.headline).foregroundStyle(FuelNerveTheme.green)
-                    Text("Please check the extracted details below. FuelNerve will update your records only after you confirm.")
-                        .font(.subheadline).foregroundStyle(.secondary)
+        ScrollView {
+            LazyVStack(spacing: 16) {
+                reviewHero
+                invoiceDetailsCard
+                itemsCard
+                if let priceAssessment, priceAssessment.direction != .unchanged {
+                    priceChangeCard(priceAssessment)
                 }
-                if document.attachment == nil {
-                    Label("The original is over 500 KB, so it will not be attached. Extracted fields can still be posted.", systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.orange)
+                if !parserWarnings.isEmpty { warningsCard }
+                stockAndPaymentCard
+                if let errorMessage { errorCard(errorMessage) }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
+        }
+        .background(FuelNerveTheme.canvas)
+        .safeAreaInset(edge: .bottom, spacing: 0) { confirmationBar }
+    }
+
+    private var reviewHero: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "doc.text.viewfinder")
+                .font(.title2.weight(.semibold))
+                .foregroundStyle(FuelNerveTheme.forest)
+                .frame(width: 52, height: 52)
+                .background(FuelNerveTheme.lime, in: RoundedRectangle(cornerRadius: 16))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("READY FOR YOUR REVIEW")
+                    .font(.caption2.weight(.black)).tracking(1.3)
+                    .foregroundStyle(FuelNerveTheme.green)
+                Text("New invoice found")
+                    .font(.title2.bold()).foregroundStyle(FuelNerveTheme.forest)
+                Text("Check the details before anything changes.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(18)
+        .background(
+            LinearGradient(
+                colors: [FuelNerveTheme.lime.opacity(0.22), .white],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 22)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(FuelNerveTheme.green.opacity(0.13)))
+    }
+
+    private var invoiceDetailsCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            brandedSectionTitle("Invoice details", symbol: "doc.plaintext")
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text("DELIVERED TO").brandFieldLabel()
+                Text(consigneeName.isEmpty ? "Not clearly found" : consigneeName)
+                    .font(.headline).foregroundStyle(FuelNerveTheme.forest)
+                Label(stationAssessment.message, systemImage: stationAssessment.status == .match ? "checkmark.shield.fill" : "exclamationmark.shield.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(stationAssessment.status == .match ? FuelNerveTheme.green : FuelNerveTheme.gold)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 15))
+
+            supplierSection
+
+            brandTextField("INVOICE NUMBER") {
+                TextField("Enter invoice number", text: $invoiceNumber)
+                    .textInputAutocapitalization(.characters)
+            }
+
+            VStack(alignment: .leading, spacing: 7) {
+                Text("INVOICE DATE").brandFieldLabel()
+                if invoiceDate != nil {
+                    DatePicker("Invoice date", selection: Binding(get: { invoiceDate ?? .now }, set: { invoiceDate = $0 }), displayedComponents: .date)
+                        .labelsHidden().tint(FuelNerveTheme.green)
+                } else {
+                    Button { invoiceDate = .now } label: {
+                        Label("Choose invoice date", systemImage: "calendar")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(FuelNerveTheme.green)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(13)
+                            .background(FuelNerveTheme.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 13))
+                    }
+                    Text("The document date was not clear. No date was assumed.")
+                        .font(.caption).foregroundStyle(FuelNerveTheme.gold)
                 }
             }
-            Section("Invoice") {
+
+            HStack(alignment: .top, spacing: 12) {
+                brandNumberField("INVOICE TOTAL", value: $invoiceTotal)
+                brandNumberField("TAXES & CHARGES", value: $taxAmount)
+            }
+
+            brandNumberField("NON-PRODUCT ADJUSTMENTS · OPTIONAL", value: $purchasePriceExcludedAmount)
+            Text("Use this only for deposits, refundable amounts or unrelated charges. It is excluded from the product purchase price.")
+                .font(.caption).foregroundStyle(.secondary)
+
+            if let invoiceDate {
+                HStack {
+                    Text("Payment due").font(.subheadline).foregroundStyle(.secondary)
+                    Spacer()
+                    Text(dueDate(paymentTerms: resolvedPaymentTerms, invoiceDate: invoiceDate).formatted(date: .abbreviated, time: .omitted))
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(FuelNerveTheme.forest)
+                }
+            }
+
+            if document.attachment == nil {
+                Label("The original is too large to attach. The checked details can still be saved.", systemImage: "paperclip.badge.ellipsis")
+                    .font(.caption).foregroundStyle(FuelNerveTheme.gold)
+            }
+        }
+        .brandCard()
+    }
+
+    private var itemsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                brandedSectionTitle("Products", symbol: "drop.fill")
+                Spacer()
+                Button { lines.append(DraftLine()) } label: {
+                    Label("Add", systemImage: "plus")
+                        .font(.subheadline.weight(.bold)).foregroundStyle(FuelNerveTheme.green)
+                }
+            }
+
+            ForEach(lines.indices, id: \.self) { index in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("PRODUCT \(index + 1)").brandFieldLabel()
+                        Spacer()
+                        if lines.count > 1 {
+                            Button(role: .destructive) { lines.remove(at: index) } label: {
+                                Image(systemName: "trash").font(.subheadline)
+                            }
+                        }
+                    }
+                    InvoiceLineEditor(line: $lines[index], products: references?.products ?? [], station: station)
+                }
+                .padding(14)
+                .background(FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 16))
+            }
+
+            HStack(spacing: 10) {
+                totalTile("Items + tax", money(calculatedTotal), emphasis: false)
+                totalTile("Invoice total", money(invoiceTotal), emphasis: totalsMatch)
+            }
+
+            if !totalsMatch {
+                Label("Invoice total must match products plus taxes and charges.", systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.red)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 13))
+            }
+        }
+        .brandCard()
+    }
+
+    @ViewBuilder private var supplierSection: some View {
+        if createNewSupplier {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 11) {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .font(.title3).foregroundStyle(FuelNerveTheme.green)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("New supplier found")
+                            .font(.headline).foregroundStyle(FuelNerveTheme.forest)
+                        Text("This supplier is not in FuelNerve yet. Check these details; it will be added only when you confirm the invoice.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
+                brandTextField("SUPPLIER NAME") {
+                    TextField("Supplier name", text: $supplierName)
+                        .textInputAutocapitalization(.words)
+                        .onChange(of: supplierName) { oldValue, newValue in
+                            if supplierCode.isEmpty || supplierCode == suggestedSupplierCode(from: oldValue) {
+                                supplierCode = uniqueSupplierCode(suggestedSupplierCode(from: newValue))
+                            }
+                        }
+                }
+
+                HStack(alignment: .top, spacing: 12) {
+                    brandTextField("SUPPLIER CODE") {
+                        TextField("Code", text: $supplierCode)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                            .onChange(of: supplierCode) { _, value in
+                                supplierCode = sanitizedSupplierCode(value)
+                            }
+                    }
+                    brandTextField("GST NUMBER") {
+                        TextField("Optional", text: $supplierTaxId)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                    }
+                }
+
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("PAYMENT TERMS").brandFieldLabel()
+                        Text(supplierPaymentTerms == 0 ? "Due immediately" : "Due in \(supplierPaymentTerms) days")
+                            .font(.subheadline).foregroundStyle(FuelNerveTheme.forest)
+                    }
+                    Spacer()
+                    Stepper("Payment terms", value: $supplierPaymentTerms, in: 0...365)
+                        .labelsHidden().tint(FuelNerveTheme.green)
+                }
+                .padding(13)
+                .background(FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 13))
+
+                DisclosureGroup(isExpanded: $showSupplierContactFields) {
+                    VStack(spacing: 12) {
+                        brandTextField("PHONE") {
+                            TextField("Optional", text: $supplierPhone).keyboardType(.phonePad)
+                        }
+                        brandTextField("EMAIL") {
+                            TextField("Optional", text: $supplierEmail)
+                                .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        }
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text("ADDRESS").brandFieldLabel()
+                            TextEditor(text: $supplierAddress)
+                                .frame(minHeight: 64)
+                                .padding(8)
+                                .scrollContentBackground(.hidden)
+                                .background(FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 13))
+                                .overlay(RoundedRectangle(cornerRadius: 13).stroke(FuelNerveTheme.green.opacity(0.16)))
+                        }
+                    }
+                    .padding(.top, 12)
+                } label: {
+                    Text("Contact and address (optional)")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(FuelNerveTheme.green)
+                }
+                .tint(FuelNerveTheme.green)
+
+                if !(references?.suppliers.filter(\.active).isEmpty ?? true) {
+                    Button {
+                        createNewSupplier = false
+                        supplierId = ""
+                    } label: {
+                        Label("Choose an existing supplier instead", systemImage: "arrow.uturn.backward")
+                            .font(.caption.weight(.semibold)).foregroundStyle(FuelNerveTheme.green)
+                    }
+                }
+
+                if !newSupplierValidationMessage.isEmpty {
+                    Label(newSupplierValidationMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.red)
+                }
+            }
+            .padding(14)
+            .background(FuelNerveTheme.green.opacity(0.055), in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(FuelNerveTheme.green.opacity(0.16)))
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("SUPPLIER").brandFieldLabel()
                 Picker("Supplier", selection: $supplierId) {
                     Text("Choose supplier").tag("")
                     ForEach(references?.suppliers.filter(\.active) ?? []) { Text($0.name).tag($0.id) }
                 }
-                TextField("Invoice number", text: $invoiceNumber).textInputAutocapitalization(.characters)
-                DatePicker("Invoice date", selection: $invoiceDate, displayedComponents: .date)
-                CurrencyField("Invoice total", value: $invoiceTotal)
-                CurrencyField("Tax amount", value: $taxAmount)
-                if let supplier { LabeledContent("Due date", value: dueDate(for: supplier).formatted(date: .abbreviated, time: .omitted)) }
-            }
-            Section("Items") {
-                ForEach($lines) { $line in
-                    InvoiceLineEditor(line: $line, products: references?.products ?? [], station: station)
-                }.onDelete { lines.remove(atOffsets: $0) }
-                Button { lines.append(DraftLine()) } label: { Label("Add item", systemImage: "plus") }
-                LabeledContent("Calculated total", value: money(calculatedTotal))
-                if !totalsMatch { Label("Invoice total must match items plus tax before posting.", systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red) }
-            }
-            Section("Stock and payment") {
-                Toggle("Receive stock now", isOn: $receiveNow)
-                Text(receiveNow ? "Creates the receipt and inventory entries when posted." : "Posts the bill without changing stock.").font(.caption).foregroundStyle(.secondary)
-                Toggle("Already paid", isOn: $paidNow)
-                if paidNow {
-                    Picker("Paid by", selection: $paymentMethod) { ForEach(["CASH", "UPI", "CARD", "OTHER"], id: \.self) { Text($0.capitalized).tag($0) } }
-                    TextField("Payment reference (optional)", text: $paymentReference)
+                .labelsHidden()
+                .tint(FuelNerveTheme.green)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                if !supplierName.isEmpty {
+                    Button {
+                        supplierId = ""
+                        createNewSupplier = true
+                    } label: {
+                        Label("Use \(supplierName) as a new supplier", systemImage: "person.badge.plus")
+                            .font(.caption.weight(.semibold)).foregroundStyle(FuelNerveTheme.green)
+                    }
                 }
             }
-            if let errorMessage { Section { Text(errorMessage).foregroundStyle(.red) } }
-            Section {
-                Button { postInvoice() } label: {
-                    HStack { Spacer(); if phase == .posting { ProgressView().tint(.white) }; Text(phase == .posting ? "Updating…" : "Confirm and update records").fontWeight(.semibold); Spacer() }
-                }.listRowBackground(canPost ? FuelNerveTheme.green : Color.gray.opacity(0.25)).foregroundStyle(.white).disabled(!canPost || phase == .posting)
-                Text("This creates the supplier invoice and accounting journal. Stock receipt and inventory records are also created if selected; payment records are created only if marked paid.")
-                    .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func priceChangeCard(_ assessment: InvoicePriceAssessment) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            brandedSectionTitle("Price change found", symbol: "chart.line.uptrend.xyaxis")
+            Text("\(assessment.productName) purchase price \(assessment.direction == .increase ? "increased" : "decreased")")
+                .font(.headline).foregroundStyle(FuelNerveTheme.forest)
+            Text("\(money(assessment.previousPrice)) → \(money(assessment.invoicePrice)) per \(assessment.unit)")
+                .font(.title3.bold()).foregroundStyle(FuelNerveTheme.gold)
+            Text("Review the retail selling price before the next sale.")
+                .font(.subheadline).foregroundStyle(.secondary)
+        }
+        .padding(18)
+        .background(FuelNerveTheme.gold.opacity(0.09), in: RoundedRectangle(cornerRadius: 22))
+        .overlay(RoundedRectangle(cornerRadius: 22).stroke(FuelNerveTheme.gold.opacity(0.2)))
+    }
+
+    private var warningsCard: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            brandedSectionTitle("Please check", symbol: "exclamationmark.triangle.fill")
+            ForEach(parserWarnings, id: \.self) { warning in
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "circle.fill").font(.system(size: 6)).padding(.top, 6)
+                    Text(warning).font(.subheadline)
+                }
+                .foregroundStyle(FuelNerveTheme.gold)
             }
         }
+        .brandCard()
+    }
+
+    private var stockAndPaymentCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            brandedSectionTitle("When you confirm", symbol: "arrow.triangle.2.circlepath")
+            brandedToggle(
+                title: "Receive stock now",
+                detail: receiveNow ? "Stock and tank records will be updated." : "The bill will be saved without changing stock.",
+                symbol: "shippingbox.fill",
+                isOn: $receiveNow
+            )
+            Divider().overlay(FuelNerveTheme.forest.opacity(0.08))
+            brandedToggle(
+                title: "Already paid",
+                detail: paidNow ? "A payment record will be created." : "The amount will remain payable.",
+                symbol: "indianrupeesign.circle.fill",
+                isOn: $paidNow
+            )
+            if paidNow {
+                HStack(spacing: 12) {
+                    Picker("Paid by", selection: $paymentMethod) {
+                        ForEach(["CASH", "UPI", "CARD", "OTHER"], id: \.self) { Text($0.capitalized).tag($0) }
+                    }
+                    .tint(FuelNerveTheme.green)
+                    TextField("Payment reference", text: $paymentReference)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+        }
+        .brandCard()
+    }
+
+    private var confirmationBar: some View {
+        VStack(spacing: 8) {
+            Button { postInvoice() } label: {
+                HStack(spacing: 10) {
+                    if phase == .posting { ProgressView().tint(.white) }
+                    Image(systemName: phase == .posting ? "arrow.triangle.2.circlepath" : "checkmark.shield.fill")
+                    Text(phase == .posting ? "Updating records…" : "Confirm and update records")
+                        .fontWeight(.bold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 15)
+            }
+            .foregroundStyle(canPost ? .white : FuelNerveTheme.forest.opacity(0.4))
+            .background(canPost ? FuelNerveTheme.forest : Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+            .disabled(!canPost || phase == .posting)
+
+            Text(canPost ? "Nothing changes until you tap confirm." : "Complete the highlighted details to continue.")
+                .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) { Divider().opacity(0.4) }
+    }
+
+    private func brandedSectionTitle(_ title: String, symbol: String) -> some View {
+        Label(title, systemImage: symbol)
+            .font(.headline).foregroundStyle(FuelNerveTheme.forest)
+    }
+
+    private func brandTextField<Content: View>(_ label: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(label).brandFieldLabel()
+            content()
+                .padding(.horizontal, 13).frame(minHeight: 48)
+                .background(FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 13))
+                .overlay(RoundedRectangle(cornerRadius: 13).stroke(FuelNerveTheme.green.opacity(0.16)))
+        }
+    }
+
+    private func brandNumberField(_ label: String, value: Binding<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(label).brandFieldLabel()
+            HStack(spacing: 5) {
+                Text("₹").foregroundStyle(.secondary)
+                TextField("0.00", value: value, format: .number.precision(.fractionLength(2)))
+                    .keyboardType(.decimalPad)
+            }
+            .padding(.horizontal, 12).frame(minHeight: 48)
+            .background(FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 13))
+            .overlay(RoundedRectangle(cornerRadius: 13).stroke(FuelNerveTheme.green.opacity(0.16)))
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func totalTile(_ label: String, _ value: String, emphasis: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.headline).foregroundStyle(FuelNerveTheme.forest).lineLimit(1).minimumScaleFactor(0.75)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(13)
+        .background(emphasis ? FuelNerveTheme.lime.opacity(0.2) : FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func brandedToggle(title: String, detail: String, symbol: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 13) {
+            Image(systemName: symbol)
+                .font(.headline).foregroundStyle(FuelNerveTheme.green)
+                .frame(width: 42, height: 42)
+                .background(FuelNerveTheme.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.headline).foregroundStyle(FuelNerveTheme.forest)
+                Text(detail).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: isOn).labelsHidden().tint(FuelNerveTheme.green)
+        }
+    }
+
+    private func errorCard(_ message: String) -> some View {
+        Label(message, systemImage: "exclamationmark.octagon.fill")
+            .font(.subheadline.weight(.semibold)).foregroundStyle(.red)
+            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.red.opacity(0.06), in: RoundedRectangle(cornerRadius: 18))
     }
 
     private var successView: some View {
@@ -132,10 +525,32 @@ struct InvoiceReviewView: View {
         return references.stations.first { $0.id == session.selectedStationId } ?? references.stations.first
     }
     private var supplier: InvoiceImportBootstrap.Supplier? { references?.suppliers.first { $0.id == supplierId } }
+    private var resolvedPaymentTerms: Int { createNewSupplier ? supplierPaymentTerms : supplier?.paymentTerms ?? 0 }
+    private var validNewSupplier: Bool { newSupplierValidationMessage.isEmpty }
+    private var newSupplierValidationMessage: String {
+        let name = supplierName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = supplierCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        let email = supplierEmail.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.count < 2 { return "Enter the supplier name." }
+        if code.isEmpty { return "Enter a supplier code." }
+        if code.range(of: #"^[A-Z0-9-]+$"#, options: .regularExpression) == nil { return "Use only letters, numbers and hyphens in the supplier code." }
+        if references?.suppliers.contains(where: { $0.code.caseInsensitiveCompare(code) == .orderedSame }) == true { return "This supplier code is already in use." }
+        if supplierTaxId.count > 30 { return "Check the GST number." }
+        if supplierPhone.count > 30 { return "Check the phone number." }
+        if !email.isEmpty && (email.range(of: #"^[^\s@]+@[^\s@]+\.[^\s@]+$"#, options: .regularExpression) == nil) { return "Enter a valid supplier email address." }
+        if supplierAddress.count > 300 { return "The supplier address is too long." }
+        return ""
+    }
+    private var stationAssessment: InvoiceStationAssessment { InvoiceImportSafety.assessStation(consigneeName: consigneeName, stationName: station?.name) }
+    private var priceAssessment: InvoicePriceAssessment? {
+        guard lines.count == 1, let line = lines.first else { return nil }
+        return InvoiceImportSafety.assessSingleProductPrice(invoiceTotal: invoiceTotal, excludedAmount: purchasePriceExcludedAmount, productId: line.productId, description: line.description, quantity: line.quantity, sourceUnit: line.sourceUnit, baseAmount: line.quantity * line.unitCost, taxRate: line.taxRate, products: references?.products ?? [])
+    }
     private var calculatedTotal: Double { lines.reduce(0) { $0 + $1.quantity * $1.unitCost } + taxAmount }
     private var totalsMatch: Bool { invoiceTotal > 0 && abs(invoiceTotal - calculatedTotal) < 0.02 }
     private var canPost: Bool {
-        guard station != nil, supplier != nil, !invoiceNumber.trimmingCharacters(in: .whitespaces).isEmpty, !lines.isEmpty, totalsMatch else { return false }
+        let hasSupplier = createNewSupplier ? validNewSupplier : supplier != nil
+        guard station != nil, stationAssessment.permitsSubmission, hasSupplier, invoiceDate != nil, !invoiceNumber.trimmingCharacters(in: .whitespaces).isEmpty, !lines.isEmpty, totalsMatch else { return false }
         return lines.allSatisfy { $0.quantity > 0 && $0.unitCost >= 0 && !$0.description.trimmingCharacters(in: .whitespaces).isEmpty && (!receiveNow || !$0.productId.isEmpty) && (!receiveNow || tankIsValid(for: $0)) }
     }
     private func tankIsValid(for line: DraftLine) -> Bool {
@@ -160,12 +575,23 @@ struct InvoiceReviewView: View {
 
     private func apply(_ parsed: ParsedInvoice, references: InvoiceImportBootstrap) {
         invoiceNumber = parsed.invoiceNumber ?? ""
-        invoiceDate = parsed.invoiceDate ?? .now
+        consigneeName = parsed.consigneeName ?? ""
+        invoiceDate = parsed.invoiceDate
         invoiceTotal = parsed.total ?? 0
         taxAmount = parsed.tax
-        supplierId = bestSupplier(for: parsed, in: references)?.id ?? ""
+        parserWarnings = parsed.warnings
+        supplierName = parsed.supplierName ?? ""
+        supplierTaxId = parsed.supplierGSTIN ?? ""
+        if let matchedSupplier = bestSupplier(for: parsed, in: references) {
+            supplierId = matchedSupplier.id
+            createNewSupplier = false
+        } else {
+            supplierId = ""
+            supplierCode = uniqueSupplierCode(suggestedSupplierCode(from: supplierName))
+            createNewSupplier = !supplierName.isEmpty
+        }
         lines = parsed.lines.map { item in
-            let product = bestProduct(for: item.description, in: references)
+            let product = bestProduct(for: item, in: references)
             return DraftLine(productId: product?.id ?? "", tankId: product.flatMap { product in station(in: references)?.tanks.first(where: { $0.productId == product.id })?.id } ?? "", description: item.description, quantity: item.quantity, sourceUnit: item.unit ?? product?.unit ?? "", unitCost: item.unitCost, taxRate: product?.taxCategory?.rate.value ?? 0, hsnCode: item.hsnCode ?? product?.hsnCode ?? "")
         }
         if lines.isEmpty { lines = [DraftLine()] }
@@ -179,32 +605,121 @@ struct InvoiceReviewView: View {
         guard let candidate, similarity(normalized(candidate.name), name) >= 4 else { return nil }
         return candidate
     }
-    private func bestProduct(for description: String, in references: InvoiceImportBootstrap) -> InvoiceImportBootstrap.Product? {
-        let value = normalized(description)
-        return references.products.first { product in value.contains(normalized(product.code)) || value.contains(normalized(product.name)) || (product.code.uppercased() == "MS" && value.contains("PETROL")) || (product.code.uppercased() == "HSD" && value.contains("DIESEL")) }
+    private func bestProduct(for item: ParsedInvoice.Line, in references: InvoiceImportBootstrap) -> InvoiceImportBootstrap.Product? {
+        let value = normalized(item.description)
+        let family = normalized(item.product)
+        let hsn = item.hsnCode?.filter(\.isNumber)
+        if let direct = references.products.first(where: { product in value.contains(normalized(product.code)) || value.contains(normalized(product.name)) || (product.code.uppercased() == "MS" && value.contains("PETROL")) || (product.code.uppercased() == "HSD" && value.contains("DIESEL")) }) { return direct }
+        let familyMatches = references.products.filter { normalized($0.code) == family }
+        if familyMatches.count == 1 { return familyMatches[0] }
+        let hsnMatches = references.products.filter { hsn != nil && $0.hsnCode?.filter(\.isNumber) == hsn }
+        return hsnMatches.count == 1 ? hsnMatches[0] : nil
     }
     private func normalized(_ value: String) -> String { value.uppercased().filter(\.isLetter) }
     private func similarity(_ left: String, _ right: String) -> Int { guard !left.isEmpty, !right.isEmpty else { return 0 }; return left == right ? 1000 : (left.contains(right) || right.contains(left) ? min(left.count, right.count) : zip(left, right).prefix { $0 == $1 }.count) }
-    private func dueDate(for supplier: InvoiceImportBootstrap.Supplier) -> Date { Calendar(identifier: .gregorian).date(byAdding: .day, value: supplier.paymentTerms, to: invoiceDate) ?? invoiceDate }
+    private func dueDate(paymentTerms: Int, invoiceDate: Date) -> Date { Calendar(identifier: .gregorian).date(byAdding: .day, value: paymentTerms, to: invoiceDate) ?? invoiceDate }
     private func money(_ value: Double) -> String { value.formatted(.currency(code: "INR")) }
 
+    private func suggestedSupplierCode(from name: String) -> String {
+        let words = name.uppercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+        let initials = words.compactMap(\.first).map(String.init).joined()
+        if initials.count >= 2 { return String(initials.prefix(12)) }
+        return String(words.joined().prefix(12))
+    }
+
+    private func sanitizedSupplierCode(_ value: String) -> String {
+        String(value.uppercased().filter { $0.isLetter || $0.isNumber || $0 == "-" }.prefix(24))
+    }
+
+    private func uniqueSupplierCode(_ proposed: String) -> String {
+        let base = sanitizedSupplierCode(proposed).isEmpty ? "SUPPLIER" : sanitizedSupplierCode(proposed)
+        let used = Set((references?.suppliers ?? []).map { $0.code.uppercased() })
+        if !used.contains(base) { return base }
+        for suffix in 2...99 {
+            let candidate = "\(base)-\(suffix)"
+            if !used.contains(candidate) { return candidate }
+        }
+        return "\(base)-NEW"
+    }
+
     private func postInvoice() {
-        guard canPost, let station, let supplier else { return }
+        guard canPost, let station, let invoiceDate else { return }
         errorMessage = nil; phase = .posting
+        supplierAddedDuringConfirmation = false
+        Task {
+            do {
+                let resolvedSupplier = try await supplierForConfirmation()
+                let submission = makeSubmission(station: station, supplier: resolvedSupplier, invoiceDate: invoiceDate)
+                let posted = try await session.invoiceImportService.post(submission, idempotencyKey: saveKey)
+                postedNumber = posted.invoiceNumber
+                phase = .complete
+            } catch APIError.server(_, let code, let message) {
+                if code == "INVOICE_EXISTS" {
+                    errorMessage = supplierAddedDuringConfirmation
+                        ? "The supplier was added, but this invoice already exists. No duplicate invoice was created."
+                        : "This supplier invoice has already been posted. No duplicate was created."
+                } else {
+                    errorMessage = supplierAddedDuringConfirmation
+                        ? "The supplier was added, but the invoice was not posted. Check the invoice and try again."
+                        : (message ?? "The invoice was not posted. No records were changed.")
+                }
+                phase = .review
+            } catch {
+                session.handleAuthenticationFailure(error)
+                errorMessage = supplierAddedDuringConfirmation
+                    ? "The supplier was added, but the invoice was not posted. Check your connection and try again."
+                    : "The invoice was not posted. Check your connection and try again."
+                phase = .review
+            }
+        }
+    }
+
+    @MainActor private func supplierForConfirmation() async throws -> InvoiceImportBootstrap.Supplier {
+        if !createNewSupplier, let supplier { return supplier }
+        let draft = NewSupplierSubmission(
+            name: supplierName.trimmingCharacters(in: .whitespacesAndNewlines),
+            code: supplierCode.trimmingCharacters(in: .whitespacesAndNewlines),
+            phone: supplierPhone.trimmingCharacters(in: .whitespacesAndNewlines),
+            email: supplierEmail.trimmingCharacters(in: .whitespacesAndNewlines),
+            taxId: supplierTaxId.trimmingCharacters(in: .whitespacesAndNewlines),
+            address: supplierAddress.trimmingCharacters(in: .whitespacesAndNewlines),
+            paymentTerms: supplierPaymentTerms,
+            active: true
+        )
+        do {
+            let created = try await session.invoiceImportService.createSupplier(draft, idempotencyKey: "\(saveKey)-supplier")
+            supplierAddedDuringConfirmation = true
+            supplierId = created.id
+            createNewSupplier = false
+            if let references {
+                self.references = .init(suppliers: references.suppliers + [created], stations: references.stations, products: references.products)
+            }
+            return created
+        } catch APIError.server(_, let code, _) where code == "SUPPLIER_CODE_EXISTS" {
+            let refreshed = try await session.invoiceImportService.bootstrap()
+            references = refreshed
+            if let existing = refreshed.suppliers.first(where: {
+                $0.code.caseInsensitiveCompare(draft.code) == .orderedSame &&
+                (normalized($0.name) == normalized(draft.name) || (!draft.taxId.isEmpty && $0.taxId?.caseInsensitiveCompare(draft.taxId) == .orderedSame))
+            }) {
+                supplierId = existing.id
+                createNewSupplier = false
+                return existing
+            }
+            throw APIError.server(status: 409, code: "SUPPLIER_CODE_EXISTS", message: "That supplier code is already in use. Choose another code.")
+        }
+    }
+
+    private func makeSubmission(station: InvoiceImportBootstrap.Station, supplier: InvoiceImportBootstrap.Supplier, invoiceDate: Date) -> PurchaseInvoiceSubmission {
         let formatter = ISO8601DateFormatter()
-        let submission = PurchaseInvoiceSubmission(
+        return PurchaseInvoiceSubmission(
             stationId: station.id, supplierId: supplier.id, invoiceNumber: invoiceNumber.trimmingCharacters(in: .whitespacesAndNewlines),
-            invoiceDate: formatter.string(from: invoiceDate), dueDate: formatter.string(from: dueDate(for: supplier)), invoiceTotal: invoiceTotal,
-            taxAmount: taxAmount, notes: "Imported with on-device OCR; confirmed by user.", receiveNow: receiveNow, paidNow: paidNow,
+            invoiceDate: formatter.string(from: invoiceDate), dueDate: formatter.string(from: dueDate(paymentTerms: supplier.paymentTerms, invoiceDate: invoiceDate)), invoiceTotal: invoiceTotal,
+            taxAmount: taxAmount, purchasePriceExcludedAmount: purchasePriceExcludedAmount > 0 ? purchasePriceExcludedAmount : nil, notes: "Imported with on-device OCR; confirmed by user.", receiveNow: receiveNow, paidNow: paidNow,
             paymentMethod: paidNow ? paymentMethod : nil, paymentReferenceNo: paidNow && !paymentReference.isEmpty ? paymentReference : nil,
             attachment: document.attachment,
             lines: lines.map { .init(productId: $0.productId.isEmpty ? nil : $0.productId, tankId: $0.tankId.isEmpty ? nil : $0.tankId, description: $0.description, quantity: $0.quantity, sourceUnit: $0.sourceUnit.isEmpty ? nil : $0.sourceUnit, unitCost: $0.unitCost, taxRate: $0.taxRate, hsnCode: $0.hsnCode.isEmpty ? nil : $0.hsnCode) }
         )
-        Task {
-            do { let posted = try await session.invoiceImportService.post(submission, idempotencyKey: saveKey); postedNumber = posted.invoiceNumber; phase = .complete }
-            catch APIError.server(_, let code, let message) { errorMessage = code == "INVOICE_EXISTS" ? "This supplier invoice has already been posted. No duplicate was created." : (message ?? "The invoice was not posted. No records were changed."); phase = .review }
-            catch { session.handleAuthenticationFailure(error); errorMessage = "The invoice was not posted. Check your connection and try again."; phase = .review }
-        }
     }
 }
 
@@ -217,22 +732,28 @@ private struct InvoiceLineEditor: View {
             Picker("Product", selection: $line.productId) {
                 Text("Choose product").tag("")
                 ForEach(products) { Text("\($0.name) (\($0.code))").tag($0.id) }
-            }.onChange(of: line.productId) { _, productId in
+            }
+            .tint(FuelNerveTheme.green)
+            .padding(.horizontal, 11)
+            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+            .background(.white, in: RoundedRectangle(cornerRadius: 12))
+            .onChange(of: line.productId) { _, productId in
                 guard let product = products.first(where: { $0.id == productId }) else { line.tankId = ""; return }
                 if line.description == "Invoice purchase" || line.description.isEmpty { line.description = product.name }
                 line.taxRate = product.taxCategory?.rate.value ?? line.taxRate
                 line.hsnCode = line.hsnCode.isEmpty ? product.hsnCode ?? "" : line.hsnCode
                 line.tankId = station?.tanks.first(where: { $0.productId == productId })?.id ?? ""
             }
-            TextField("Description", text: $line.description)
+            TextField("Description", text: $line.description).brandInput()
             HStack { DecimalField("Quantity", value: $line.quantity); DecimalField("Unit cost", value: $line.unitCost) }
-            TextField("Invoice unit", text: $line.sourceUnit).textInputAutocapitalization(.characters)
-            HStack { DecimalField("Tax %", value: $line.taxRate); TextField("HSN", text: $line.hsnCode).keyboardType(.numberPad) }
+            TextField("Invoice unit", text: $line.sourceUnit).textInputAutocapitalization(.characters).brandInput()
+            HStack { DecimalField("Tax %", value: $line.taxRate); TextField("HSN", text: $line.hsnCode).keyboardType(.numberPad).brandInput() }
             if let product = products.first(where: { $0.id == line.productId }), product.tankLinked {
                 Picker("Receiving tank", selection: $line.tankId) {
                     Text("Choose tank").tag("")
                     ForEach(station?.tanks.filter { $0.productId == product.id } ?? []) { Text($0.code).tag($0.id) }
                 }
+                .tint(FuelNerveTheme.green)
             }
         }.padding(.vertical, 5)
     }
@@ -254,7 +775,7 @@ private struct DecimalField: View {
     let label: String
     @Binding var value: Double
     init(_ label: String, value: Binding<Double>) { self.label = label; _value = value }
-    var body: some View { TextField(label, value: $value, format: .number.precision(.fractionLength(0...3))).keyboardType(.decimalPad).textFieldStyle(.roundedBorder) }
+    var body: some View { TextField(label, value: $value, format: .number.precision(.fractionLength(0...3))).keyboardType(.decimalPad).brandInput() }
 }
 
 private struct CurrencyField: View {
@@ -262,4 +783,30 @@ private struct CurrencyField: View {
     @Binding var value: Double
     init(_ label: String, value: Binding<Double>) { self.label = label; _value = value }
     var body: some View { TextField(label, value: $value, format: .number.precision(.fractionLength(2))).keyboardType(.decimalPad) }
+}
+
+private extension View {
+    func brandCard() -> some View {
+        self
+            .padding(18)
+            .background(.white, in: RoundedRectangle(cornerRadius: 22))
+            .overlay(RoundedRectangle(cornerRadius: 22).stroke(FuelNerveTheme.forest.opacity(0.07)))
+            .shadow(color: FuelNerveTheme.forest.opacity(0.035), radius: 14, y: 6)
+    }
+
+    func brandInput() -> some View {
+        self
+            .padding(.horizontal, 12)
+            .frame(minHeight: 46)
+            .background(.white, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(FuelNerveTheme.green.opacity(0.16)))
+    }
+}
+
+private extension Text {
+    func brandFieldLabel() -> some View {
+        font(.caption2.weight(.bold))
+            .tracking(0.8)
+            .foregroundStyle(FuelNerveTheme.green)
+    }
 }

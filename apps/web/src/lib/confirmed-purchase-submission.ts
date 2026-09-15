@@ -50,6 +50,7 @@ export function buildConfirmedPurchaseInput(draft: EditableInvoiceDraft, station
     dueDate: isoDate(draft.dueDate),
     invoiceTotal: Number(draft.totalAmount),
     taxAmount: Number(draft.taxAmount || 0),
+    purchasePriceExcludedAmount: Number(draft.purchasePriceExcludedAmount || 0) || undefined,
     receiveNow: false,
     paidNow: false,
     attachment: null,
