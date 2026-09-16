@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileCheck2, PackageX, RefreshCw, ShieldCheck, X } from "lucide-react";
-import type { InvoiceImportPolicy, PurchaseInvoice, PurchasesBootstrap } from "../lib/api";
+import type { InvoiceImportPolicy, ProductPriceApprovalNotice, PurchaseInvoice, PurchasesBootstrap } from "../lib/api";
 import { api, ApiRequestError } from "../lib/api";
 import { buildConfirmedPurchaseInput, findDuplicateInvoice, findMatchingProduct, findMatchingSupplier, validateConfirmedPurchase } from "../lib/confirmed-purchase-submission";
 import { flushInvoiceImportPerformance, recordInvoiceImportPerformance } from "../lib/invoice-import-performance";
@@ -14,7 +14,7 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
   isDemo: boolean;
   onBack: () => void;
   onClose: () => void;
-  onSubmitted: (invoice: PurchaseInvoice) => void;
+  onSubmitted: (invoice: PurchaseInvoice, priceApprovals: ProductPriceApprovalNotice[]) => void;
 }) {
   const dialog = useRef<HTMLElement | null>(null);
   const closeButton = useRef<HTMLButtonElement | null>(null);
@@ -27,6 +27,7 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<PurchaseInvoice | null>(null);
+  const [priceApprovals, setPriceApprovals] = useState<ProductPriceApprovalNotice[]>([]);
   const stationAssessment = useMemo(() => assessInvoiceStation(draft.consigneeName, stationName), [draft.consigneeName, stationName]);
 
   useEffect(() => {
@@ -76,8 +77,10 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
     try {
       const input = buildConfirmedPurchaseInput(draft, stationId, supplierId, productIds);
       const result = await api.createImportedPurchaseInvoice(input);
+      const approvals = result.priceApprovals ?? [];
       setCreated(result.invoice);
-      onSubmitted(result.invoice);
+      setPriceApprovals(approvals);
+      onSubmitted(result.invoice, approvals);
       await recordInvoiceImportPerformance({ stage: "SUBMISSION", durationMs: Math.min(120_000, Math.round(performance.now() - startedAt)), outcome: "SUCCESS" }, Boolean(policy.monitored));
     } catch (caught) {
       setError(caught instanceof ApiRequestError ? caught.message : caught instanceof Error ? caught.message : "The invoice could not be created safely.");
@@ -101,7 +104,7 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
 
       {loading && <div className="invoice-submit-loading"><RefreshCw className="spinning"/><strong>Checking suppliers and purchase records…</strong><p>I’m making sure this invoice can be added to the selected fuel station.</p></div>}
 
-      {!loading && created && <div className="invoice-submit-success"><CheckCircle2/><span><small>Invoice created</small><h3>{created.supplier.name} · {money(Number(created.totalAmount))}</h3><p>Invoice {created.invoiceNumber} is now recorded as unpaid. Stock and payment were not changed.</p></span><button type="button" onClick={onClose}>Done</button></div>}
+      {!loading && created && <div className="invoice-submit-success"><CheckCircle2/><span><small>Invoice created</small><h3>{created.supplier.name} · {money(Number(created.totalAmount))}</h3><p>Invoice {created.invoiceNumber} is now recorded as unpaid. Stock and payment were not changed.</p>{priceApprovals.length > 0 && <div className="invoice-submit-price-alert" role="alert"><AlertTriangle/><span><strong>{priceApprovals.length === 1 ? `${priceApprovals[0]!.evidence.product.code} purchase price changed` : `${priceApprovals.length} purchase prices changed`}</strong><small>The owner has been alerted. Purchase Agent will keep this visible until the purchase and retail selling prices are confirmed.</small></span></div>}</span><button type="button" onClick={onClose}>Done</button></div>}
 
       {!loading && !created && <div className="invoice-submit-body">
         <section className="invoice-submit-boundary"><ShieldCheck/><div><strong>Only one unpaid invoice will be created</strong><p>The source document stays on this device. Stock, tanks, supplier payments and bank balances will not change.</p></div></section>

@@ -101,10 +101,15 @@ struct PostedPurchaseInvoice: Decodable, Sendable {
     let invoiceNumber: String
 }
 
+struct PostedPurchaseInvoiceResult: Decodable, Sendable {
+    let invoice: PostedPurchaseInvoice
+    let priceApprovals: [OwnerApproval]?
+}
+
 protocol InvoiceImportService: Sendable {
     func bootstrap() async throws -> InvoiceImportBootstrap
     func createSupplier(_ supplier: NewSupplierSubmission, idempotencyKey: String) async throws -> InvoiceImportBootstrap.Supplier
-    func post(_ invoice: PurchaseInvoiceSubmission, idempotencyKey: String) async throws -> PostedPurchaseInvoice
+    func post(_ invoice: PurchaseInvoiceSubmission, idempotencyKey: String) async throws -> PostedPurchaseInvoiceResult
 }
 
 struct LiveInvoiceImportService: InvoiceImportService {
@@ -116,14 +121,13 @@ struct LiveInvoiceImportService: InvoiceImportService {
         struct Response: Decodable, Sendable { let supplier: InvoiceImportBootstrap.Supplier }
         return try await client.send("purchases/suppliers", body: supplier, idempotencyKey: idempotencyKey, as: Response.self).supplier
     }
-    func post(_ invoice: PurchaseInvoiceSubmission, idempotencyKey: String) async throws -> PostedPurchaseInvoice {
-        struct Response: Decodable, Sendable { let invoice: PostedPurchaseInvoice }
-        return try await client.send("purchases/invoices", body: invoice, idempotencyKey: idempotencyKey, as: Response.self).invoice
+    func post(_ invoice: PurchaseInvoiceSubmission, idempotencyKey: String) async throws -> PostedPurchaseInvoiceResult {
+        try await client.send("purchases/invoices", body: invoice, idempotencyKey: idempotencyKey, as: PostedPurchaseInvoiceResult.self)
     }
 }
 
 struct PreviewInvoiceImportService: InvoiceImportService {
     func bootstrap() async throws -> InvoiceImportBootstrap { .init(suppliers: [], stations: [], products: []) }
     func createSupplier(_ supplier: NewSupplierSubmission, idempotencyKey: String) async throws -> InvoiceImportBootstrap.Supplier { throw APIError.actionDisabled }
-    func post(_ invoice: PurchaseInvoiceSubmission, idempotencyKey: String) async throws -> PostedPurchaseInvoice { throw APIError.actionDisabled }
+    func post(_ invoice: PurchaseInvoiceSubmission, idempotencyKey: String) async throws -> PostedPurchaseInvoiceResult { throw APIError.actionDisabled }
 }

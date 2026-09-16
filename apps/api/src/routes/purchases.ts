@@ -44,11 +44,12 @@ const importPolicy = (user: User) => invoiceImportReleasePolicy({
 async function createInvoiceAndPriceApproval(user: User, input: ReturnType<typeof purchaseInvoiceInputSchema.parse>) {
   const invoice = await service.createInvoice(user.organization.id, user.id, input);
   try {
-    await requestProductPriceChangeFromInvoice(user.organization.id, user.id, invoice, input);
+    const priceApprovals = await requestProductPriceChangeFromInvoice(user.organization.id, user.id, invoice, input);
+    return { invoice, priceApprovals };
   } catch (error) {
     logger.error({ invoiceId: invoice.id, error: error instanceof Error ? error.message : 'Unknown error' }, 'Could not create product price approval after invoice creation');
+    return { invoice, priceApprovals: [] };
   }
-  return invoice;
 }
 
 purchasesRouter.use(authenticate);
@@ -82,13 +83,13 @@ purchasesRouter.post("/invoice-import", async (req, res) => {
   const input = parse(purchaseInvoiceInputSchema.safeParse(req.body), "INVOICE_INVALID", "Please review the invoice details.");
   if (input.receiveNow || input.paidNow || input.attachment) throw new AppError(400, "INVOICE_IMPORT_SCOPE_INVALID", "This confirmation can create only an unpaid invoice. Stock, payment and document storage remain separate.");
   assertStationAccess(req.user!, input.stationId);
-  res.status(201).json({ invoice: await createInvoiceAndPriceApproval(req.user!, input) });
+  res.status(201).json(await createInvoiceAndPriceApproval(req.user!, input));
 });
 
 purchasesRouter.post("/invoices", async (req, res) => {
   const input = parse(purchaseInvoiceInputSchema.safeParse(req.body), "INVOICE_INVALID", "Please review the invoice details.");
   assertStationAccess(req.user!, input.stationId);
-  res.status(201).json({ invoice: await createInvoiceAndPriceApproval(req.user!, input) });
+  res.status(201).json(await createInvoiceAndPriceApproval(req.user!, input));
 });
 purchasesRouter.get("/invoices/:id/price-preview", async (req, res) => res.json(await service.invoicePricePreview(req.user!.organization.id, req.params.id!, permittedStationIds(req.user!), typeof req.query.invoiceDate === "string" ? req.query.invoiceDate : undefined)));
 purchasesRouter.put("/invoices/:id", async (req, res) => {

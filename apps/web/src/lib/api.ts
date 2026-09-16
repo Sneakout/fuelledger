@@ -249,14 +249,14 @@ export const api = {
       body: JSON.stringify(input),
     }),
   createPurchaseInvoice: (input: PurchaseInvoiceInput) =>
-    request<{ invoice: PurchaseInvoice }>("/purchases/invoices", {
+    request<{ invoice: PurchaseInvoice; priceApprovals?: ProductPriceApprovalNotice[] }>("/purchases/invoices", {
       method: "POST",
       body: JSON.stringify(input),
     }),
   invoiceImportPolicy: () =>
     request<InvoiceImportPolicy>("/purchases/invoice-import/policy"),
   createImportedPurchaseInvoice: (input: PurchaseInvoiceInput) =>
-    request<{ invoice: PurchaseInvoice }>("/purchases/invoice-import", {
+    request<{ invoice: PurchaseInvoice; priceApprovals?: ProductPriceApprovalNotice[] }>("/purchases/invoice-import", {
       method: "POST",
       body: JSON.stringify(input),
     }),
@@ -1092,6 +1092,18 @@ export type PurchaseInvoice = {
     correctedAt: string;
     correctedBy: { name: string };
   }>;
+};
+export type ProductPriceApprovalNotice = {
+  id: string;
+  evidence: {
+    product: { id: string; name: string; code: string; unit: string };
+    invoice: { id: string; invoiceNumber: string; totalAmount: number; quantity: number; sourceUnit: string };
+    currentPurchasePrice: number;
+    proposedPurchasePrice: number;
+    currentSellingPrice: number;
+    suggestedSellingPrice: number;
+    purchaseEffectiveFrom: string;
+  };
 };
 export type ReceiptTimingAudit = {
   generatedAt: string;

@@ -93,7 +93,7 @@ export function IntelligenceAgentsPage() {
 
     {data && <section className="nerve-team" aria-label={`Nerve Intelligence specialists for ${selectedStation?.name ?? "the selected station"}`}><div className="nerve-team-heading"><div><span className="eyebrow">Your specialist team</span><h2>Six agents, one clear owner view</h2><p>Each agent watches a specific part of the business. The Owner Assistant connects their findings.</p></div><span>{reviewedAgentCount} reviewed · {team.length - reviewedAgentCount} awaiting review</span></div><div className="nerve-team-grid">{team.map(agent => <AgentTeamCard key={agent.agentKey} agent={agent}/>)}</div></section>}
 
-    <AskNerveBar stationId={selectedStationId} stationName={selectedStation?.name} isDemo={Boolean(user?.demoExpiresAt)}/>
+    <AskNerveBar stationId={selectedStationId} stationName={selectedStation?.name} isDemo={Boolean(user?.demoExpiresAt)} onRecordsChanged={() => void load()}/>
 
     {error && <section className="nerve-unavailable"><MessageCircleQuestion/><div><h2>Nerve Intelligence is temporarily unavailable</h2><p>{error}</p><small>FuelNerve continues working normally.</small></div><button className="secondary" onClick={() => void load()}><RefreshCw/> Try again</button></section>}
     {loading && <div className="loading-inline nerve-loading"><span/><p>Checking the latest records…</p></div>}
@@ -119,7 +119,7 @@ type LocalInvoice = {
   submitted?: { id: string; invoiceNumber: string };
 };
 
-function AskNerveBar({ stationId, stationName, isDemo }: { stationId: string | null; stationName?: string | undefined; isDemo: boolean }) {
+function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { stationId: string | null; stationName?: string | undefined; isDemo: boolean; onRecordsChanged: () => void }) {
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<AskFuelNerveResponse | null>(null);
   const [asking, setAsking] = useState(false);
@@ -330,7 +330,10 @@ function AskNerveBar({ stationId, stationName, isDemo }: { stationId: string | n
       isDemo={isDemo}
       onBack={() => { setSubmittingId(null); setPreviewingId(submittingInvoice.id); }}
       onClose={() => setSubmittingId(null)}
-      onSubmitted={created => setInvoices(current => current.map(invoice => invoice.id === submittingInvoice.id ? { ...invoice, submitted: { id: created.id, invoiceNumber: created.invoiceNumber } } : invoice))}
+      onSubmitted={(created, priceApprovals) => {
+        setInvoices(current => current.map(invoice => invoice.id === submittingInvoice.id ? { ...invoice, submitted: { id: created.id, invoiceNumber: created.invoiceNumber } } : invoice));
+        if (priceApprovals.length > 0) onRecordsChanged();
+      }}
     />}
   </section>;
 }

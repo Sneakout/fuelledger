@@ -12,7 +12,40 @@ type Narrative = { headline: string; summary: string; items: Array<{ factId: str
 const narrativeSchema = z.object({ headline: z.string().min(5).max(90), summary: z.string().min(10).max(240), items: z.array(z.object({ factId: z.string(), explanation: z.string().min(5).max(180), action: z.string().min(3).max(120) })).max(5) });
 const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const money = (value: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
+const priceMoney = (value: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value);
 const severityOrder = { URGENT: 0, ATTENTION: 1, POSITIVE: 2, INFORMATION: 3 } as const;
+
+type PendingPriceApproval = { id: string; evidence: unknown };
+type PriceApprovalEvidence = {
+  product?: { code?: unknown; unit?: unknown };
+  invoice?: { id?: unknown; invoiceNumber?: unknown };
+  currentPurchasePrice?: unknown;
+  proposedPurchasePrice?: unknown;
+};
+
+export function pendingPriceChangeFacts(rows: PendingPriceApproval[]): BriefingFact[] {
+  return rows.flatMap(row => {
+    const evidence = row.evidence as PriceApprovalEvidence | null;
+    const code = typeof evidence?.product?.code === 'string' ? evidence.product.code : null;
+    const unit = typeof evidence?.product?.unit === 'string' ? evidence.product.unit.toLowerCase() : 'unit';
+    const invoiceId = typeof evidence?.invoice?.id === 'string' ? evidence.invoice.id : null;
+    const invoiceNumber = typeof evidence?.invoice?.invoiceNumber === 'string' ? evidence.invoice.invoiceNumber : null;
+    const previous = Number(evidence?.currentPurchasePrice);
+    const proposed = Number(evidence?.proposedPurchasePrice);
+    if (!code || !invoiceId || !invoiceNumber || !Number.isFinite(previous) || !Number.isFinite(proposed) || Math.abs(proposed - previous) < 0.01) return [];
+    const direction = proposed > previous ? 'increased' : 'decreased';
+    return [{
+      id: `price-approval-${row.id}`,
+      category: 'PURCHASES',
+      severity: 'ATTENTION',
+      label: `${code} purchase price ${direction}`,
+      value: `${priceMoney(previous)} → ${priceMoney(proposed)} per ${unit}`,
+      context: `Invoice ${invoiceNumber} changed the observed purchase price. The owner must confirm the purchase price and review the retail selling price.`,
+      evidenceLabel: `Invoice ${invoiceNumber}`,
+      evidencePath: `/purchases?invoiceId=${encodeURIComponent(invoiceId)}`,
+    } satisfies BriefingFact];
+  });
+}
 
 export async function requireIntelligenceAccess(organizationId: string, now = new Date()) {
   const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { intelligenceEnabledAt: true, intelligenceExpiresAt: true } });
@@ -61,9 +94,20 @@ export async function dailyBriefing(organizationId: string, permittedStationIds?
   const now = new Date();
   if (!options.demoAccess) await requireIntelligenceAccess(organizationId, now);
   const today = isoDate(now), yesterdayDate = new Date(now); yesterdayDate.setDate(yesterdayDate.getDate() - 1); const yesterday = isoDate(yesterdayDate);
-  const [dashboard, previous] = await Promise.all([
+  const [dashboard, previous, pendingPriceChanges] = await Promise.all([
     dashboardBootstrap(organizationId, permittedStationIds, stationId),
     buildReport(organizationId, { startDate: yesterday, endDate: yesterday, permittedStationIds, ...(stationId ? { stationId } : {}) }),
+    prisma.approvalRequest.findMany({
+      where: {
+        organizationId,
+        status: 'PENDING',
+        actionType: 'PRODUCT_PRICE_CHANGE',
+        ...(stationId ? { stationId } : permittedStationIds ? { stationId: { in: permittedStationIds } } : {}),
+      },
+      select: { id: true, evidence: true },
+      orderBy: { requestedAt: 'desc' },
+      take: 20,
+    }),
   ]);
   const facts: BriefingFact[] = [];
   const add = (fact: BriefingFact) => facts.push(fact);
@@ -75,6 +119,7 @@ export async function dailyBriefing(organizationId: string, permittedStationIds?
   add({ id: 'profit-today', category: 'PROFIT', severity: dashboard.today.netProfit < 0 ? 'URGENT' : 'INFORMATION', label: 'Net profit today', value: money(dashboard.today.netProfit), context: 'Calculated from posted revenue, cost of sales and operating expenses.', evidenceLabel: 'Profit report', evidencePath: '/reports' });
   if (dashboard.today.receivables > 0) add({ id: 'receivables', category: 'CREDIT', severity: 'ATTENTION', label: 'Customer balances', value: money(dashboard.today.receivables), context: 'Customer ledger balances remain outstanding.', evidenceLabel: 'Customer ledgers', evidencePath: '/customers' });
   if (dashboard.today.payables > 0) add({ id: 'payables', category: 'PURCHASES', severity: 'INFORMATION', label: 'Supplier balances', value: money(dashboard.today.payables), context: 'Open supplier invoices remain payable.', evidenceLabel: 'Supplier invoices', evidencePath: '/purchases' });
+  for (const fact of pendingPriceChangeFacts(pendingPriceChanges)) add(fact);
   facts.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity] || a.id.localeCompare(b.id));
   const stationScope = stationId ?? 'ALL';
   const dateValue = new Date(`${today}T00:00:00.000Z`);

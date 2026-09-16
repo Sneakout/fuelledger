@@ -34,6 +34,8 @@ struct InvoiceReviewView: View {
     @State private var phase = Phase.checking
     @State private var errorMessage: String?
     @State private var postedNumber: String?
+    @State private var priceChangeDetected = false
+    @State private var pendingPriceApprovalId: String?
     @State private var supplierAddedDuringConfirmation = false
     @State private var saveKey = UUID().uuidString
 
@@ -544,14 +546,31 @@ struct InvoiceReviewView: View {
             Text("Invoice \(postedNumber ?? invoiceNumber) was added").font(.title2.bold()).multilineTextAlignment(.center).foregroundStyle(FuelNerveTheme.forest)
             Text(receiveNow ? "The invoice, payable, stock receipt, inventory ledger and accounting entries were updated together." : "The invoice, payable and accounting entries were updated together.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
+            if priceChangeDetected {
+                Label(session.capabilities.approvals
+                      ? "A purchase price change was found. Your owner approval will open next so the purchase and retail selling prices can be confirmed."
+                      : "A purchase price change was found. The owner has been alerted to confirm the purchase and retail selling prices.",
+                      systemImage: "bell.badge.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(FuelNerveTheme.gold)
+                    .multilineTextAlignment(.center)
+            }
             Button("Done") { closeReview() }.buttonStyle(.borderedProminent).tint(FuelNerveTheme.green)
         }.padding(30)
     }
 
     private func closeReview() {
         guard phase != .posting else { return }
+        let approvalId = pendingPriceApprovalId
         onClose()
         dismiss()
+        if let approvalId {
+            UserDefaults.standard.set(approvalId, forKey: PushNavigation.pendingApprovalKey)
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(350))
+                NotificationCenter.default.post(name: .fuelNerveOpenApproval, object: approvalId)
+            }
+        }
     }
 
     private var station: InvoiceImportBootstrap.Station? {
@@ -685,8 +704,10 @@ struct InvoiceReviewView: View {
             do {
                 let resolvedSupplier = try await supplierForConfirmation()
                 let submission = makeSubmission(station: station, supplier: resolvedSupplier, invoiceDate: invoiceDate)
-                let posted = try await session.invoiceImportService.post(submission, idempotencyKey: saveKey)
-                postedNumber = posted.invoiceNumber
+                let result = try await session.invoiceImportService.post(submission, idempotencyKey: saveKey)
+                postedNumber = result.invoice.invoiceNumber
+                priceChangeDetected = !(result.priceApprovals ?? []).isEmpty
+                pendingPriceApprovalId = session.capabilities.approvals ? result.priceApprovals?.first?.id : nil
                 phase = .complete
             } catch APIError.server(_, let code, let message) {
                 if code == "INVOICE_EXISTS" {

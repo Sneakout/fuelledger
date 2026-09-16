@@ -130,6 +130,7 @@ export function PurchasesPage() {
   const [data, setData] = useState<PurchasesBootstrap | null>(null),
     [mode, setMode] = useState<Mode>(null),
     [error, setError] = useState(""),
+    [priceAlert, setPriceAlert] = useState(""),
     [saving, setSaving] = useState(false),
     [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null),
     [file, setFile] = useState<File | null>(null);
@@ -329,7 +330,7 @@ export function PurchasesPage() {
         await load();
         return;
       }
-      await api.createPurchaseInvoice({
+      const result = await api.createPurchaseInvoice({
         ...invoice,
         receivedAt: invoice.receiveNow && receiptTimeEdited ? new Date(invoice.receivedAt).toISOString() : undefined,
         receiptTimingReason: invoice.receiveNow && receiptTimeEdited && invoice.receiptTimingReason ? invoice.receiptTimingReason : undefined,
@@ -360,6 +361,11 @@ export function PurchasesPage() {
           };
         }),
       });
+      const priceApprovals = result.priceApprovals ?? [];
+      if (priceApprovals.length > 0) {
+        const codes = priceApprovals.map(approval => approval.evidence.product.code).join(", ");
+        setPriceAlert(`${codes} purchase price changed. The owner has been alerted, and Purchase Agent will keep the decision visible until purchase and retail selling prices are confirmed.`);
+      }
       setMode(null);
       setFile(null);
       setInvoice((x) => ({
@@ -462,6 +468,7 @@ export function PurchasesPage() {
         </div>
       </div>
       {error && <div className="form-error">{error}</div>}
+      {priceAlert && <div className="purchase-price-alert" role="alert"><AlertTriangle/><span><strong>Owner price confirmation required</strong><small>{priceAlert}</small></span><button type="button" aria-label="Dismiss price alert" onClick={() => setPriceAlert("")}><X/></button></div>}
       <section className="purchase-stats">
         <div>
           <span>
