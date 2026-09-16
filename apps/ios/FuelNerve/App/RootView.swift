@@ -183,6 +183,7 @@ private struct OwnerTabView: View {
         do {
             _ = try await session.approvalService.decide(id: approval.id, approve: true, note: "", version: approval.version, sellingPrice: sellingPrice, sellingPriceEffectiveFrom: effectiveFrom)
             popupCoordinator.completeActive()
+            NotificationCenter.default.post(name: .fuelNerveRecordsChanged, object: nil)
             return true
         } catch APIError.server(let status, _, _) where status == 409 {
             popupCoordinator.completeActive()

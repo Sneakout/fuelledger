@@ -12,10 +12,12 @@ const number=(value:number)=>new Intl.NumberFormat('en-IN',{maximumFractionDigit
 export function DashboardPage(){
   const{user}=useAuth();
   const{selectedStationId,selectedStation}=useStation();
-  const [data,setData]=useState<DashboardBootstrap|null>(null);const [briefing,setBriefing]=useState<DailyBriefingResponse|null>(null);const [intelligenceActive,setIntelligenceActive]=useState(false);const [error,setError]=useState('');
+  const [data,setData]=useState<DashboardBootstrap|null>(null);const [briefing,setBriefing]=useState<DailyBriefingResponse|null>(null);const [intelligenceActive,setIntelligenceActive]=useState(false);const [error,setError]=useState('');const [recordsVersion,setRecordsVersion]=useState(0);
+  useEffect(()=>{const refresh=()=>setRecordsVersion(value=>value+1);const timer=window.setInterval(refresh,30_000);window.addEventListener('fuelnerve:records-changed',refresh);window.addEventListener('focus',refresh);return()=>{window.clearInterval(timer);window.removeEventListener('fuelnerve:records-changed',refresh);window.removeEventListener('focus',refresh);};},[]);
+  useEffect(()=>{setData(null);setBriefing(null);setIntelligenceActive(false);setError('');},[selectedStationId]);
   useEffect(()=>{
     let active=true;
-    setData(null);setBriefing(null);setIntelligenceActive(false);setError('');
+    setError('');
     void Promise.all([api.dashboardBootstrap(selectedStationId||undefined),api.subscription().catch(()=>null)])
       .then(async([dashboard,plan])=>{
         if(!active)return;
@@ -26,7 +28,7 @@ export function DashboardPage(){
       })
       .catch(item=>{if(active)setError(item instanceof ApiRequestError?item.message:'Unable to load the owner dashboard.');});
     return()=>{active=false;};
-  },[selectedStationId,user?.demoExpiresAt]);
+  },[selectedStationId,user?.demoExpiresAt,recordsVersion]);
   const maxTrend=useMemo(()=>Math.max(...(data?.trend.days.map(day=>day.amount)??[]),1),[data]);
   if(!data)return <main className="page"><div className="loading"><span/><p>Preparing the owner overview…</p></div>{error&&<div className="form-error">{error}</div>}</main>;
   const collected=data.collections.filter(row=>!['CREDIT','FLEET'].includes(row.method)).reduce((sum,row)=>sum+row.amount,0);

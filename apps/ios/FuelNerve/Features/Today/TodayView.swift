@@ -15,6 +15,7 @@ struct TodayView: View {
                     VStack(spacing: 18) {
                         StationHero(snapshot: snapshot)
                         if snapshotStale { StaleDataNotice(updatedAt: snapshot.asOf) { Task { await load() } } }
+                        DashboardActionSection(actions: snapshot.alerts)
                         MetricGrid(snapshot: snapshot)
                         ShiftStatusCard(open: snapshot.openShifts, pending: snapshot.pendingReconciliations)
                         TankStockSection(tanks: snapshot.tanks)
@@ -31,6 +32,9 @@ struct TodayView: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { if loading { ProgressView() } } }
             .refreshable { await load() }
             .task(id: session.selectedStationId) { await load() }
+            .task {
+                for await _ in NotificationCenter.default.notifications(named: .fuelNerveRecordsChanged) { await load() }
+            }
         }
     }
 
@@ -50,6 +54,41 @@ struct TodayView: View {
             session.handleAuthenticationFailure(error)
             snapshotStale = snapshot != nil
             if snapshot == nil { self.error = "Please check your connection and fuel station access, then try again." }
+        }
+    }
+}
+
+private struct DashboardActionSection: View {
+    let actions: [OwnerAlert]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("What needs action").font(.title3.bold()).foregroundStyle(FuelNerveTheme.forest)
+                Spacer()
+                Text("\(actions.count)").font(.caption.bold()).foregroundStyle(actions.isEmpty ? FuelNerveTheme.green : FuelNerveTheme.gold)
+                    .frame(minWidth: 30, minHeight: 30).background((actions.isEmpty ? Color.green : Color.orange).opacity(0.1), in: Circle())
+            }
+            if actions.isEmpty {
+                Label("Nothing urgent", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.semibold)).foregroundStyle(FuelNerveTheme.green)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding().background(.white, in: RoundedRectangle(cornerRadius: 18))
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: action.severity == .urgent ? "exclamationmark.triangle.fill" : "bell.badge.fill")
+                                .foregroundStyle(action.severity == .urgent ? .red : FuelNerveTheme.gold).frame(width: 24)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(action.title).font(.subheadline.weight(.bold)).foregroundStyle(FuelNerveTheme.forest)
+                                Text(action.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                        }.padding(.vertical, 13)
+                        if index < actions.count - 1 { Divider() }
+                    }
+                }.padding(.horizontal, 16).background(.white, in: RoundedRectangle(cornerRadius: 18))
+            }
         }
     }
 }

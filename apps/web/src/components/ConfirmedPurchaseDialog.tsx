@@ -81,6 +81,7 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
       setCreated(result.invoice);
       setPriceApprovals(approvals);
       onSubmitted(result.invoice, approvals);
+      window.dispatchEvent(new Event("fuelnerve:records-changed"));
       await recordInvoiceImportPerformance({ stage: "SUBMISSION", durationMs: Math.min(120_000, Math.round(performance.now() - startedAt)), outcome: "SUCCESS" }, Boolean(policy.monitored));
     } catch (caught) {
       setError(caught instanceof ApiRequestError ? caught.message : caught instanceof Error ? caught.message : "The invoice could not be created safely.");

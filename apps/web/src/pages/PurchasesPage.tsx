@@ -366,6 +366,7 @@ export function PurchasesPage() {
         const codes = priceApprovals.map(approval => approval.evidence.product.code).join(", ");
         setPriceAlert(`${codes} purchase price changed. The owner has been alerted, and Purchase Agent will keep the decision visible until purchase and retail selling prices are confirmed.`);
       }
+      window.dispatchEvent(new Event("fuelnerve:records-changed"));
       setMode(null);
       setFile(null);
       setInvoice((x) => ({

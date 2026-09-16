@@ -58,7 +58,7 @@ struct DashboardResponse: Decodable, Sendable {
         let id: String; let code: String; let productCode: String; let bookStock: Double
         let workingCapacity: Double; let fillPercent: Double; let status: String; let station: StationReference
     }
-    struct Action: Decodable, Sendable { let id: String; let severity: String; let title: String; let detail: String }
+    struct Action: Decodable, Sendable { let id: String; let severity: String; let title: String; let detail: String; let href: String }
     let asOf: Date; let today: Summary; let collections: [Collection]; let operations: Operations
     let actions: [Action]; let stationHealth: [Station]; let tankStocks: [Tank]
 }

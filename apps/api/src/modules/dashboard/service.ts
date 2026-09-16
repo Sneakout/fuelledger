@@ -7,12 +7,35 @@ const isoDate=(date:Date)=>`${date.getFullYear()}-${String(date.getMonth()+1).pa
 const startOfDay=(date:Date)=>{const result=new Date(date);result.setHours(0,0,0,0);return result;};
 const addDays=(date:Date,days:number)=>{const result=new Date(date);result.setDate(result.getDate()+days);return result;};
 const number=(value:unknown)=>Number(value??0);
+const money=(value:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(value);
+
+type RecentPurchaseForAction={id:string;invoiceNumber:string;totalAmount:unknown;supplier:{name:string}};
+type PendingPriceApprovalForAction={id:string;reason:string;evidence:unknown};
+type DashboardAction={id:string;severity:'HIGH'|'MEDIUM';title:string;detail:string;href:string};
+
+export function purchaseDashboardActions(recentPurchases:RecentPurchaseForAction[],pendingPriceApprovals:PendingPriceApprovalForAction[]):DashboardAction[]{
+  const priceActions=pendingPriceApprovals.flatMap(row=>{
+    const evidence=row.evidence as {product?:{code?:unknown;unit?:unknown};invoice?:{id?:unknown;invoiceNumber?:unknown};currentPurchasePrice?:unknown;proposedPurchasePrice?:unknown}|null;
+    const code=typeof evidence?.product?.code==='string'?evidence.product.code:null;
+    const unit=typeof evidence?.product?.unit==='string'?evidence.product.unit.toLowerCase():'unit';
+    const invoiceId=typeof evidence?.invoice?.id==='string'?evidence.invoice.id:null;
+    const invoiceNumber=typeof evidence?.invoice?.invoiceNumber==='string'?evidence.invoice.invoiceNumber:null;
+    const previous=Number(evidence?.currentPurchasePrice),proposed=Number(evidence?.proposedPurchasePrice);
+    if(!code||!invoiceId||!invoiceNumber||!Number.isFinite(previous)||!Number.isFinite(proposed)||Math.abs(proposed-previous)<0.01)return[];
+    return[{id:`price-approval-${row.id}`,severity:'HIGH',title:`New invoice ${invoiceNumber} recorded — ${code} price change needs confirmation`,detail:`${money(previous)} → ${money(proposed)} per ${unit}. Confirm the purchase and retail selling prices.`,href:`/purchases?invoiceId=${encodeURIComponent(invoiceId)}`} satisfies DashboardAction];
+  });
+  if(!recentPurchases.length)return priceActions;
+  const total=recentPurchases.reduce((sum,row)=>sum+number(row.totalAmount),0);
+  const latest=recentPurchases[0]!;
+  const purchaseAction:DashboardAction={id:'purchases-recorded-today',severity:'MEDIUM',title:`${recentPurchases.length} new purchase invoice${recentPurchases.length===1?'':'s'} recorded today`,detail:recentPurchases.length===1?`${latest.supplier.name} · ${money(number(latest.totalAmount))} · Invoice ${latest.invoiceNumber}.`:`${money(total)} recorded across ${recentPurchases.length} supplier invoices.`,href:'/purchases'};
+  return[...priceActions,purchaseAction];
+}
 
 export async function bootstrap(organizationId:string,permittedStationIds?:string[],stationId?:string){
   const now=new Date(),today=startOfDay(now),tomorrow=addDays(today,1),weekStart=addDays(today,-6),previousStart=addDays(today,-13);
   const report=await buildReport(organizationId,{startDate:isoDate(today),endDate:isoDate(today),permittedStationIds,...(stationId?{stationId}:{})});
   const scopeIds=stationId?[stationId]:permittedStationIds;
-  const [recentSales,shifts,reconciliations,tanks]=await Promise.all([
+  const [recentSales,shifts,reconciliations,tanks,recentPurchases,pendingPriceApprovals]=await Promise.all([
     prisma.sale.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),occurredAt:{gte:previousStart,lt:tomorrow}},select:{occurredAt:true,totalAmount:true}}),
     prisma.shift.findMany({where:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})},status:{in:['OPEN','RECONCILIATION_REQUIRED']}},select:{id:true,status:true,shiftNumber:true,openedAt:true,closedAt:true,station:{select:{id:true,name:true,code:true}}},orderBy:{openedAt:'desc'}}),
     prisma.shiftReconciliation.findMany({where:{shift:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})}},reconciledAt:{gte:today,lt:tomorrow}},include:{collections:{select:{varianceAmount:true}}}}),
@@ -26,6 +49,8 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
       },
       orderBy:[{configuration:{station:{name:'asc'}}},{code:'asc'}],
     }),
+    prisma.purchaseInvoice.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),createdAt:{gte:today,lt:tomorrow}},select:{id:true,invoiceNumber:true,totalAmount:true,supplier:{select:{name:true}}},orderBy:{createdAt:'desc'},take:20}),
+    prisma.approvalRequest.findMany({where:{organizationId,status:'PENDING',actionType:'PRODUCT_PRICE_CHANGE',...(scopeIds?{stationId:{in:scopeIds}}:{})},select:{id:true,reason:true,evidence:true},orderBy:{requestedAt:'desc'},take:20}),
   ]);
   const bookStockByTank=await tankBookStocksAt(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),now);
   const total=(from:Date,to:Date)=>recentSales.filter(row=>row.occurredAt>=from&&row.occurredAt<to).reduce((sum,row)=>sum+number(row.totalAmount),0);
@@ -36,6 +61,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
   const overdueReceivables=report.customers.reduce((sum,row)=>sum+row.ageing.days31to60+row.ageing.days61to90+row.ageing.days90plus,0);
   const lowStock=report.inventory.filter(row=>row.quantity<=0);
   const actions=[
+    ...purchaseDashboardActions(recentPurchases,pendingPriceApprovals),
     ...(pending.length?[{id:'reconciliation',severity:'HIGH',title:`${pending.length} shift${pending.length===1?'':'s'} waiting for reconciliation`,detail:'Review expected and actual collections, then lock the shift.',href:'/reconciliation'}]:[]),
     ...(report.payables.some(row=>row.overdue)?[{id:'payables',severity:'HIGH',title:`${report.payables.filter(row=>row.overdue).length} overdue supplier invoice${report.payables.filter(row=>row.overdue).length===1?'':'s'}`,detail:`${new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:0}).format(report.payables.filter(row=>row.overdue).reduce((sum,row)=>sum+row.outstanding,0))} needs payment attention.`,href:'/purchases'}]:[]),
     ...(overdueReceivables>0?[{id:'receivables',severity:'MEDIUM',title:'Customer credit is ageing',detail:`₹${Math.round(overdueReceivables).toLocaleString('en-IN')} has been outstanding for more than 30 days.`,href:'/customers'}]:[]),

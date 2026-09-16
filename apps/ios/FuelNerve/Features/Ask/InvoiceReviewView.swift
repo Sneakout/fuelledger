@@ -709,6 +709,7 @@ struct InvoiceReviewView: View {
                 priceChangeDetected = !(result.priceApprovals ?? []).isEmpty
                 pendingPriceApprovalId = session.capabilities.approvals ? result.priceApprovals?.first?.id : nil
                 phase = .complete
+                NotificationCenter.default.post(name: .fuelNerveRecordsChanged, object: nil)
             } catch APIError.server(_, let code, let message) {
                 if code == "INVOICE_EXISTS" {
                     errorMessage = supplierAddedDuringConfirmation

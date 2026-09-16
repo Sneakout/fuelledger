@@ -6,6 +6,7 @@ extension Notification.Name {
     static let fuelNervePushToken = Notification.Name("fuelNervePushToken")
     static let fuelNerveOpenApproval = Notification.Name("fuelNerveOpenApproval")
     static let fuelNerveOpenBriefing = Notification.Name("fuelNerveOpenBriefing")
+    static let fuelNerveRecordsChanged = Notification.Name("fuelNerveRecordsChanged")
 }
 
 enum PushNavigation {
