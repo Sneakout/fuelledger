@@ -81,6 +81,33 @@ struct InvoiceImportTests {
         #expect(result.warnings.contains { $0.contains("quantity and rate do not match") })
     }
 
+    @Test func parsesVisionColumnarLayoutAndDoesNotTreatTaxPercentageAsRupees() {
+        let result = InvoiceTextParser.parse("""
+        Indian Oil Corporation Limited
+        TAX INVOICE 20274247B025710
+        Date 31-Aug-26
+        HSD-BSVI
+        QUANTITY. UNIT
+        12.000
+        KL
+        RATE: UNIT
+        79341.270
+        HSN CODE
+        27101944
+        TOTAL FOR MATERIAL
+        952095.24
+        Social Cess 2%
+        Total 1207079.00
+        """)
+
+        #expect(result.lines.count == 1)
+        #expect(result.lines.first?.product == "HSD")
+        #expect(result.lines.first?.quantity == 12)
+        #expect(result.lines.first?.unitCost == 79_341.27)
+        #expect(result.tax == 254_983.76)
+        #expect(result.tax != 2)
+    }
+
     @Test(arguments: [
         ("MS-BS VI", "MS"), ("XP95", "MS"), ("XP100", "MS"), ("XTRAPREMIUM", "MS"),
         ("Speed 97", "MS"), ("Power95", "MS"), ("XtraGreen", "HSD"), ("XtraMile", "HSD"),

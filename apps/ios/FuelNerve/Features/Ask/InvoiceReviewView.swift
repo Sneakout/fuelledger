@@ -23,6 +23,7 @@ struct InvoiceReviewView: View {
     @State private var invoiceTotal = 0.0
     @State private var taxAmount = 0.0
     @State private var purchasePriceExcludedAmount = 0.0
+    @State private var showAdjustments = false
     @State private var lines: [DraftLine] = []
     @State private var parserWarnings: [String] = []
     @State private var receiveNow = true
@@ -81,7 +82,7 @@ struct InvoiceReviewView: View {
 
     private var reviewForm: some View {
         ScrollView {
-            LazyVStack(spacing: 16) {
+            LazyVStack(spacing: 12) {
                 reviewHero
                 invoiceDetailsCard
                 itemsCard
@@ -92,9 +93,9 @@ struct InvoiceReviewView: View {
                 stockAndPaymentCard
                 if let errorMessage { errorCard(errorMessage) }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 12)
-            .padding(.bottom, 24)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
         }
         .background(FuelNerveTheme.canvas)
         .safeAreaInset(edge: .bottom, spacing: 0) { confirmationBar }
@@ -118,7 +119,7 @@ struct InvoiceReviewView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(18)
+        .padding(14)
         .background(
             LinearGradient(
                 colors: [FuelNerveTheme.lime.opacity(0.22), .white],
@@ -131,7 +132,7 @@ struct InvoiceReviewView: View {
     }
 
     private var invoiceDetailsCard: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 12) {
             brandedSectionTitle("Invoice details", symbol: "doc.plaintext")
 
             VStack(alignment: .leading, spacing: 5) {
@@ -177,9 +178,22 @@ struct InvoiceReviewView: View {
                 brandNumberField("TAXES & CHARGES", value: $taxAmount)
             }
 
-            brandNumberField("NON-PRODUCT ADJUSTMENTS · OPTIONAL", value: $purchasePriceExcludedAmount)
-            Text("Use this only for deposits, refundable amounts or unrelated charges. It is excluded from the product purchase price.")
-                .font(.caption).foregroundStyle(.secondary)
+            DisclosureGroup(isExpanded: $showAdjustments) {
+                VStack(alignment: .leading, spacing: 6) {
+                    brandNumberField("NON-PRODUCT ADJUSTMENTS", value: $purchasePriceExcludedAmount)
+                    Text("Deposits or unrelated charges only. This is excluded from the product purchase price.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                .padding(.top, 8)
+            } label: {
+                HStack {
+                    Text("Other adjustments (optional)")
+                        .font(.subheadline.weight(.semibold)).foregroundStyle(FuelNerveTheme.green)
+                    Spacer()
+                    if purchasePriceExcludedAmount > 0 { Text(money(purchasePriceExcludedAmount)).font(.caption.bold()) }
+                }
+            }
+            .tint(FuelNerveTheme.green)
 
             if let invoiceDate {
                 HStack {
@@ -191,7 +205,7 @@ struct InvoiceReviewView: View {
             }
 
             if document.attachment == nil {
-                Label("The original is too large to attach. The checked details can still be saved.", systemImage: "paperclip.badge.ellipsis")
+                Label("Original too large to attach; checked details can still be saved.", systemImage: "paperclip.badge.ellipsis")
                     .font(.caption).foregroundStyle(FuelNerveTheme.gold)
             }
         }
@@ -222,7 +236,7 @@ struct InvoiceReviewView: View {
                     }
                     InvoiceLineEditor(line: $lines[index], products: references?.products ?? [], station: station)
                 }
-                .padding(14)
+                .padding(12)
                 .background(FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 16))
             }
 
@@ -599,7 +613,7 @@ struct InvoiceReviewView: View {
         }
         lines = parsed.lines.map { item in
             let product = bestProduct(for: item, in: references)
-            return DraftLine(productId: product?.id ?? "", tankId: product.flatMap { product in station(in: references)?.tanks.first(where: { $0.productId == product.id })?.id } ?? "", description: item.description, quantity: item.quantity, sourceUnit: item.unit ?? product?.unit ?? "", unitCost: item.unitCost, taxRate: product?.taxCategory?.rate.value ?? 0, hsnCode: item.hsnCode ?? product?.hsnCode ?? "", detectedProduct: item.product)
+            return DraftLine(productId: product?.id ?? "", tankId: product.flatMap { product in station(in: references)?.tanks.first(where: { $0.productId == product.id })?.id } ?? "", description: item.description, quantity: item.quantity, sourceUnit: item.unit ?? product?.unit ?? "", unitCost: item.unitCost, taxRate: product?.taxCategory?.rate.value ?? 0, hsnCode: item.hsnCode ?? product?.hsnCode ?? "", detectedProduct: item.product, isExpanded: false)
         }
         if lines.isEmpty { lines = [DraftLine()] }
     }
@@ -735,92 +749,91 @@ private struct InvoiceLineEditor: View {
     let products: [InvoiceImportBootstrap.Product]
     let station: InvoiceImportBootstrap.Station?
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 7) {
-                Text("DESCRIPTION").brandFieldLabel()
-                TextField("Description", text: $line.description).brandInput()
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(line.description.isEmpty ? "Product not clearly found" : line.description)
+                        .font(.headline).foregroundStyle(FuelNerveTheme.forest)
+                    Text(productSummary)
+                        .font(.caption).foregroundStyle(line.description.isEmpty ? FuelNerveTheme.gold : Color.secondary)
+                }
+                Spacer(minLength: 8)
+                Text((line.quantity * line.unitCost).formatted(.currency(code: "INR")))
+                    .font(.subheadline.bold()).foregroundStyle(FuelNerveTheme.forest)
+                    .multilineTextAlignment(.trailing)
             }
 
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("PRODUCT").brandFieldLabel()
-                    Picker("Product", selection: $line.productId) {
-                        Text(line.detectedProduct.isEmpty ? "Choose product" : line.detectedProduct).tag("")
-                        ForEach(products) { Text("\($0.name) (\($0.code))").tag($0.id) }
+            DisclosureGroup(isExpanded: $line.isExpanded) {
+                VStack(alignment: .leading, spacing: 10) {
+                    labeledField("DESCRIPTION") { TextField("Description", text: $line.description).brandInput() }
+
+                    HStack(alignment: .top, spacing: 10) {
+                        labeledField("PRODUCT") {
+                            Picker("Product", selection: $line.productId) {
+                                Text(line.detectedProduct.isEmpty ? "Choose product" : line.detectedProduct).tag("")
+                                ForEach(products) { Text("\($0.name) (\($0.code))").tag($0.id) }
+                            }
+                            .tint(FuelNerveTheme.green)
+                            .padding(.horizontal, 11)
+                            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+                            .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        labeledField("HSN") { TextField("Optional", text: $line.hsnCode).keyboardType(.numberPad).brandInput() }
+                            .frame(maxWidth: 120)
                     }
-                    .tint(FuelNerveTheme.green)
-                    .padding(.horizontal, 11)
-                    .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
-                    .background(.white, in: RoundedRectangle(cornerRadius: 12))
-                    .onChange(of: line.productId) { _, productId in
-                        guard let product = products.first(where: { $0.id == productId }) else { line.tankId = ""; return }
-                        line.detectedProduct = product.code.uppercased()
-                        if line.description == "Invoice purchase" || line.description.isEmpty { line.description = product.name }
-                        line.taxRate = product.taxCategory?.rate.value ?? line.taxRate
-                        line.hsnCode = line.hsnCode.isEmpty ? product.hsnCode ?? "" : line.hsnCode
-                        line.tankId = station?.tanks.first(where: { $0.productId == productId })?.id ?? ""
+
+                    HStack(alignment: .top, spacing: 10) {
+                        labeledField("QUANTITY") { DecimalField("Quantity", value: $line.quantity) }
+                        labeledField("UNIT") { TextField("KL or L", text: $line.sourceUnit).textInputAutocapitalization(.characters).brandInput() }
                     }
+                    HStack(alignment: .top, spacing: 10) {
+                        labeledField("RATE") { DecimalField("Rate", value: $line.unitCost) }
+                        labeledField("TAX %") { DecimalField("Tax %", value: $line.taxRate) }
+                    }
+
                     if line.productId.isEmpty && !line.detectedProduct.isEmpty {
                         Text("Detected as \(line.detectedProduct). Choose the matching FuelNerve product before receiving stock.")
                             .font(.caption2).foregroundStyle(FuelNerveTheme.gold)
                     }
+                    if let product = products.first(where: { $0.id == line.productId }), product.tankLinked {
+                        Picker("Receiving tank", selection: $line.tankId) {
+                            Text("Choose tank").tag("")
+                            ForEach(station?.tanks.filter { $0.productId == product.id } ?? []) { Text($0.code).tag($0.id) }
+                        }
+                        .tint(FuelNerveTheme.green)
+                    }
                 }
-
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("HSN").brandFieldLabel()
-                    TextField("Optional", text: $line.hsnCode).keyboardType(.numberPad).brandInput()
-                }
-                .frame(maxWidth: 120)
+                .padding(.top, 9)
+            } label: {
+                Text(line.isExpanded ? "Hide details" : "Review details")
+                    .font(.caption.weight(.bold)).foregroundStyle(FuelNerveTheme.green)
             }
-
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("QUANTITY").brandFieldLabel()
-                    DecimalField("Quantity", value: $line.quantity)
-                }
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("UNIT").brandFieldLabel()
-                    TextField("KL or L", text: $line.sourceUnit).textInputAutocapitalization(.characters).brandInput()
-                }
+            .tint(FuelNerveTheme.green)
+            .onChange(of: line.productId) { _, productId in
+                guard let product = products.first(where: { $0.id == productId }) else { line.tankId = ""; return }
+                line.detectedProduct = product.code.uppercased()
+                if line.description == "Invoice purchase" || line.description.isEmpty { line.description = product.name }
+                line.taxRate = product.taxCategory?.rate.value ?? line.taxRate
+                line.hsnCode = line.hsnCode.isEmpty ? product.hsnCode ?? "" : line.hsnCode
+                line.tankId = station?.tanks.first(where: { $0.productId == productId })?.id ?? ""
             }
+        }
+    }
 
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("RATE").brandFieldLabel()
-                    DecimalField("Rate", value: $line.unitCost)
-                }
-                VStack(alignment: .leading, spacing: 7) {
-                    Text("TAX %").brandFieldLabel()
-                    DecimalField("Tax %", value: $line.taxRate)
-                }
-            }
+    private var productSummary: String {
+        let product = line.detectedProduct.isEmpty ? "Unidentified" : line.detectedProduct.replacingOccurrences(of: "_", with: " ")
+        let quantity = line.quantity.formatted(.number.precision(.fractionLength(0...3)))
+        let measure = line.sourceUnit.isEmpty ? quantity : "\(quantity) \(line.sourceUnit.uppercased())"
+        let hsn = line.hsnCode.isEmpty ? nil : "HSN \(line.hsnCode)"
+        return ([product, measure] + [hsn].compactMap { $0 }).joined(separator: " · ")
+    }
 
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("AMOUNT").brandFieldLabel()
-                    Text((line.quantity * line.unitCost).formatted(.currency(code: "INR")))
-                        .font(.headline).foregroundStyle(FuelNerveTheme.forest)
-                }
-                Spacer()
-                if !line.detectedProduct.isEmpty {
-                    Text(line.detectedProduct.replacingOccurrences(of: "_", with: " "))
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(FuelNerveTheme.green)
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(FuelNerveTheme.green.opacity(0.08), in: Capsule())
-                }
-            }
-            .padding(12)
-            .background(.white, in: RoundedRectangle(cornerRadius: 12))
-
-            if let product = products.first(where: { $0.id == line.productId }), product.tankLinked {
-                Picker("Receiving tank", selection: $line.tankId) {
-                    Text("Choose tank").tag("")
-                    ForEach(station?.tanks.filter { $0.productId == product.id } ?? []) { Text($0.code).tag($0.id) }
-                }
-                .tint(FuelNerveTheme.green)
-            }
-        }.padding(.vertical, 5)
+    private func labeledField<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).brandFieldLabel()
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -835,6 +848,7 @@ fileprivate struct DraftLine: Identifiable {
     var taxRate = 0.0
     var hsnCode = ""
     var detectedProduct = ""
+    var isExpanded = true
 }
 
 private struct DecimalField: View {
@@ -854,10 +868,10 @@ private struct CurrencyField: View {
 private extension View {
     func brandCard() -> some View {
         self
-            .padding(18)
-            .background(.white, in: RoundedRectangle(cornerRadius: 22))
-            .overlay(RoundedRectangle(cornerRadius: 22).stroke(FuelNerveTheme.forest.opacity(0.07)))
-            .shadow(color: FuelNerveTheme.forest.opacity(0.035), radius: 14, y: 6)
+            .padding(15)
+            .background(.white, in: RoundedRectangle(cornerRadius: 19))
+            .overlay(RoundedRectangle(cornerRadius: 19).stroke(FuelNerveTheme.forest.opacity(0.07)))
+            .shadow(color: FuelNerveTheme.forest.opacity(0.03), radius: 10, y: 4)
     }
 
     func brandInput() -> some View {

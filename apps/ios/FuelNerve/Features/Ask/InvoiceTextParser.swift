@@ -63,10 +63,10 @@ enum InvoiceTextParser {
         let total = findInvoiceTotal(lines)
         let subtotal = findAmount(lines, label: #"\b(?:taxable\s+(?:amount|value)|sub\s*total|basic\s+amount)\b"#)
         let components = [
-            findAmount(lines, label: #"\bCGST\b"#),
-            findAmount(lines, label: #"\bSGST\b"#),
-            findAmount(lines, label: #"\bIGST\b"#),
-            findAmount(lines, label: #"\b(?:CESS|TCS)\b"#),
+            findTaxComponent(lines, label: #"\bCGST\b"#),
+            findTaxComponent(lines, label: #"\bSGST\b"#),
+            findTaxComponent(lines, label: #"\bIGST\b"#),
+            findTaxComponent(lines, label: #"\b(?:CESS|TCS)\b"#),
         ]
         let explicitTax = findAmount(lines, label: #"\b(?:total\s+tax|tax\s+amount)\b"#)
         let componentTax = components.compactMap { $0 }.reduce(0, +)
@@ -255,6 +255,15 @@ enum InvoiceTextParser {
         return nil
     }
 
+    private static func findTaxComponent(_ lines: [SourceLine], label: String) -> Double? {
+        for line in lines.reversed() where matches(line.text, label) && !matches(line.text, #"\b(?:GSTIN|tax\s+invoice|invoice\s+(?:no|number))\b"#) {
+            let values = numericValues(line.text)
+            if line.text.contains("%"), values.count == 1 { continue }
+            if let amount = values.last { return amount }
+        }
+        return nil
+    }
+
     private static func parseItemLines(_ lines: [SourceLine]) -> [ParsedInvoice.Line] {
         var parsed: [ParsedInvoice.Line] = []
         for (index, line) in lines.enumerated() {
@@ -285,9 +294,9 @@ enum InvoiceTextParser {
             return findProduct(line.text)
         }
         guard !products.isEmpty,
-              let quantityHeading = lines.firstIndex(where: { matches($0.text, #"^QUANTITY\s+UNIT$"#) }),
-              let rateHeading = lines[quantityHeading...].firstIndex(where: { matches($0.text, #"^RATE\s+UNIT$"#) }),
-              let hsnHeading = lines[rateHeading...].firstIndex(where: { matches($0.text, #"^HSN\s+CODE$"#) }) else { return [] }
+              let quantityHeading = lines.firstIndex(where: { matches($0.text, #"^QUANTITY[\s.:_-]+UNIT\b"#) }),
+              let rateHeading = lines[quantityHeading...].firstIndex(where: { matches($0.text, #"^RATE[\s.:_-]+UNIT\b"#) }),
+              let hsnHeading = lines[rateHeading...].firstIndex(where: { matches($0.text, #"^HSN[\s.:_-]+CODE\b"#) }) else { return [] }
 
         var measures: [(quantity: Double, unit: String)] = []
         var index = quantityHeading + 1
