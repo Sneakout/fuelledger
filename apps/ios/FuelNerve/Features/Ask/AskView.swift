@@ -117,7 +117,7 @@ struct AskView: View {
                 } catch { message = "FuelNerve could not open that invoice file." }
             }
             .sheet(item: $invoiceDocument) { document in
-                InvoiceReviewView(document: document)
+                InvoiceReviewView(document: document) { invoiceDocument = nil }
             }
         }
     }

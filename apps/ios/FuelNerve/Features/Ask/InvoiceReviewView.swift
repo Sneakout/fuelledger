@@ -4,6 +4,7 @@ struct InvoiceReviewView: View {
     @Environment(AppSession.self) private var session
     @Environment(\.dismiss) private var dismiss
     let document: InvoiceSourceDocument
+    var onClose: () -> Void = {}
 
     @State private var references: InvoiceImportBootstrap?
     @State private var rawText = ""
@@ -51,7 +52,10 @@ struct InvoiceReviewView: View {
             .toolbarBackground(FuelNerveTheme.canvas, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button(phase == .complete ? "Done" : "Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(phase == .complete ? "Done" : "Cancel") { closeReview() }
+                        .disabled(phase == .posting)
+                }
             }
             .interactiveDismissDisabled(phase == .posting)
             .task { await readDocument() }
@@ -81,24 +85,26 @@ struct InvoiceReviewView: View {
     }
 
     private var reviewForm: some View {
-        ScrollView {
-            LazyVStack(spacing: 12) {
-                reviewHero
-                invoiceDetailsCard
-                itemsCard
-                if let priceAssessment, priceAssessment.direction != .unchanged {
-                    priceChangeCard(priceAssessment)
+        VStack(spacing: 0) {
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    reviewHero
+                    invoiceDetailsCard
+                    itemsCard
+                    if let priceAssessment, priceAssessment.direction != .unchanged {
+                        priceChangeCard(priceAssessment)
+                    }
+                    if !parserWarnings.isEmpty { warningsCard }
+                    stockAndPaymentCard
+                    if let errorMessage { errorCard(errorMessage) }
                 }
-                if !parserWarnings.isEmpty { warningsCard }
-                stockAndPaymentCard
-                if let errorMessage { errorCard(errorMessage) }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
             }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 16)
+            confirmationBar
         }
         .background(FuelNerveTheme.canvas)
-        .safeAreaInset(edge: .bottom, spacing: 0) { confirmationBar }
     }
 
     private var reviewHero: some View {
@@ -456,6 +462,8 @@ struct InvoiceReviewView: View {
             }
             .foregroundStyle(canPost ? .white : FuelNerveTheme.forest.opacity(0.4))
             .background(canPost ? FuelNerveTheme.forest : Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+            .contentShape(Rectangle())
+            .buttonStyle(.plain)
             .disabled(!canPost || phase == .posting)
 
             Text(canPost ? "Nothing changes until you tap confirm." : "Complete the highlighted details to continue.")
@@ -536,8 +544,14 @@ struct InvoiceReviewView: View {
             Text("Invoice \(postedNumber ?? invoiceNumber) was added").font(.title2.bold()).multilineTextAlignment(.center).foregroundStyle(FuelNerveTheme.forest)
             Text(receiveNow ? "The invoice, payable, stock receipt, inventory ledger and accounting entries were updated together." : "The invoice, payable and accounting entries were updated together.")
                 .multilineTextAlignment(.center).foregroundStyle(.secondary)
-            Button("Done") { dismiss() }.buttonStyle(.borderedProminent).tint(FuelNerveTheme.green)
+            Button("Done") { closeReview() }.buttonStyle(.borderedProminent).tint(FuelNerveTheme.green)
         }.padding(30)
+    }
+
+    private func closeReview() {
+        guard phase != .posting else { return }
+        onClose()
+        dismiss()
     }
 
     private var station: InvoiceImportBootstrap.Station? {
