@@ -226,9 +226,15 @@ struct InvoiceReviewView: View {
                 .background(FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 16))
             }
 
-            HStack(spacing: 10) {
-                totalTile("Items + tax", money(calculatedTotal), emphasis: false)
-                totalTile("Invoice total", money(invoiceTotal), emphasis: totalsMatch)
+            VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    totalTile("Products", money(productSubtotal), emphasis: false)
+                    totalTile("Taxes & charges", money(taxAmount), emphasis: false)
+                }
+                HStack(spacing: 10) {
+                    totalTile("Calculated total", money(calculatedTotal), emphasis: false)
+                    totalTile("Invoice total", money(invoiceTotal), emphasis: totalsMatch)
+                }
             }
 
             if !totalsMatch {
@@ -546,7 +552,8 @@ struct InvoiceReviewView: View {
         guard lines.count == 1, let line = lines.first else { return nil }
         return InvoiceImportSafety.assessSingleProductPrice(invoiceTotal: invoiceTotal, excludedAmount: purchasePriceExcludedAmount, productId: line.productId, description: line.description, quantity: line.quantity, sourceUnit: line.sourceUnit, baseAmount: line.quantity * line.unitCost, taxRate: line.taxRate, products: references?.products ?? [])
     }
-    private var calculatedTotal: Double { lines.reduce(0) { $0 + $1.quantity * $1.unitCost } + taxAmount }
+    private var productSubtotal: Double { lines.reduce(0) { $0 + $1.quantity * $1.unitCost } }
+    private var calculatedTotal: Double { productSubtotal + taxAmount }
     private var totalsMatch: Bool { invoiceTotal > 0 && abs(invoiceTotal - calculatedTotal) < 0.02 }
     private var canPost: Bool {
         let hasSupplier = createNewSupplier ? validNewSupplier : supplier != nil
@@ -592,7 +599,7 @@ struct InvoiceReviewView: View {
         }
         lines = parsed.lines.map { item in
             let product = bestProduct(for: item, in: references)
-            return DraftLine(productId: product?.id ?? "", tankId: product.flatMap { product in station(in: references)?.tanks.first(where: { $0.productId == product.id })?.id } ?? "", description: item.description, quantity: item.quantity, sourceUnit: item.unit ?? product?.unit ?? "", unitCost: item.unitCost, taxRate: product?.taxCategory?.rate.value ?? 0, hsnCode: item.hsnCode ?? product?.hsnCode ?? "")
+            return DraftLine(productId: product?.id ?? "", tankId: product.flatMap { product in station(in: references)?.tanks.first(where: { $0.productId == product.id })?.id } ?? "", description: item.description, quantity: item.quantity, sourceUnit: item.unit ?? product?.unit ?? "", unitCost: item.unitCost, taxRate: product?.taxCategory?.rate.value ?? 0, hsnCode: item.hsnCode ?? product?.hsnCode ?? "", detectedProduct: item.product)
         }
         if lines.isEmpty { lines = [DraftLine()] }
     }
@@ -728,26 +735,84 @@ private struct InvoiceLineEditor: View {
     let products: [InvoiceImportBootstrap.Product]
     let station: InvoiceImportBootstrap.Station?
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Picker("Product", selection: $line.productId) {
-                Text("Choose product").tag("")
-                ForEach(products) { Text("\($0.name) (\($0.code))").tag($0.id) }
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("DESCRIPTION").brandFieldLabel()
+                TextField("Description", text: $line.description).brandInput()
             }
-            .tint(FuelNerveTheme.green)
-            .padding(.horizontal, 11)
-            .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("PRODUCT").brandFieldLabel()
+                    Picker("Product", selection: $line.productId) {
+                        Text(line.detectedProduct.isEmpty ? "Choose product" : line.detectedProduct).tag("")
+                        ForEach(products) { Text("\($0.name) (\($0.code))").tag($0.id) }
+                    }
+                    .tint(FuelNerveTheme.green)
+                    .padding(.horizontal, 11)
+                    .frame(maxWidth: .infinity, minHeight: 46, alignment: .leading)
+                    .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                    .onChange(of: line.productId) { _, productId in
+                        guard let product = products.first(where: { $0.id == productId }) else { line.tankId = ""; return }
+                        line.detectedProduct = product.code.uppercased()
+                        if line.description == "Invoice purchase" || line.description.isEmpty { line.description = product.name }
+                        line.taxRate = product.taxCategory?.rate.value ?? line.taxRate
+                        line.hsnCode = line.hsnCode.isEmpty ? product.hsnCode ?? "" : line.hsnCode
+                        line.tankId = station?.tanks.first(where: { $0.productId == productId })?.id ?? ""
+                    }
+                    if line.productId.isEmpty && !line.detectedProduct.isEmpty {
+                        Text("Detected as \(line.detectedProduct). Choose the matching FuelNerve product before receiving stock.")
+                            .font(.caption2).foregroundStyle(FuelNerveTheme.gold)
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("HSN").brandFieldLabel()
+                    TextField("Optional", text: $line.hsnCode).keyboardType(.numberPad).brandInput()
+                }
+                .frame(maxWidth: 120)
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("QUANTITY").brandFieldLabel()
+                    DecimalField("Quantity", value: $line.quantity)
+                }
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("UNIT").brandFieldLabel()
+                    TextField("KL or L", text: $line.sourceUnit).textInputAutocapitalization(.characters).brandInput()
+                }
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("RATE").brandFieldLabel()
+                    DecimalField("Rate", value: $line.unitCost)
+                }
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("TAX %").brandFieldLabel()
+                    DecimalField("Tax %", value: $line.taxRate)
+                }
+            }
+
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("AMOUNT").brandFieldLabel()
+                    Text((line.quantity * line.unitCost).formatted(.currency(code: "INR")))
+                        .font(.headline).foregroundStyle(FuelNerveTheme.forest)
+                }
+                Spacer()
+                if !line.detectedProduct.isEmpty {
+                    Text(line.detectedProduct.replacingOccurrences(of: "_", with: " "))
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(FuelNerveTheme.green)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(FuelNerveTheme.green.opacity(0.08), in: Capsule())
+                }
+            }
+            .padding(12)
             .background(.white, in: RoundedRectangle(cornerRadius: 12))
-            .onChange(of: line.productId) { _, productId in
-                guard let product = products.first(where: { $0.id == productId }) else { line.tankId = ""; return }
-                if line.description == "Invoice purchase" || line.description.isEmpty { line.description = product.name }
-                line.taxRate = product.taxCategory?.rate.value ?? line.taxRate
-                line.hsnCode = line.hsnCode.isEmpty ? product.hsnCode ?? "" : line.hsnCode
-                line.tankId = station?.tanks.first(where: { $0.productId == productId })?.id ?? ""
-            }
-            TextField("Description", text: $line.description).brandInput()
-            HStack { DecimalField("Quantity", value: $line.quantity); DecimalField("Unit cost", value: $line.unitCost) }
-            TextField("Invoice unit", text: $line.sourceUnit).textInputAutocapitalization(.characters).brandInput()
-            HStack { DecimalField("Tax %", value: $line.taxRate); TextField("HSN", text: $line.hsnCode).keyboardType(.numberPad).brandInput() }
+
             if let product = products.first(where: { $0.id == line.productId }), product.tankLinked {
                 Picker("Receiving tank", selection: $line.tankId) {
                     Text("Choose tank").tag("")
@@ -769,6 +834,7 @@ fileprivate struct DraftLine: Identifiable {
     var unitCost = 0.0
     var taxRate = 0.0
     var hsnCode = ""
+    var detectedProduct = ""
 }
 
 private struct DecimalField: View {
