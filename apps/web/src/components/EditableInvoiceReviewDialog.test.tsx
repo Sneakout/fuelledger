@@ -33,6 +33,19 @@ describe("editable invoice review", () => {
     expect(errors).toContain("product amounts and tax");
   });
 
+  it("keeps the reviewed total consistent after a one-digit OCR error in the printed product amount", () => {
+    const parsed = parseIndianInvoice(`Indian Oil Corporation Limited
+Tax Invoice No: 20274247B025710
+Invoice Date: 31-Aug-26
+HSD-BSVI 12.000 KL 27101944
+BASIC DESTINATION PRICE 12.000 KL 79341.270 KL 952005.24
+Total 1207079.00`);
+    const draft = createEditableInvoiceDraft(parsed);
+
+    expect(draft.taxAmount).toBe("254983.76");
+    expect(validateEditableInvoiceDraft(draft)).not.toContainEqual(expect.stringContaining("product amounts and tax"));
+  });
+
   it("lets the owner edit and keep a draft without offering a record update", () => {
     const onKeep = vi.fn();
     render(<EditableInvoiceReviewDialog fileName="invoice.pdf" initialDraft={createEditableInvoiceDraft(parseIndianInvoice(invoiceText))} onCancel={vi.fn()} onKeep={onKeep}/>);

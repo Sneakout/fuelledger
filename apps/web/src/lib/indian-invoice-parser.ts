@@ -85,9 +85,12 @@ export function parseIndianInvoice(text: string): ParsedIndianInvoice {
   const explicitTax = findAmount(lines, /\b(?:total\s+tax|tax\s+amount)\b/i);
   const componentTax = [cgst, sgst, igst, cess].reduce((sum, item) => sum + (item?.value ?? 0), 0);
   const itemLines = parseItemLines(lines);
-  // Prefer the amount printed for the product. Rebuilding it from an OCR-read
-  // rate can turn a small recognition error into a false tax amount.
-  const productSubtotal = itemLines.reduce((sum, line) => sum + (line.amount ?? line.quantity * line.unitRate), 0);
+  // Keep the amount used to derive charges consistent with the editable draft,
+  // which calculates each line from quantity x rate. A very small disagreement
+  // is usually a single OCR digit error in the printed amount (for example,
+  // 952005.24 instead of 952095.24). A larger disagreement is more likely to be
+  // a damaged rate, so retain the printed accounting amount in that case.
+  const productSubtotal = itemLines.reduce((sum, line) => sum + reconciledLineAmount(line), 0);
   const derivedCharges = totalAmount && productSubtotal > 0 ? totalAmount.value - productSubtotal : null;
   let taxTotal = explicitTax?.value ?? (componentTax > 0 ? componentTax : null);
   if (derivedCharges !== null && derivedCharges >= 0 && (taxTotal === null || Math.abs(taxTotal - derivedCharges) > 1)) {
@@ -358,6 +361,14 @@ function deduplicateItemLines(lines: IndianInvoiceLine[]) {
 function itemArithmeticError(line: IndianInvoiceLine) {
   if (line.amount === null) return Number.POSITIVE_INFINITY;
   return Math.abs(line.quantity * line.unitRate - line.amount);
+}
+
+function reconciledLineAmount(line: IndianInvoiceLine) {
+  const calculated = line.quantity * line.unitRate;
+  if (line.amount === null) return calculated;
+  const difference = Math.abs(calculated - line.amount);
+  const relativeDifference = difference / Math.max(1, Math.abs(calculated), Math.abs(line.amount));
+  return difference > 1 && relativeDifference <= 0.001 ? calculated : line.amount;
 }
 
 function buildItemLine(productLine: SourceLine, recognised: { description: string; product: IndianInvoiceLine["product"] }, measuredLine: SourceLine, measured: { quantity: number; unit: string; unitRate: number; amount: number }): IndianInvoiceLine {

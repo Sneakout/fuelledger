@@ -71,11 +71,11 @@ enum InvoiceTextParser {
         let explicitTax = findAmount(lines, label: #"\b(?:total\s+tax|tax\s+amount)\b"#)
         let componentTax = components.compactMap { $0 }.reduce(0, +)
         let itemLines = parseItemLines(lines)
-        // The amount printed on an invoice line is the accounting value. OCR can
-        // slightly distort a rate, so rebuilding every line from quantity × rate
-        // can turn that recognition error into a bogus tax/charges figure.
+        // Use the same line basis as the editable review. A tiny disagreement is
+        // normally one damaged OCR digit in the printed amount; a larger one is
+        // more likely to be a damaged rate, so preserve the printed value then.
         let productSubtotal = itemLines.reduce(0) { subtotal, line in
-            subtotal + (line.amount ?? line.quantity * line.unitCost)
+            subtotal + reconciledLineAmount(line)
         }
         let derivedCharges = total.flatMap { productSubtotal > 0 ? $0 - productSubtotal : nil }
         var tax = explicitTax ?? (componentTax > 0 ? componentTax : 0)
@@ -117,6 +117,15 @@ enum InvoiceTextParser {
     }
 
     private struct InvoiceNumber { let value: String; let needsReview: Bool }
+
+    private static func reconciledLineAmount(_ line: ParsedInvoice.Line) -> Double {
+        let calculated = line.quantity * line.unitCost
+        guard let amount = line.amount else { return calculated }
+        let difference = abs(calculated - amount)
+        let relativeDifference = difference / max(1, abs(calculated), abs(amount))
+        return difference > 1 && relativeDifference <= 0.001 ? calculated : amount
+    }
+
     private static func findInvoiceNumber(_ lines: [SourceLine]) -> InvoiceNumber? {
         let patterns = [
             #"\b(?:tax\s+)?invoice\s*(?:no\.?|number|#)\s*[:\-]?\s*([A-Z0-9][A-Z0-9/\-]{2,})\b"#,

@@ -110,6 +110,29 @@ E Te a aeotall 1207079.00`);
     expect(result.tax.total).toBe(254983.76);
   });
 
+  it("does not create a false tax mismatch when OCR changes one product-amount digit", () => {
+    const result = parseIndianInvoice(`Indian Oil Corporation Limited
+TAX INVOICE 20274247B025710
+Date 31-Aug-26
+HSD-BSVI 12.000 KL 27101944
+BASIC DESTINATION PRICE 12.000 KL 79341.270 KL 952005.24
+Total 1207079.00`);
+
+    expect(result.lines[0]).toMatchObject({ quantity: 12, unitRate: 79341.27, amount: 952005.24 });
+    expect(result.tax.total).toBe(254983.76);
+    expect(result.warnings).toContain("The quantity and rate do not match the amount shown for HSD-BSVI.");
+  });
+
+  it("keeps the printed product amount when the OCR rate is materially different", () => {
+    const result = parseIndianInvoice(`Indian Oil Corporation Limited
+Tax Invoice No: 20274247B025710
+Date 31-Aug-26
+HSD-BSVI 12.000 KL 80000.00 KL 952095.24
+Total 1207079.00`);
+
+    expect(result.tax.total).toBe(254983.76);
+  });
+
   it("recovers decimal points lost by OCR when the quantity-rate arithmetic supports them", () => {
     const result = parseIndianInvoice(`Indian Oil Corporation Limited
 Doc.Name TAX INVOICE 20274247B025710

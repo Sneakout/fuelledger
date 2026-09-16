@@ -67,6 +67,20 @@ struct InvoiceImportTests {
         #expect(result.tax != 2)
     }
 
+    @Test func reconcilesSingleDigitProductAmountOCRErrorWithoutFalseTotalMismatch() {
+        let result = InvoiceTextParser.parse("""
+        Indian Oil Corporation Limited
+        Tax Invoice No: 20274247B025710
+        Date 31-Aug-26
+        HSD-BSVI 12.000 KL 79341.270 KL 952005.24
+        Total 1207079.00
+        """)
+
+        #expect(result.lines.first?.amount == 952_005.24)
+        #expect(result.tax == 254_983.76)
+        #expect(result.warnings.contains { $0.contains("quantity and rate do not match") })
+    }
+
     @Test(arguments: [
         ("MS-BS VI", "MS"), ("XP95", "MS"), ("XP100", "MS"), ("XTRAPREMIUM", "MS"),
         ("Speed 97", "MS"), ("Power95", "MS"), ("XtraGreen", "HSD"), ("XtraMile", "HSD"),
