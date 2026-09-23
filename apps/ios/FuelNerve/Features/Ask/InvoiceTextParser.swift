@@ -8,6 +8,7 @@ struct ParsedInvoice: Sendable {
         let unit: String?
         let unitCost: Double
         let amount: Double?
+        let grossAmount: Double?
         let hsnCode: String?
     }
 
@@ -32,6 +33,7 @@ enum InvoiceTextParser {
     private struct ProductRule { let pattern: String; let product: String }
 
     private static let productRules = [
+        ProductRule(pattern: #"\b(?:EBMS|E[-\s]?\d{1,2}\s*(?:MS|PETROL)|ETHANOL[-\s]+BLENDED\s+(?:MS|MOTOR\s+SPIRIT|PETROL))\b"#, product: "MS"),
         ProductRule(pattern: #"\b(?:HSD|HIGH\s+SPEED\s+DIESEL)(?:[-\s]?(?:BS)?[-\s]?(?:VI|V1))?\b"#, product: "HSD"),
         ProductRule(pattern: #"\b(?:XTRA\s*GREEN|XTRA\s*MILE)(?:\s+(?:DIESEL|HSD))?\b"#, product: "HSD"),
         ProductRule(pattern: #"\bV[-\s]?POWER\s+(?:DIESEL|HSD)\b"#, product: "HSD"),
@@ -60,7 +62,8 @@ enum InvoiceTextParser {
         let buyerGSTIN = chooseGSTIN(gstins, party: .buyer)
         let consignee = findConsignee(lines)
         let supplierName = findSupplierName(lines)
-        let total = findInvoiceTotal(lines)
+        let itemLines = parseItemLines(lines)
+        let total = findInvoiceTotal(lines, itemLines: itemLines, warnings: &warnings)
         let subtotal = findAmount(lines, label: #"\b(?:taxable\s+(?:amount|value)|sub\s*total|basic\s+amount)\b"#)
         let components = [
             findTaxComponent(lines, label: #"\bCGST\b"#),
@@ -70,7 +73,6 @@ enum InvoiceTextParser {
         ]
         let explicitTax = findAmount(lines, label: #"\b(?:total\s+tax|tax\s+amount)\b"#)
         let componentTax = components.compactMap { $0 }.reduce(0, +)
-        let itemLines = parseItemLines(lines)
         // Use the same line basis as the editable review. A tiny disagreement is
         // normally one damaged OCR digit in the printed amount; a larger one is
         // more likely to be a damaged rate, so preserve the printed value then.
@@ -217,7 +219,7 @@ enum InvoiceTextParser {
         return nil
     }
 
-    private static func findInvoiceTotal(_ lines: [SourceLine]) -> Double? {
+    private static func findInvoiceTotal(_ lines: [SourceLine], itemLines: [ParsedInvoice.Line], warnings: inout [String]) -> Double? {
         let labels = [
             #"\bgrand\s+total\b"#,
             #"\binvoice\s+total\b"#,
@@ -225,6 +227,13 @@ enum InvoiceTextParser {
             #"^[^A-Z0-9₹]{0,8}total\b(?!.*\b(?:for\s+material|material|tax|gst|cgst|sgst|igst|cess)\b)"#,
         ]
         for label in labels { if let amount = findAmount(lines, label: label) { return amount } }
+        let grossSum = itemLines.compactMap(\.grossAmount).reduce(0, +)
+        for index in lines.indices.reversed() where matches(lines[index].text, #"^total\s*:?$"#) {
+            let following = lines.dropFirst(index + 1).prefix(4)
+            let candidates = following.flatMap { numericValues($0.text) }.filter { $0 >= 1_000 }
+            let plausible = grossSum > 0 ? candidates.filter { abs($0 - grossSum) <= max(10, grossSum * 0.001) } : candidates
+            if plausible.count == 1 { return plausible[0] }
+        }
         for line in lines.reversed() {
             let groups = captures(line.text, pattern: #"\btotal(?!\s+(?:for\s+)?material|\s+tax)\s*[^A-Z0-9]{0,8}(\d[\d,]*(?:\.\d{1,3})?)"#)
             if let raw = groups.last, let value = number(raw) { return value }
@@ -239,7 +248,21 @@ enum InvoiceTextParser {
                 }
             }
         }
-        guard let materialIndex = lines.lastIndex(where: { matches($0.text, #"\btotal\s+for\s+material\b"#) }),
+        if itemLines.count > 1, itemLines.allSatisfy({ $0.grossAmount != nil }) {
+            let materialSum = roundMoney(itemLines.compactMap(\.grossAmount).reduce(0, +))
+            let expectedRounding = roundMoney(materialSum.rounded() - materialSum)
+            if let roundingLine = lines.reversed().first(where: { matches($0.text, #"\b(?:ZRND|ROUNDING\s+(?:DIFFERENCE|OFF)|ROUND\s+OFF)\b"#) }),
+               let raw = firstCapture(roundingLine.text, patterns: [#"(-?\d+(?:\.\d{1,2})?)\s*$"#]),
+               let stated = number(raw), abs(expectedRounding) <= 0.5 {
+                let alternatives = raw.contains(".") ? [stated] : [stated, stated / 100]
+                if alternatives.contains(where: { abs($0 - expectedRounding) < 0.011 }) {
+                    warnings.append("The invoice total was reconstructed from all product totals and the rounding line. Check it against the document before continuing.")
+                    return materialSum.rounded()
+                }
+            }
+        }
+        guard itemLines.count == 1,
+              let materialIndex = lines.lastIndex(where: { matches($0.text, #"\btotal\s+for\s+material\b"#) }),
               let materialTotal = numericValues(lines[materialIndex].text).last, materialTotal > 0 else { return nil }
         let tolerance = max(10, materialTotal * 0.001)
         let followingLines = Array(lines.dropFirst(materialIndex + 1).prefix(13))
@@ -271,7 +294,23 @@ enum InvoiceTextParser {
             let nearby = lines[index..<min(lines.count, index + 6)].filter { !matches($0.text, #"\b(?:CGST|SGST|IGST|CESS|TOTAL|GSTIN)\b"#) }
             let measures = nearby.compactMap { row in parseMeasureRow(row.text).map { (row, $0) } }
             guard let measured = measures.first(where: { matches($0.0.text, #"\b(?:BASIC|DESTINATION\s+PRICE|PRODUCT\s+VALUE)\b"#) }) ?? measures.first else { continue }
-            parsed.append(.init(description: product.description, product: product.product, quantity: measured.1.quantity, unit: measured.1.unit, unitCost: measured.1.unitRate, amount: measured.1.amount, hsnCode: findHSN(line.text)))
+            let nextProduct = lines.indices.first { candidate in
+                candidate > index && findProduct(lines[candidate].text) != nil && matches(lines[candidate].text, #"^\s*(?:\d{1,3}\s+\d{4,6}\s+)?(?:EBMS|HSD|MS|PETROL|DIESEL)\b"#)
+            } ?? min(lines.count, index + 28)
+            let section = lines[index..<nextProduct]
+            let materialIndex = section.firstIndex { matches($0.text, #"\btotal\s+for\s+material\b"#) }
+            var grossAmount: Double?
+            if let materialIndex {
+                let stated = numericValues(lines[materialIndex].text).last
+                grossAmount = stated.flatMap { $0 >= measured.1.amount ? $0 : nil }
+                if grossAmount == nil {
+                    grossAmount = lines.dropFirst(materialIndex + 1).prefix(3)
+                        .filter { matches($0.text, #"^\s*[₹]?[\d,]+(?:\.\d{1,2})?\s*$"#) }
+                        .flatMap { numericValues($0.text) }
+                        .first { $0 >= measured.1.amount }
+                }
+            }
+            parsed.append(.init(description: product.description, product: product.product, quantity: measured.1.quantity, unit: measured.1.unit, unitCost: measured.1.unitRate, amount: measured.1.amount, grossAmount: grossAmount, hsnCode: findHSN(line.text)))
         }
         if parsed.isEmpty { parsed = parseColumnarItemLines(lines) }
         var chosen: [String: ParsedInvoice.Line] = [:]
@@ -331,6 +370,7 @@ enum InvoiceTextParser {
                 unit: measure.unit,
                 unitCost: rate,
                 amount: amount,
+                grossAmount: nil,
                 hsnCode: productIndex < hsnValues.count ? hsnValues[productIndex] : nil
             )
         }
@@ -349,13 +389,15 @@ enum InvoiceTextParser {
     }
 
     private static func parseMeasureRow(_ value: String) -> Measure? {
-        guard let range = regex(#"\b(KL|L|LTRS?|LITRES?|LITERS?|KG|MT|NOS?|EA|PCS?)\b"#)?.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
+        guard let range = regex(#"\b(KL|ML|L|LTRS?|LITRES?|LITERS?|KG|MT|NOS?|EA|PCS?)\b"#)?.firstMatch(in: value, range: NSRange(value.startIndex..., in: value)),
               let whole = Range(range.range(at: 0), in: value), let unitRange = Range(range.range(at: 1), in: value),
               !matches(value, #"\b(?:TAX|CESS)\b"#) else { return nil }
         let before = numericTokens(String(value[..<whole.lowerBound]))
         let after = numericTokens(String(value[whole.upperBound...]))
         guard let quantity = before.last, let rate = after.first, let amount = after.last, after.count >= 2 else { return nil }
-        return normalizeMeasure(quantity.raw, rate.raw, amount.raw, unit: String(value[unitRange]).uppercased())
+        let recognisedUnit = String(value[unitRange]).uppercased()
+        let unit = recognisedUnit == "ML" && matches(value, #"\b(?:BASIC|DESTINATION\s+PRICE)\b"#) ? "KL" : recognisedUnit
+        return normalizeMeasure(quantity.raw, rate.raw, amount.raw, unit: unit)
     }
 
     private static func normalizeMeasure(_ quantityRaw: String, _ rateRaw: String, _ amountRaw: String, unit: String) -> Measure? {

@@ -646,7 +646,11 @@ struct InvoiceReviewView: View {
         }
         lines = parsed.lines.map { item in
             let product = bestProduct(for: item, in: references)
-            return DraftLine(productId: product?.id ?? "", tankId: product.flatMap { product in station(in: references)?.tanks.first(where: { $0.productId == product.id })?.id } ?? "", description: item.description, quantity: item.quantity, sourceUnit: item.unit ?? product?.unit ?? "", unitCost: item.unitCost, taxRate: product?.taxCategory?.rate.value ?? 0, hsnCode: item.hsnCode ?? product?.hsnCode ?? "", detectedProduct: item.product, isExpanded: false)
+            let base = item.quantity * item.unitCost
+            let materialTaxRate = item.grossAmount.flatMap { gross in
+                base > 0 && gross >= base ? (gross - base) / base * 100 : nil
+            }
+            return DraftLine(productId: product?.id ?? "", tankId: product.flatMap { product in station(in: references)?.tanks.first(where: { $0.productId == product.id })?.id } ?? "", description: item.description, quantity: item.quantity, sourceUnit: item.unit ?? product?.unit ?? "", unitCost: item.unitCost, taxRate: materialTaxRate ?? product?.taxCategory?.rate.value ?? 0, hsnCode: item.hsnCode ?? product?.hsnCode ?? "", detectedProduct: item.product, isExpanded: false)
         }
         if lines.isEmpty { lines = [DraftLine()] }
     }
@@ -794,9 +798,12 @@ private struct InvoiceLineEditor: View {
                         .font(.caption).foregroundStyle(line.description.isEmpty ? FuelNerveTheme.gold : Color.secondary)
                 }
                 Spacer(minLength: 8)
-                Text((line.quantity * line.unitCost).formatted(.currency(code: "INR")))
-                    .font(.subheadline.bold()).foregroundStyle(FuelNerveTheme.forest)
-                    .multilineTextAlignment(.trailing)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text((line.quantity * line.unitCost * (1 + line.taxRate / 100)).formatted(.currency(code: "INR")))
+                        .font(.subheadline.bold()).foregroundStyle(FuelNerveTheme.forest)
+                    if line.taxRate > 0 { Text("incl. product taxes").font(.caption2).foregroundStyle(.secondary) }
+                }
+                .multilineTextAlignment(.trailing)
             }
 
             DisclosureGroup(isExpanded: $line.isExpanded) {
@@ -849,7 +856,7 @@ private struct InvoiceLineEditor: View {
                 guard let product = products.first(where: { $0.id == productId }) else { line.tankId = ""; return }
                 line.detectedProduct = product.code.uppercased()
                 if line.description == "Invoice purchase" || line.description.isEmpty { line.description = product.name }
-                line.taxRate = product.taxCategory?.rate.value ?? line.taxRate
+                if line.taxRate == 0 { line.taxRate = product.taxCategory?.rate.value ?? 0 }
                 line.hsnCode = line.hsnCode.isEmpty ? product.hsnCode ?? "" : line.hsnCode
                 line.tankId = station?.tanks.first(where: { $0.productId == productId })?.id ?? ""
             }

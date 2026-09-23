@@ -2,6 +2,86 @@ import { describe, expect, it } from "vitest";
 import { parseIndianInvoice } from "./indian-invoice-parser";
 
 describe("parseIndianInvoice", () => {
+  it("reconciles two IOCL fuels using each material total and a separately OCR'd invoice total", () => {
+    const result = parseIndianInvoice(`Indian Oil Corporation Limited
+TAX INVOICE 20274247B022177
+Date 13-Aug-26
+PAYER - 187714 SALEEMA PETROLEUM
+10 16730 EBMS 4.000 KL 2710 12 42
+BASIC DESTINATION PRICE 4.000 KL 82203.320 KL 328813.28
+ZLST Local sales tax 98907.03
+ZAST Additional Tax 4000.00
+ZSOC Social Sec Cess 1029.07
+ZCS2 Cess 8000.00
+Total for material
+440749.38
+20 50700 HSD-BSVI 8.000 KL 2710 19 44
+BASIC DESTINATION PRICE 8.000 KL 79341.270 KL 634730.16
+ZLST Local sales tax 144464.58
+ZAST Additional Tax 8000.00
+ZSOC Social Sec Cess 1524.65
+ZCS2 Cess 16000.00
+Total for material
+804719.39
+ZRND Rounding Difference 0.23
+Total
+1245469.00`);
+
+    expect(result.lines).toMatchObject([
+      { product: "MS", description: "EBMS", quantity: 4, amount: 328813.28, grossAmount: 440749.38 },
+      { product: "HSD", quantity: 8, amount: 634730.16, grossAmount: 804719.39 },
+    ]);
+    expect(result.totalAmount?.value).toBe(1245469);
+    expect(result.tax.total).toBe(281925.56);
+  });
+  it("recovers the actual scanned two-product layout when OCR reads KL as ML and drops decimal points", () => {
+    const result = parseIndianInvoice(`Indian Oil Corporation Limited
+DocName TAX INVOICE 20274247B022177
+Date 13-Aug-26
+10 16730 EBMS 4.000 KL 27101242
+BASIC DESTINATION PRICE . 4000 ML 82203320 KL 32881328)
+Tank no: SUP1 Comp No(s) 1, Density@ 15: 750 600 Total for material 440749.38
+20 50700 HSD-BSVI 8000 KL 271019 44
+BASIC DESTINATION PRICE 8000 KL 79341270 KL 634730.16
+Tank no: T005 Comp No(s) 2,3, Density @ 15: 835.500 Total for material 804719.39
+ZRND Rounding Difference 023
+fins Total 1245469.00`);
+    expect(result.lines.map(line => [line.product, line.quantity, line.amount, line.grossAmount])).toEqual([
+      ["MS", 4, 328813.28, 440749.38],
+      ["HSD", 8, 634730.16, 804719.39],
+    ]);
+    expect(result.totalAmount?.value).toBe(1245469);
+    expect(result.tax.total).toBe(281925.56);
+  });
+  it("reconstructs a missing IOCL grand-total row only from complete material totals and matching rounding", () => {
+    const result = parseIndianInvoice(`Indian Oil Corporation Limited
+TAX INVOICE 20274247B022177
+Date 13-Aug-26
+10 16730 EBMS 4.000 KL 27101242
+BASIC DESTINATION PRICE 4000 ML 82203320 KL 32881328
+Total for material 440749.38
+20 50700 HSD-BSVI 8000 KL 271019 44
+BASIC DESTINATION PRICE 8000 KL 79341270 KL 634730.16
+Total for material 804719.39
+ZRND Rounding Difference 023`);
+    expect(result.totalAmount?.value).toBe(1245469);
+    expect(result.totalAmount?.needsReview).toBe(true);
+    expect(result.tax.total).toBe(281925.56);
+    expect(result.missingFields).not.toContain("invoice total");
+    expect(result.warnings).toContain("The invoice total was reconstructed from all product totals and the rounding line. Check it against the document before continuing.");
+  });
+  it("does not invent a missing total when the rounding line disagrees", () => {
+    const result = parseIndianInvoice(`Indian Oil Corporation Limited
+TAX INVOICE 20274247B022177
+Date 13-Aug-26
+10 16730 EBMS 4.000 KL 82203.320 KL 328813.28
+Total for material 440749.38
+20 50700 HSD-BSVI 8.000 KL 79341.270 KL 634730.16
+Total for material 804719.39
+ZRND Rounding Difference 0.15`);
+    expect(result.totalAmount).toBeNull();
+    expect(result.missingFields).toContain("invoice total");
+  });
   it("reuses the proven iOS fuel-invoice fields without creating a record", () => {
     const result = parseIndianInvoice(`Kerala Fuel Supplies Pvt Ltd
 GSTIN: 32ABCDE1234F1Z5

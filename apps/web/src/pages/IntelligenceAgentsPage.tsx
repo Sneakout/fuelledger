@@ -370,7 +370,12 @@ function InvoiceDetails({ invoice, draft, stationName, catalogProducts, reviewed
   const stationAssessment = assessInvoiceStation(draft.consigneeName, stationName);
   const priceAssessment = assessSingleProductInvoicePrice(draft, catalogProducts);
   const productSummary = draft.lines.length
-    ? draft.lines.slice(0, 2).map(line => `${line.description || "Unnamed product"} · ${formatInvoiceNumber(Number(line.quantity) || 0)}${line.unit ? ` ${line.unit}` : ""} · ${formatInvoiceMoney((Number(line.quantity) || 0) * (Number(line.unitRate) || 0))}`).join("; ")
+    ? draft.lines.slice(0, 2).map((line, index) => {
+      const base = (Number(line.quantity) || 0) * (Number(line.unitRate) || 0);
+      const gross = !reviewed ? invoice.lines[index]?.grossAmount : null;
+      const amount = gross ?? base * (1 + (Number(line.taxRate) || 0) / 100);
+      return `${line.description || "Unnamed product"} · ${formatInvoiceNumber(Number(line.quantity) || 0)}${line.unit ? ` ${line.unit}` : ""} · ${formatInvoiceMoney(amount)}${gross || Number(line.taxRate) > 0 ? " incl. product taxes" : " base"}`;
+    }).join("; ")
     : "Not clearly found";
   return <section className={`nerve-invoice-details ${invoice.status === "NEEDS_REVIEW" ? "needs-review" : ""}`} aria-label="Invoice details found">
     <header><div><strong>{submitted ? "This invoice is now in Purchases" : reviewed ? "You reviewed this invoice" : invoice.status === "READY_FOR_REVIEW" ? "I found a new invoice" : "I found an invoice, but some details need checking"}</strong><small>{submitted ? `Invoice ${submitted.invoiceNumber} was created as unpaid. Stock and payment were not changed.` : reviewed ? "Your edits are kept only in this browser tab." : "No FuelNerve record has been changed."}</small></div><span>{submitted ? "Created" : reviewed ? "Reviewed" : invoice.status === "READY_FOR_REVIEW" ? "Ready to review" : "Check details"}</span></header>

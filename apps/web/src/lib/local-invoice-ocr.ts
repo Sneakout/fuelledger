@@ -93,6 +93,14 @@ export async function recognizeLocalInvoices(
           const totalsResult = await recognizeWithLimit(worker, totals, deadline.signal);
           supplementalText.push(totalsResult.data.text);
           confidence.push(totalsResult.data.confidence);
+          if (needsInvoiceTotalPass([...text, ...supplementalText].join("\n")) && /\btotal\s+for\s+material\b/i.test(pageText)) {
+            // On multi-material IOCL invoices the right-column grand total is
+            // small and often lost among two blocks of tax rows. Read it alone.
+            const finalRow = await cropImageForOcr(image, { left: 0.46, width: 0.54, top: 0.66, height: 0.14, scale: 2 });
+            const finalResult = await recognizeWithLimit(worker, finalRow, deadline.signal);
+            supplementalText.push(finalResult.data.text);
+            confidence.push(finalResult.data.confidence);
+          }
         }
         for (const supplemental of supplementalText) {
           const cleaned = supplemental.replace(/\s+\n/g, "\n").trim();

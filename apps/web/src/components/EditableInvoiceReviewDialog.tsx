@@ -134,7 +134,7 @@ export function EditableInvoiceReviewDialog({ fileName, initialDraft, onCancel, 
             <label><span>Unit</span><input value={line.unit} onChange={event => updateLine(line.id, "unit", event.target.value.toUpperCase())} placeholder="L or KL"/></label>
             <label><span>Rate</span><input type="number" inputMode="decimal" min="0" step="0.001" value={line.unitRate} onChange={event => updateLine(line.id, "unitRate", event.target.value)}/></label>
             <label><span>Tax %</span><input type="number" inputMode="decimal" min="0" max="100" step="0.01" value={line.taxRate} onChange={event => updateLine(line.id, "taxRate", event.target.value)}/></label>
-            <div className="invoice-line-amount"><span>Amount</span><strong>{money(number(line.quantity) * number(line.unitRate))}</strong></div>
+            <div className="invoice-line-amount"><span>Base amount</span><strong>{money(number(line.quantity) * number(line.unitRate))}</strong>{number(line.taxRate) > 0 && <small>With product taxes: {money(number(line.quantity) * number(line.unitRate) * (1 + number(line.taxRate) / 100))}</small>}</div>
           </div></article>)}</div>
         </fieldset>
 
@@ -148,7 +148,11 @@ export function EditableInvoiceReviewDialog({ fileName, initialDraft, onCancel, 
 }
 
 function toEditableLine(line: IndianInvoiceLine): EditableInvoiceLine {
-  return { id: crypto.randomUUID(), product: line.product, description: line.description, hsnCode: line.hsnCode ?? "", quantity: decimal(line.quantity), unit: line.unit ?? "", unitRate: decimal(line.unitRate), taxRate: "0" };
+  const baseAmount = line.quantity * line.unitRate;
+  const taxRate = line.grossAmount && baseAmount > 0 && line.grossAmount >= baseAmount
+    ? String(Number((((line.grossAmount - baseAmount) / baseAmount) * 100).toFixed(8)))
+    : "0";
+  return { id: crypto.randomUUID(), product: line.product, description: line.description, hsnCode: line.hsnCode ?? "", quantity: decimal(line.quantity), unit: line.unit ?? "", unitRate: decimal(line.unitRate), taxRate };
 }
 
 function emptyInvoiceLine(): EditableInvoiceLine {

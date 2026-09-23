@@ -13,6 +13,7 @@ export type IndianInvoiceLine = {
   unit: string | null;
   unitRate: number;
   amount: number | null;
+  grossAmount?: number | null;
   sourceLine: string;
   lineNumber: number;
 };
@@ -45,6 +46,7 @@ type SourceLine = { text: string; number: number };
 
 const GSTIN_PATTERN = /\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z0-9]Z[A-Z0-9]\b/gi;
 const PRODUCT_RULES: Array<{ pattern: RegExp; product: IndianInvoiceLine["product"] }> = [
+  { pattern: /\b(?:EBMS|E[-\s]?\d{1,2}\s*(?:MS|PETROL)|ETHANOL[-\s]+BLENDED\s+(?:MS|MOTOR\s+SPIRIT|PETROL))\b/i, product: "MS" },
   { pattern: /\b(?:HSD|HIGH\s+SPEED\s+DIESEL)(?:[-\s]?(?:BS)?[-\s]?(?:VI|V1))?\b/i, product: "HSD" },
   { pattern: /\b(?:XTRA\s*GREEN|XTRA\s*MILE)(?:\s+(?:DIESEL|HSD))?\b/i, product: "HSD" },
   { pattern: /\bV[-\s]?POWER\s+(?:DIESEL|HSD)\b/i, product: "HSD" },
@@ -76,7 +78,8 @@ export function parseIndianInvoice(text: string): ParsedIndianInvoice {
   const buyerGSTIN = chooseGSTIN(gstins, "buyer");
   const supplierName = findSupplierName(lines);
   const consignee = findConsignee(lines);
-  const totalAmount = findInvoiceTotal(lines);
+  const itemLines = parseItemLines(lines);
+  const totalAmount = findInvoiceTotal(lines, itemLines, warnings);
   const subtotal = findAmount(lines, /\b(?:taxable\s+(?:amount|value)|sub\s*total|basic\s+amount)\b/i);
   const cgst = findAmount(lines, /\bCGST\b/i);
   const sgst = findAmount(lines, /\bSGST\b/i);
@@ -84,7 +87,6 @@ export function parseIndianInvoice(text: string): ParsedIndianInvoice {
   const cess = findAmount(lines, /\b(?:CESS|TCS)\b/i);
   const explicitTax = findAmount(lines, /\b(?:total\s+tax|tax\s+amount)\b/i);
   const componentTax = [cgst, sgst, igst, cess].reduce((sum, item) => sum + (item?.value ?? 0), 0);
-  const itemLines = parseItemLines(lines);
   // Keep the amount used to derive charges consistent with the editable draft,
   // which calculates each line from quantity x rate. A very small disagreement
   // is usually a single OCR digit error in the printed amount (for example,
@@ -292,7 +294,7 @@ function findAmount(lines: SourceLine[], label: RegExp): InvoiceCandidate<number
   return null;
 }
 
-function findInvoiceTotal(lines: SourceLine[]): InvoiceCandidate<number> | null {
+function findInvoiceTotal(lines: SourceLine[], itemLines: IndianInvoiceLine[], warnings: string[]): InvoiceCandidate<number> | null {
   const labels = [
     /\bgrand\s+total\b/i,
     /\binvoice\s+total\b/i,
@@ -302,6 +304,19 @@ function findInvoiceTotal(lines: SourceLine[]): InvoiceCandidate<number> | null 
   for (const label of labels) {
     const amount = findAmount(lines, label);
     if (amount) return amount;
+  }
+  // IOCL's final "Total" is often OCR'd as a heading followed by a separate
+  // right-column amount. Never use a material subtotal as the invoice total.
+  const grossSum = itemLines.reduce((sum, line) => sum + (line.grossAmount ?? 0), 0);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const heading = lines[index]!;
+    if (!/^total\s*:?$/i.test(heading.text)) continue;
+    const following = lines.slice(index + 1, index + 5);
+    const amounts = following.flatMap(line => numericValues(line.text).filter(value => value >= 1000).map(value => ({ line, value })));
+    const plausible = grossSum > 0
+      ? amounts.filter(item => Math.abs(item.value - grossSum) <= Math.max(10, grossSum * 0.001))
+      : amounts.filter(item => item.line.text.match(/^\s*[₹]?[\d,]+(?:\.\d{2})?\s*$/));
+    if (plausible.length === 1) return candidate(plausible[0]!.value, plausible[0]!.line, true);
   }
   for (const line of [...lines].reverse()) {
     const matches = Array.from(line.text.matchAll(/\btotal(?!\s+(?:for\s+)?material|\s+tax)\s*[^A-Z0-9]{0,8}(\d[\d,]*(?:\.\d{1,3})?)/gi));
@@ -315,7 +330,7 @@ function findInvoiceTotal(lines: SourceLine[]): InvoiceCandidate<number> | null 
       break;
     }
   }
-  if (materialTotalIndex >= 0) {
+  if (materialTotalIndex >= 0 && itemLines.length === 1) {
     const materialValues = numericValues(lines[materialTotalIndex]!.text);
     const materialTotal = materialValues[materialValues.length - 1];
     if (materialTotal && materialTotal > 0) {
@@ -325,6 +340,23 @@ function findInvoiceTotal(lines: SourceLine[]): InvoiceCandidate<number> | null 
         .filter(item => item.value >= materialTotal - tolerance && item.value <= materialTotal + tolerance)
         .sort((left, right) => Math.abs(left.value - materialTotal) - Math.abs(right.value - materialTotal))[0];
       if (finalTotal) return candidate(finalTotal.value, finalTotal.line, true);
+    }
+  }
+  // The final row can be missed even when both material totals and the IOCL
+  // rounding row are legible. Reconstruct it only when every material total is
+  // present and the rounding token independently agrees to the paise.
+  if (itemLines.length > 1 && itemLines.every(line => line.grossAmount !== null && line.grossAmount !== undefined)) {
+    const materialSum = Number(itemLines.reduce((sum, line) => sum + line.grossAmount!, 0).toFixed(2));
+    const expectedRounding = Number((Math.round(materialSum) - materialSum).toFixed(2));
+    const roundingLine = [...lines].reverse().find(line => /\b(?:ZRND|ROUNDING\s+(?:DIFFERENCE|OFF)|ROUND\s+OFF)\b/i.test(line.text));
+    const roundingToken = roundingLine?.text.match(/(-?\d+(?:\.\d{1,2})?)\s*$/)?.[1];
+    if (roundingLine && roundingToken && Math.abs(expectedRounding) <= 0.5) {
+      const stated = Number(roundingToken);
+      const alternatives = roundingToken.includes(".") ? [stated] : [stated, stated / 100];
+      if (alternatives.some(value => Math.abs(value - expectedRounding) < 0.011)) {
+        warnings.push("The invoice total was reconstructed from all product totals and the rounding line. Check it against the document before continuing.");
+        return candidate(Math.round(materialSum), roundingLine, true);
+      }
     }
   }
   return null;
@@ -343,7 +375,21 @@ function parseItemLines(lines: SourceLine[]): IndianInvoiceLine[] {
     });
     const measured = measuredRows.find(item => /\b(?:BASIC|DESTINATION\s+PRICE|PRODUCT\s+VALUE)\b/i.test(item.row.text)) ?? measuredRows[0];
     if (!measured) continue;
-    parsed.push(buildItemLine(line, recognised, measured.row, measured.value));
+    const nextProduct = lines.findIndex((item, candidateIndex) => candidateIndex > index && findProduct(item.text) && /^\s*(?:\d{1,3}\s+\d{4,6}\s+)?(?:EBMS|HSD|MS|PETROL|DIESEL)\b/i.test(item.text));
+    const end = nextProduct > index ? nextProduct : Math.min(lines.length, index + 28);
+    const materialLines = lines.slice(index, end);
+    const materialIndex = materialLines.findIndex(item => /\btotal\s+for\s+material\b/i.test(item.text));
+    let grossAmount: number | null = null;
+    if (materialIndex >= 0) {
+      const materialLine = materialLines[materialIndex]!;
+      grossAmount = numericValues(materialLine.text).at(-1) ?? null;
+      if (grossAmount === null || grossAmount < measured.value.amount) {
+        const following = materialLines.slice(materialIndex + 1, materialIndex + 4)
+          .filter(item => /^\s*[₹]?[\d,]+(?:\.\d{1,2})?\s*$/.test(item.text));
+        grossAmount = following.flatMap(item => numericValues(item.text)).find(value => value >= measured.value.amount) ?? null;
+      }
+    }
+    parsed.push({ ...buildItemLine(line, recognised, measured.row, measured.value), grossAmount });
   }
   return deduplicateItemLines(parsed);
 }
@@ -404,7 +450,7 @@ function findProduct(value: string) {
 }
 
 function parseMeasureRow(value: string): { quantity: number; unit: string; unitRate: number; amount: number } | null {
-  const unitMatch = value.match(/\b(KL|L|LTRS?|LITRES?|LITERS?|KG|MT|NOS?|EA|PCS?)\b/i);
+  const unitMatch = value.match(/\b(KL|ML|L|LTRS?|LITRES?|LITERS?|KG|MT|NOS?|EA|PCS?)\b/i);
   if (!unitMatch || unitMatch.index === undefined || /\b(?:TAX|CESS)\b/i.test(value)) return null;
   const before = numericTokens(value.slice(0, unitMatch.index));
   const after = numericTokens(value.slice(unitMatch.index + unitMatch[0].length));
@@ -412,9 +458,10 @@ function parseMeasureRow(value: string): { quantity: number; unit: string; unitR
   if (!quantityToken || after.length < 2) return null;
   const rateToken = after[0]!;
   const amountToken = after[after.length - 1]!;
-  const normalized = normalizeQuantityRateAndAmount(quantityToken.raw, rateToken.raw, amountToken.raw, unitMatch[1]!.toUpperCase());
+  const unit = unitMatch[1]!.toUpperCase() === "ML" && /\b(?:BASIC|DESTINATION\s+PRICE)\b/i.test(value) ? "KL" : unitMatch[1]!.toUpperCase();
+  const normalized = normalizeQuantityRateAndAmount(quantityToken.raw, rateToken.raw, amountToken.raw, unit);
   if (!normalized) return null;
-  return { unit: unitMatch[1]!.toUpperCase(), ...normalized };
+  return { unit, ...normalized };
 }
 
 function normalizeQuantityRateAndAmount(quantityRaw: string, rateRaw: string, amountRaw: string, unit: string) {

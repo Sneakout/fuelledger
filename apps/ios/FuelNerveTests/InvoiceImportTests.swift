@@ -3,6 +3,78 @@ import Testing
 @testable import FuelNerve
 
 struct InvoiceImportTests {
+    @Test func reconcilesTwoIOCLMaterialsAndSplitGrandTotal() {
+        let result = InvoiceTextParser.parse("""
+        Indian Oil Corporation Limited
+        TAX INVOICE 20274247B022177
+        Date 13-Aug-26
+        10 16730 EBMS 4.000 KL 2710 12 42
+        BASIC DESTINATION PRICE 4.000 KL 82203.320 KL 328813.28
+        Total for material
+        440749.38
+        20 50700 HSD-BSVI 8.000 KL 2710 19 44
+        BASIC DESTINATION PRICE 8.000 KL 79341.270 KL 634730.16
+        Total for material
+        804719.39
+        ZRND Rounding Difference 0.23
+        Total
+        1245469.00
+        """)
+        #expect(result.lines.map(\.product) == ["MS", "HSD"])
+        #expect(result.lines.map(\.grossAmount) == [440_749.38, 804_719.39])
+        #expect(result.total == 1_245_469)
+        #expect(abs(result.tax - 281_925.56) < 0.01)
+    }
+    @Test func recoversEBMSWhenOCRReadsKLAsML() {
+        let result = InvoiceTextParser.parse("""
+        Indian Oil Corporation Limited
+        TAX INVOICE 20274247B022177
+        Date 13-Aug-26
+        10 16730 EBMS 4.000 KL 27101242
+        BASIC DESTINATION PRICE . 4000 ML 82203320 KL 32881328)
+        Tank no: SUP1 Comp No(s) 1, Density@ 15: 750 600 Total for material 440749.38
+        20 50700 HSD-BSVI 8000 KL 271019 44
+        BASIC DESTINATION PRICE 8000 KL 79341270 KL 634730.16
+        Tank no: T005 Comp No(s) 2,3, Density @ 15: 835.500 Total for material 804719.39
+        fins Total 1245469.00
+        """)
+        #expect(result.lines.map(\.product) == ["MS", "HSD"])
+        #expect(result.total == 1_245_469)
+        #expect(abs(result.tax - 281_925.56) < 0.01)
+    }
+    @Test func reconstructsMissingGrandTotalFromCompleteMaterialsAndRounding() {
+        let result = InvoiceTextParser.parse("""
+        Indian Oil Corporation Limited
+        TAX INVOICE 20274247B022177
+        Date 13-Aug-26
+        10 16730 EBMS 4.000 KL 27101242
+        BASIC DESTINATION PRICE 4000 ML 82203320 KL 32881328
+        Total for material 440749.38
+        20 50700 HSD-BSVI 8000 KL 271019 44
+        BASIC DESTINATION PRICE 8000 KL 79341270 KL 634730.16
+        Total for material 804719.39
+        ZRND Rounding Difference 023
+        """)
+        #expect(result.total == 1_245_469)
+        #expect(abs(result.tax - 281_925.56) < 0.01)
+        #expect(!result.missingFields.contains("invoice total"))
+        #expect(result.warnings.contains { $0.contains("reconstructed from all product totals") })
+    }
+
+    @Test func withholdsReconstructedTotalWhenRoundingDisagrees() {
+        let result = InvoiceTextParser.parse("""
+        Indian Oil Corporation Limited
+        TAX INVOICE 20274247B022177
+        Date 13-Aug-26
+        10 16730 EBMS 4.000 KL 82203.320 KL 328813.28
+        Total for material 440749.38
+        20 50700 HSD-BSVI 8.000 KL 79341.270 KL 634730.16
+        Total for material 804719.39
+        ZRND Rounding Difference 0.15
+        """)
+        #expect(result.total == nil)
+        #expect(result.missingFields.contains("invoice total"))
+    }
     @Test func parsesIndianFuelInvoiceWithoutChangingRecords() throws {
         let text = """
         Kerala Fuel Supplies Pvt Ltd
