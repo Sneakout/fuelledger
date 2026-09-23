@@ -254,13 +254,6 @@ export function OperationsPage() {
       setError("Choose a fuel station and manager.");
       return;
     }
-    if (
-      !nozzleAssignments.length ||
-      nozzleAssignments.some((assignment) => !assignment.userId)
-    ) {
-      setError("Assign an attendant to every active nozzle before opening the shift.");
-      return;
-    }
     setSaving(true);
     setError("");
     try {
@@ -268,7 +261,7 @@ export function OperationsPage() {
         stationId,
         managerId,
         userIds,
-        nozzleAssignments,
+        nozzleAssignments: nozzleAssignments.filter((assignment) => assignment.userId),
         openingCash,
         tankReadings: openTanks,
         nozzleReadings: openNozzles,
@@ -617,7 +610,7 @@ export function OperationsPage() {
             onChange={(v) => replace(openTanks, v.id, v.value, setOpenTanks)}
           />
           <section className="opening-nozzle-table">
-            <h3>Opening meter readings & attendants</h3>
+            <h3>Opening meter readings & optional attendants</h3>
             <div className="opening-nozzle-head" aria-hidden="true">
               <span>Nozzle & product</span>
               <span>Assigned attendant</span>
@@ -636,14 +629,14 @@ export function OperationsPage() {
                       <small>{nozzle.product.name}</small>
                     </span>
                     <label>
-                      <small>Assigned attendant</small>
+                      <small>Assigned attendant · optional</small>
                       <select
                         value={assignment?.userId ?? ""}
                         onChange={(event) =>
                           assignAttendant(nozzle.id, event.target.value)
                         }
                       >
-                        <option value="">Choose attendant</option>
+                        <option value="">No fixed attendant</option>
                         {attendants.map((attendant) => (
                           <option key={attendant.id} value={attendant.id}>
                             {attendant.name}

@@ -84,7 +84,7 @@ accessRouter.put(
       throw new AppError(
         400,
         "CUSTODY_INVALID",
-        "Assign every nozzle to an attendant.",
+        "Choose valid optional nozzle assignments.",
         parsed.error.flatten(),
       );
     res.json(

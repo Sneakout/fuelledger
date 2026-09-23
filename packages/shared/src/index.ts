@@ -193,8 +193,7 @@ export type ManagerInput = z.infer<typeof managerInputSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
 export const nozzleCustodySchema = z.object({
   assignments: z
-    .array(z.object({ nozzleId: z.string().cuid(), userId: z.string().cuid() }))
-    .min(1),
+    .array(z.object({ nozzleId: z.string().cuid(), userId: z.string().cuid() })),
 });
 export type NozzleCustodyInput = z.infer<typeof nozzleCustodySchema>;
 

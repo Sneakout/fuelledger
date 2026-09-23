@@ -181,18 +181,14 @@ export function StaffPage() {
     }
   };
   const saveCustody = async () => {
-    const rows = nozzles.map((row) => ({
-      nozzleId: row.id,
-      userId: assignments[row.id] ?? "",
-    }));
-    if (!rows.length) {
+    if (!nozzles.length) {
       setError("Configure active nozzles for this petrol pump first.");
       return;
     }
-    if (rows.some((row) => !row.userId)) {
-      setError("Assign an attendant to every active nozzle before saving.");
-      return;
-    }
+    const rows = nozzles.map((row) => ({
+      nozzleId: row.id,
+      userId: assignments[row.id] ?? "",
+    })).filter((row) => row.userId);
     setSaving(true);
     setError("");
     try {
@@ -445,7 +441,7 @@ export function StaffPage() {
                   }
                 >
                   <option value="">
-                    {staff.length ? "Choose attendant" : "Add an attendant above"}
+                    {staff.length ? "No default attendant" : "Add an attendant above"}
                   </option>
                   {team.map((member) => (
                     <option key={member.id} value={member.id}>

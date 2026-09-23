@@ -324,18 +324,15 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
         `Nozzle ${nozzle.code} must open at ${expected.toLocaleString()} L, matching ${prior !== null && prior !== undefined ? `shift #${previous!.shiftNumber}'s closing meter` : "its configured opening meter"}. Refresh and try again.`,
       );
   }
+  const assignedNozzleIds = input.nozzleAssignments.map((row) => row.nozzleId);
   if (
-    !exact(
-      input.nozzleAssignments.map((row) => row.nozzleId),
-      nozzles,
-    ) ||
-    new Set(input.nozzleAssignments.map((row) => row.nozzleId)).size !==
-      nozzles.length
+    new Set(assignedNozzleIds).size !== assignedNozzleIds.length ||
+    assignedNozzleIds.some((id) => !nozzles.some((nozzle) => nozzle.id === id))
   )
     throw new AppError(
       400,
-      "NOZZLE_ASSIGNMENTS_INCOMPLETE",
-      "Assign one attendant to every active nozzle.",
+      "NOZZLE_ASSIGNMENTS_INVALID",
+      "Choose each assigned nozzle only once from this petrol pump.",
     );
   const users = await tx.user.findMany({
     where: {
@@ -802,18 +799,16 @@ export async function updateNozzleCustody(
       "SHIFT_NOT_OPEN",
       "Nozzle assignments can only change during an open shift.",
     );
+  const assignedNozzleIds = input.assignments.map((row) => row.nozzleId);
+  const shiftNozzleIds = new Set(shift.nozzleReadings.map((row) => row.nozzleId));
   if (
-    !exact(
-      input.assignments.map((row) => row.nozzleId),
-      shift.nozzleReadings.map((row) => ({ id: row.nozzleId })),
-    ) ||
-    new Set(input.assignments.map((row) => row.nozzleId)).size !==
-      shift.nozzleReadings.length
+    new Set(assignedNozzleIds).size !== assignedNozzleIds.length ||
+    assignedNozzleIds.some((id) => !shiftNozzleIds.has(id))
   )
     throw new AppError(
       400,
-      "NOZZLE_ASSIGNMENTS_INCOMPLETE",
-      "Assign every active nozzle exactly once.",
+      "NOZZLE_ASSIGNMENTS_INVALID",
+      "Choose each assigned nozzle only once from this shift.",
     );
   const team = new Set([
     shift.managerId,
@@ -827,7 +822,7 @@ export async function updateNozzleCustody(
     );
   await safeTransaction(prisma, async (tx) => {
     await tx.shiftNozzleAssignment.deleteMany({ where: { shiftId: id } });
-    await tx.shiftNozzleAssignment.createMany({
+    if (input.assignments.length) await tx.shiftNozzleAssignment.createMany({
       data: input.assignments.map((row) => ({
         shiftId: id,
         nozzleId: row.nozzleId,

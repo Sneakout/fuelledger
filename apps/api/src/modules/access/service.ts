@@ -128,14 +128,13 @@ export async function saveNozzleAssignments(
     ) ?? [];
   const nozzleIds = input.assignments.map((row) => row.nozzleId);
   if (
-    nozzleIds.length !== nozzles.length ||
-    new Set(nozzleIds).size !== nozzles.length ||
+    new Set(nozzleIds).size !== nozzleIds.length ||
     nozzleIds.some((id) => !nozzles.some((nozzle) => nozzle.id === id))
   )
     throw new AppError(
       400,
-      "NOZZLE_ASSIGNMENTS_INCOMPLETE",
-      "Assign every active nozzle exactly once.",
+      "NOZZLE_ASSIGNMENTS_INVALID",
+      "Choose each assigned nozzle only once from this petrol pump.",
     );
   const attendantIds = [...new Set(input.assignments.map((row) => row.userId))];
   const attendants = await prisma.user.count({
@@ -158,7 +157,7 @@ export async function saveNozzleAssignments(
     await tx.nozzleAttendantAssignment.deleteMany({
       where: { nozzleId: { in: nozzles.map((nozzle) => nozzle.id) } },
     });
-    await tx.nozzleAttendantAssignment.createMany({
+    if (input.assignments.length) await tx.nozzleAttendantAssignment.createMany({
       data: input.assignments.map((row) => ({
         nozzleId: row.nozzleId,
         userId: row.userId,
@@ -178,7 +177,7 @@ export async function saveNozzleAssignments(
       await tx.shiftNozzleAssignment.deleteMany({
         where: { shiftId: openShift.id },
       });
-      await tx.shiftNozzleAssignment.createMany({
+      if (input.assignments.length) await tx.shiftNozzleAssignment.createMany({
         data: input.assignments.map((row) => ({
           shiftId: openShift.id,
           nozzleId: row.nozzleId,
