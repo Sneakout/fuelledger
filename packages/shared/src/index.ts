@@ -957,6 +957,15 @@ export const purchaseInvoiceInputSchema = z
         path: ["paymentMethod"],
       });
   });
+export const purchaseInvoiceReceiptInputSchema = z.object({
+  receivedAt: z.string().datetime().optional(),
+  receiptTimingReason: z.string().trim().min(5).max(300).optional(),
+  allocations: z.array(z.object({
+    invoiceLineId: z.string().cuid(),
+    productId: z.string().cuid(),
+    tankId: z.string().cuid().nullable().optional(),
+  })).min(1),
+});
 export const purchaseInvoiceUpdateSchema = z
   .object({
     version: z.number().int().nonnegative(),
@@ -1028,6 +1037,7 @@ export const expenseInputSchema = z.object({
 });
 export type SupplierInput = z.infer<typeof supplierInputSchema>;
 export type PurchaseInvoiceInput = z.infer<typeof purchaseInvoiceInputSchema>;
+export type PurchaseInvoiceReceiptInput = z.infer<typeof purchaseInvoiceReceiptInputSchema>;
 export type PurchaseInvoiceUpdateInput = z.infer<
   typeof purchaseInvoiceUpdateSchema
 >;

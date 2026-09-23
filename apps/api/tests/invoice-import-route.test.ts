@@ -3,9 +3,11 @@ import request from "supertest";
 import { AppError } from "../src/lib/errors.js";
 
 const auth = vi.hoisted(() => ({ currentUser: vi.fn() }));
-const purchases = vi.hoisted(() => ({ createInvoice: vi.fn(), bootstrap: vi.fn() }));
+const purchases = vi.hoisted(() => ({ createInvoice: vi.fn(), receiveInvoiceStock: vi.fn(), bootstrap: vi.fn() }));
+const approvals = vi.hoisted(() => ({ requestProductPriceChangeFromInvoice: vi.fn() }));
 vi.mock("../src/modules/auth/service.js", () => ({ currentUser: auth.currentUser }));
 vi.mock("../src/modules/purchases/service.js", () => purchases);
+vi.mock("../src/modules/approvals/service.js", () => approvals);
 vi.mock("../src/lib/prisma.js", () => ({ prisma: { $queryRaw: vi.fn() } }));
 
 process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
@@ -35,20 +37,44 @@ describe("Nerve invoice import route", async () => {
   beforeEach(() => {
     vi.clearAllMocks();
     auth.currentUser.mockResolvedValue(owner);
-    purchases.createInvoice.mockResolvedValue({ id: "invoice-1", invoiceNumber: "IOCL-91" });
+    const savedInvoice = { id: "invoice-1", stationId: input.stationId, invoiceNumber: "IOCL-91", invoiceDate: new Date(input.invoiceDate), dueDate: new Date(input.dueDate), subtotal: 10000, taxAmount: 1800, totalAmount: 11800, supplier: { id: input.supplierId }, lines: [{ id: "cm00000000000000000000006", productId: "cm00000000000000000000003", description: "HSD", quantity: 100, unitCost: 100, taxRate: 0, hsnCode: "27101944" }] };
+    purchases.createInvoice.mockResolvedValue(savedInvoice);
+    purchases.receiveInvoiceStock.mockResolvedValue({ ...savedInvoice, receipt: { id: "receipt-1" } });
+    approvals.requestProductPriceChangeFromInvoice.mockResolvedValue([{ id: "price-approval-1" }]);
   });
 
   it("uses the existing purchase service for a tightly scoped unpaid invoice", async () => {
     const response = await request(createApp()).post("/api/purchases/invoice-import").set("Cookie", "fuelledger_session=valid").set("Idempotency-Key", "invoice-import-test-0001").send(input);
     expect(response.status).toBe(201);
     expect(purchases.createInvoice).toHaveBeenCalledWith("org-1", "owner-1", expect.objectContaining({ receiveNow: false, paidNow: false, attachment: null }));
+    expect(approvals.requestProductPriceChangeFromInvoice).toHaveBeenCalledOnce();
   });
 
-  it("rejects stock, payment or document-storage expansion", async () => {
+  it("rejects payment or document-storage expansion", async () => {
     const response = await request(createApp()).post("/api/purchases/invoice-import").set("Cookie", "fuelledger_session=valid").set("Idempotency-Key", "invoice-import-test-0002").send({ ...input, paidNow: true, paymentMethod: "UPI" });
     expect(response.status).toBe(400);
     expect(response.body.error.code).toBe("INVOICE_IMPORT_SCOPE_INVALID");
     expect(purchases.createInvoice).not.toHaveBeenCalled();
+  });
+
+  it("allows a confirmed stock receipt with product and tank allocations", async () => {
+    const response = await request(createApp()).post("/api/purchases/invoice-import").set("Cookie", "fuelledger_session=valid").set("Idempotency-Key", "invoice-import-test-stock").send({
+      ...input,
+      receiveNow: true,
+      lines: [{ ...input.lines[0], productId: "cm00000000000000000000003", tankId: "cm00000000000000000000004" }],
+    });
+    expect(response.status).toBe(201);
+    expect(purchases.createInvoice).toHaveBeenCalledWith("org-1", "owner-1", expect.objectContaining({ receiveNow: true, lines: [expect.objectContaining({ productId: "cm00000000000000000000003", tankId: "cm00000000000000000000004" })] }));
+  });
+
+  it("repairs the missing receipt of an existing imported invoice without recreating it", async () => {
+    const response = await request(createApp()).post("/api/purchases/invoices/cm00000000000000000000005/receive").set("Cookie", "fuelledger_session=valid").set("Idempotency-Key", "invoice-import-receipt-repair").send({
+      allocations: [{ invoiceLineId: "cm00000000000000000000006", productId: "cm00000000000000000000003", tankId: "cm00000000000000000000004" }],
+    });
+    expect(response.status).toBe(201);
+    expect(purchases.receiveInvoiceStock).toHaveBeenCalledWith("org-1", "owner-1", "cm00000000000000000000005", { allocations: [{ invoiceLineId: "cm00000000000000000000006", productId: "cm00000000000000000000003", tankId: "cm00000000000000000000004" }] }, ["cm00000000000000000000001"]);
+    expect(purchases.createInvoice).not.toHaveBeenCalled();
+    expect(approvals.requestProductPriceChangeFromInvoice).toHaveBeenCalledWith("org-1", "owner-1", expect.objectContaining({ id: "invoice-1" }), expect.objectContaining({ invoiceTotal: 11800, receiveNow: true, lines: [expect.objectContaining({ productId: "cm00000000000000000000003", quantity: 100, unitCost: 100 })] }));
   });
 
   it("denies a station outside the signed-in owner’s scope", async () => {

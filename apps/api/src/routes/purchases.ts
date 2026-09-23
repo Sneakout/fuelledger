@@ -1,5 +1,5 @@
-import type { User } from "@fuelledger/shared";
-import { expenseCategoryInputSchema, expenseInputSchema, purchaseInvoiceInputSchema, purchaseInvoiceUpdateSchema, supplierInputSchema, supplierPaymentInputSchema } from "@fuelledger/shared";
+import type { PurchaseInvoiceInput, User } from "@fuelledger/shared";
+import { expenseCategoryInputSchema, expenseInputSchema, purchaseInvoiceInputSchema, purchaseInvoiceReceiptInputSchema, purchaseInvoiceUpdateSchema, supplierInputSchema, supplierPaymentInputSchema } from "@fuelledger/shared";
 import { Router } from "express";
 import { z } from "zod";
 import { env } from "../config/env.js";
@@ -41,15 +41,18 @@ const importPolicy = (user: User) => invoiceImportReleasePolicy({
   role: user.role,
 });
 
-async function createInvoiceAndPriceApproval(user: User, input: ReturnType<typeof purchaseInvoiceInputSchema.parse>) {
-  const invoice = await service.createInvoice(user.organization.id, user.id, input);
+async function priceApprovalsFor(user: User, invoice: Awaited<ReturnType<typeof service.createInvoice>>, input: PurchaseInvoiceInput) {
   try {
-    const priceApprovals = await requestProductPriceChangeFromInvoice(user.organization.id, user.id, invoice, input);
-    return { invoice, priceApprovals };
+    return await requestProductPriceChangeFromInvoice(user.organization.id, user.id, invoice, input);
   } catch (error) {
     logger.error({ invoiceId: invoice.id, error: error instanceof Error ? error.message : 'Unknown error' }, 'Could not create product price approval after invoice creation');
-    return { invoice, priceApprovals: [] };
+    return [];
   }
+}
+
+async function createInvoiceAndPriceApproval(user: User, input: ReturnType<typeof purchaseInvoiceInputSchema.parse>) {
+  const invoice = await service.createInvoice(user.organization.id, user.id, input);
+  return { invoice, priceApprovals: await priceApprovalsFor(user, invoice, input) };
 }
 
 purchasesRouter.use(authenticate);
@@ -81,7 +84,7 @@ purchasesRouter.post("/invoice-import", async (req, res) => {
   const policy = importPolicy(req.user!);
   if (!policy.enabled) throw new AppError(403, "INVOICE_IMPORT_UNAVAILABLE", "Invoice import is not available for this account yet.");
   const input = parse(purchaseInvoiceInputSchema.safeParse(req.body), "INVOICE_INVALID", "Please review the invoice details.");
-  if (input.receiveNow || input.paidNow || input.attachment) throw new AppError(400, "INVOICE_IMPORT_SCOPE_INVALID", "This confirmation can create only an unpaid invoice. Stock, payment and document storage remain separate.");
+  if (input.paidNow || input.attachment) throw new AppError(400, "INVOICE_IMPORT_SCOPE_INVALID", "This confirmation can create an unpaid invoice and its stock receipt. Payment and document storage remain separate.");
   assertStationAccess(req.user!, input.stationId);
   res.status(201).json(await createInvoiceAndPriceApproval(req.user!, input));
 });
@@ -90,6 +93,24 @@ purchasesRouter.post("/invoices", async (req, res) => {
   const input = parse(purchaseInvoiceInputSchema.safeParse(req.body), "INVOICE_INVALID", "Please review the invoice details.");
   assertStationAccess(req.user!, input.stationId);
   res.status(201).json(await createInvoiceAndPriceApproval(req.user!, input));
+});
+purchasesRouter.post("/invoices/:id/receive", async (req, res) => {
+  const input = parse(purchaseInvoiceReceiptInputSchema.safeParse(req.body), "RECEIPT_INVALID", "Please review the stock receipt details.");
+  const invoice = await service.receiveInvoiceStock(req.user!.organization.id, req.user!.id, req.params.id!, input, permittedStationIds(req.user!));
+  const priceInput: PurchaseInvoiceInput = {
+    stationId: invoice.stationId,
+    supplierId: invoice.supplier.id,
+    invoiceNumber: invoice.invoiceNumber,
+    invoiceDate: invoice.invoiceDate.toISOString(),
+    dueDate: invoice.dueDate.toISOString(),
+    invoiceTotal: Number(invoice.totalAmount),
+    taxAmount: Number(invoice.taxAmount),
+    receiveNow: true,
+    paidNow: false,
+    attachment: null,
+    lines: invoice.lines.map(line => ({ productId: line.productId, description: line.description, quantity: Number(line.quantity), unitCost: Number(line.unitCost), taxRate: Number(line.taxRate), hsnCode: line.hsnCode ?? undefined })),
+  };
+  res.status(201).json({ invoice, priceApprovals: await priceApprovalsFor(req.user!, invoice, priceInput) });
 });
 purchasesRouter.get("/invoices/:id/price-preview", async (req, res) => res.json(await service.invoicePricePreview(req.user!.organization.id, req.params.id!, permittedStationIds(req.user!), typeof req.query.invoiceDate === "string" ? req.query.invoiceDate : undefined)));
 purchasesRouter.put("/invoices/:id", async (req, res) => {

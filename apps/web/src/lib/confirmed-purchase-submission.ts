@@ -1,5 +1,5 @@
 import type { PurchaseInvoiceInput } from "@fuelledger/shared";
-import type { PurchaseInvoice, PurchaseProduct, Supplier } from "./api";
+import type { PurchaseInvoice, PurchaseProduct, PurchaseStation, Supplier } from "./api";
 import { calculatedInvoiceTotal, validateEditableInvoiceDraft, type EditableInvoiceDraft } from "../components/EditableInvoiceReviewDialog";
 import { defaultPurchaseDueDate } from "./purchase-due-date";
 
@@ -25,6 +25,37 @@ export function findMatchingProduct(description: string, product: string, hsnCod
   return exact.length === 1 ? exact[0]!.id : null;
 }
 
+export function compatibleTanks(stations: PurchaseStation[], stationId: string, productId: string) {
+  return stations.find(station => station.id === stationId)?.configurations.flatMap(configuration => configuration.tanks).filter(tank => tank.productId === productId) ?? [];
+}
+
+export function onlyCompatibleTankId(stations: PurchaseStation[], stationId: string, productId: string) {
+  const tanks = compatibleTanks(stations, stationId, productId);
+  return tanks.length === 1 ? tanks[0]!.id : null;
+}
+
+export function validateReceiptSelections(
+  receiveNow: boolean,
+  stationId: string,
+  productIds: Array<string | null>,
+  tankIds: Array<string | null>,
+  products: PurchaseProduct[],
+  stations: PurchaseStation[],
+) {
+  if (!receiveNow) return [];
+  const errors: string[] = [];
+  productIds.forEach((productId, index) => {
+    if (!productId) { errors.push(`Choose an inventory product for product ${index + 1}.`); return; }
+    const product = products.find(item => item.id === productId);
+    if (!product) { errors.push(`Choose an active inventory product for product ${index + 1}.`); return; }
+    if (!product.tankLinked) return;
+    const tankId = tankIds[index];
+    const validTank = compatibleTanks(stations, stationId, productId).some(tank => tank.id === tankId);
+    if (!validTank) errors.push(`Choose the receiving tank for ${product.name}.`);
+  });
+  return errors;
+}
+
 export function findDuplicateInvoice(supplierId: string, invoiceNumber: string, invoices: PurchaseInvoice[]) {
   const number = normalize(invoiceNumber);
   if (!supplierId || !number) return undefined;
@@ -41,9 +72,17 @@ export function validateConfirmedPurchase(draft: EditableInvoiceDraft, stationId
   return [...new Set(errors)];
 }
 
-export function buildConfirmedPurchaseInput(draft: EditableInvoiceDraft, stationId: string, supplierId: string, productIds: Array<string | null>): PurchaseInvoiceInput {
+export function buildConfirmedPurchaseInput(
+  draft: EditableInvoiceDraft,
+  stationId: string,
+  supplierId: string,
+  productIds: Array<string | null>,
+  options: { receiveNow?: boolean; tankIds?: Array<string | null> } = {},
+): PurchaseInvoiceInput {
   const errors = validateConfirmedPurchase(draft, stationId, supplierId);
   if (errors.length) throw new Error(errors[0]);
+  const receiveNow = options.receiveNow ?? true;
+  const tankIds = options.tankIds ?? [];
   return {
     stationId,
     supplierId,
@@ -53,12 +92,12 @@ export function buildConfirmedPurchaseInput(draft: EditableInvoiceDraft, station
     invoiceTotal: Number(draft.totalAmount),
     taxAmount: Number(draft.taxAmount || 0),
     purchasePriceExcludedAmount: Number(draft.purchasePriceExcludedAmount || 0) || undefined,
-    receiveNow: false,
+    receiveNow,
     paidNow: false,
     attachment: null,
     lines: draft.lines.map((line, index) => ({
       productId: productIds[index] || null,
-      tankId: null,
+      tankId: receiveNow ? tankIds[index] || null : null,
       description: line.description.trim(),
       quantity: Number(line.quantity),
       sourceUnit: line.unit.trim().toUpperCase() || undefined,

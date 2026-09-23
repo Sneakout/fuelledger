@@ -260,6 +260,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  receiveImportedPurchaseInvoice: (id: string, input: PurchaseInvoiceReceiptInput) =>
+    request<{ invoice: PurchaseInvoice; priceApprovals?: ProductPriceApprovalNotice[] }>(`/purchases/invoices/${id}/receive`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   recordInvoiceImportMetric: (input: InvoiceImportMetric) =>
     request<void>("/purchases/invoice-import/metrics", {
       method: "POST",
@@ -1170,6 +1175,11 @@ export type PurchasesBootstrap = {
   summary: { payables: number; overdue: number; expensesThisMonth: number };
 };
 export type InvoiceImportPolicy = { enabled: boolean; monitored: boolean };
+export type PurchaseInvoiceReceiptInput = {
+  receivedAt?: string;
+  receiptTimingReason?: string;
+  allocations: Array<{ invoiceLineId: string; productId: string; tankId?: string | null }>;
+};
 export type InvoiceImportMetric = {
   stage: "PDF_TEXT" | "OCR" | "PURCHASE_CHECK" | "SUBMISSION";
   durationMs: number;

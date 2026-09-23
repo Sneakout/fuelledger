@@ -1,5 +1,5 @@
 import { safeTransaction } from '../../lib/safe-save.js';
-import type { ExpenseCategoryInput, ExpenseInput, PurchaseInvoiceInput, PurchaseInvoiceUpdateInput, SupplierInput, SupplierPaymentInput } from '@fuelledger/shared';
+import type { ExpenseCategoryInput, ExpenseInput, PurchaseInvoiceInput, PurchaseInvoiceReceiptInput, PurchaseInvoiceUpdateInput, SupplierInput, SupplierPaymentInput } from '@fuelledger/shared';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
@@ -406,6 +406,21 @@ export async function createInvoice(organizationId: string, userId: string, inpu
             : null;
           if (line.tankId && !tank) throw new AppError(400, 'TANK_MAPPING_INVALID', 'The selected tank must hold the invoiced product.');
           if (product.tankLinked && !tank) throw new AppError(400, 'TANK_REQUIRED', `${product.name} must be received into a configured tank.`);
+          if (tank) {
+            const stockBeforeReceipt = Number(await bookStockAt(tx, {
+              organizationId,
+              stationId: station.id,
+              productId: product.id,
+              tankId: tank.id,
+            }, receiptTiming!.receivedAt));
+            const stockAfterReceipt = stockBeforeReceipt + line.quantity;
+            if (stockAfterReceipt > Number(tank.workingCapacity) + 0.001)
+              throw new AppError(
+                409,
+                'TANK_CAPACITY_EXCEEDED',
+                `${tank.code} would contain ${stockAfterReceipt.toLocaleString('en-IN')} L after this receipt, above its ${Number(tank.workingCapacity).toLocaleString('en-IN')} L safe capacity. Split the delivery across compatible tanks or correct the tank allocation before posting.`,
+              );
+          }
           const receiptLine = await tx.receiptLine.create({
             data: {
               receiptId: receipt.id,
@@ -482,6 +497,49 @@ export async function createInvoice(organizationId: string, userId: string, inpu
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AppError(409, 'INVOICE_EXISTS', 'This invoice number already exists for the supplier.');
     throw error;
   }
+}
+export async function receiveInvoiceStock(organizationId: string, userId: string, invoiceId: string, input: PurchaseInvoiceReceiptInput, stationIds?: string[]) {
+  const invoice = await prisma.purchaseInvoice.findFirst({
+    where: { id: invoiceId, organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}) },
+    include: { receipt: { select: { id: true } }, supplier: { select: { id: true, name: true } }, lines: { select: { id: true, productId: true, description: true, quantity: true, unitCost: true } } },
+  });
+  if (!invoice) throw new AppError(404, 'INVOICE_NOT_FOUND', 'This supplier invoice was not found.');
+  if (invoice.receipt) throw new AppError(409, 'INVOICE_ALREADY_RECEIVED', 'Stock has already been received for this invoice.');
+  if (input.allocations.length !== invoice.lines.length || new Set(input.allocations.map(item => item.invoiceLineId)).size !== invoice.lines.length)
+    throw new AppError(400, 'RECEIPT_LINES_INCOMPLETE', 'Confirm one stock allocation for every invoice line.');
+  const allocations = new Map(input.allocations.map(item => [item.invoiceLineId, item]));
+  if (invoice.lines.some(line => !allocations.has(line.id))) throw new AppError(400, 'RECEIPT_LINES_INCOMPLETE', 'Confirm one stock allocation for every invoice line.');
+  const products = await prisma.product.findMany({ where: { organizationId, id: { in: input.allocations.map(item => item.productId) }, active: true, inventoryTracked: true } });
+  if (products.length !== new Set(input.allocations.map(item => item.productId)).size) throw new AppError(400, 'PRODUCT_NOT_INVENTORIED', 'Every received invoice line needs an active inventory product.');
+  for (const line of invoice.lines) {
+    const allocation = allocations.get(line.id)!;
+    if (!line.productId || line.productId !== allocation.productId)
+      throw new AppError(409, 'INVOICE_PRODUCT_CHANGED', `${line.description} is not linked to the same inventory product saved on the invoice. Review it in Purchases before receiving stock.`);
+  }
+  const timing = resolveReceiptTiming(input.receivedAt, input.receiptTimingReason);
+  try {
+    await safeTransaction(prisma, async tx => {
+      const receipt = await tx.purchaseReceipt.create({ data: { organizationId, stationId: invoice.stationId, supplierId: invoice.supplier.id, invoiceId: invoice.id, supplierName: invoice.supplier.name, referenceNo: invoice.invoiceNumber, receivedAt: timing.receivedAt, receivedAtReason: timing.receivedAtReason, notes: 'Received after OCR invoice confirmation', createdById: userId } });
+      for (const line of invoice.lines) {
+        const allocation = allocations.get(line.id)!;
+        const product = products.find(item => item.id === allocation.productId)!;
+        const tank = allocation.tankId ? await tx.tank.findFirst({ where: { id: allocation.tankId, productId: product.id, status: 'ACTIVE', configuration: { stationId: invoice.stationId, active: true } } }) : null;
+        if (allocation.tankId && !tank) throw new AppError(400, 'TANK_MAPPING_INVALID', 'The selected tank must hold the invoiced product.');
+        if (product.tankLinked && !tank) throw new AppError(400, 'TANK_REQUIRED', `${product.name} must be received into a configured tank.`);
+        if (tank) {
+          const stockAfterReceipt = Number(await bookStockAt(tx, { organizationId, stationId: invoice.stationId, productId: product.id, tankId: tank.id }, timing.receivedAt)) + Number(line.quantity);
+          if (stockAfterReceipt > Number(tank.workingCapacity) + 0.001) throw new AppError(409, 'TANK_CAPACITY_EXCEEDED', `${tank.code} would contain ${stockAfterReceipt.toLocaleString('en-IN')} L after this receipt, above its ${Number(tank.workingCapacity).toLocaleString('en-IN')} L safe capacity. Split the delivery across compatible tanks or correct the tank allocation before posting.`);
+        }
+        const receiptLine = await tx.receiptLine.create({ data: { receiptId: receipt.id, productId: product.id, tankId: tank?.id ?? null, quantity: line.quantity, unitCost: line.unitCost } });
+        await tx.inventoryLedger.create({ data: { organizationId, stationId: invoice.stationId, productId: product.id, tankId: tank?.id ?? null, type: 'RECEIPT', quantityDelta: line.quantity, unitCost: line.unitCost, receiptLineId: receiptLine.id, occurredAt: receipt.receivedAt, createdById: userId } });
+      }
+      await postJournal(tx, { organizationId, stationId: invoice.stationId, createdById: userId, journalDate: receipt.receivedAt, reference: `GRN-${receipt.id.slice(-8)}`, description: `Stock received for invoice ${invoice.invoiceNumber}`, sourceType: 'PURCHASE_RECEIPT', sourceId: receipt.id, lines: [{ account: '1200', debit: invoice.subtotal }, { account: '1220', credit: invoice.subtotal }] });
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AppError(409, 'INVOICE_ALREADY_RECEIVED', 'Stock has already been received for this invoice.');
+    throw error;
+  }
+  return prisma.purchaseInvoice.findUniqueOrThrow({ where: { id: invoice.id }, include: invoiceInclude });
 }
 type InvoiceForPricing = {
   lines: Array<{

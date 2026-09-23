@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileCheck2, PackageX, RefreshCw, ShieldCheck, X } from "lucide-react";
 import type { InvoiceImportPolicy, ProductPriceApprovalNotice, PurchaseInvoice, PurchasesBootstrap } from "../lib/api";
 import { api, ApiRequestError } from "../lib/api";
-import { buildConfirmedPurchaseInput, findDuplicateInvoice, findMatchingProduct, findMatchingSupplier, validateConfirmedPurchase } from "../lib/confirmed-purchase-submission";
+import { buildConfirmedPurchaseInput, compatibleTanks, findDuplicateInvoice, findMatchingProduct, findMatchingSupplier, onlyCompatibleTankId, validateConfirmedPurchase, validateReceiptSelections } from "../lib/confirmed-purchase-submission";
 import { flushInvoiceImportPerformance, recordInvoiceImportPerformance } from "../lib/invoice-import-performance";
 import type { EditableInvoiceDraft } from "./EditableInvoiceReviewDialog";
 import { assessInvoiceStation } from "../lib/invoice-local-safety";
@@ -23,11 +23,14 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
   const [policy, setPolicy] = useState<InvoiceImportPolicy | null>(null);
   const [supplierId, setSupplierId] = useState("");
   const [productIds, setProductIds] = useState<Array<string | null>>([]);
+  const [tankIds, setTankIds] = useState<Array<string | null>>([]);
+  const [receiveNow, setReceiveNow] = useState(true);
   const [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [created, setCreated] = useState<PurchaseInvoice | null>(null);
+  const [recoveredReceipt, setRecoveredReceipt] = useState(false);
   const [priceApprovals, setPriceApprovals] = useState<ProductPriceApprovalNotice[]>([]);
   const stationAssessment = useMemo(() => assessInvoiceStation(draft.consigneeName, stationName), [draft.consigneeName, stationName]);
   const dueDate = draft.dueDate || defaultPurchaseDueDate(draft.invoiceDate);
@@ -58,7 +61,9 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
         const activeSuppliers = result.suppliers.filter(supplier => supplier.active);
         setData({ ...result, suppliers: activeSuppliers });
         setSupplierId(findMatchingSupplier(draft, activeSuppliers));
-        setProductIds(draft.lines.map(line => findMatchingProduct(line.description, line.product, line.hsnCode, result.products)));
+        const matchedProducts = draft.lines.map(line => findMatchingProduct(line.description, line.product, line.hsnCode, result.products));
+        setProductIds(matchedProducts);
+        setTankIds(matchedProducts.map(productId => productId ? onlyCompatibleTankId(result.stations, stationId, productId) : null));
         await recordInvoiceImportPerformance({ stage: "PURCHASE_CHECK", durationMs: Math.min(120_000, Math.round(performance.now() - startedAt)), outcome: "SUCCESS" }, monitored);
       } catch (caught) {
         if (active) setError(caught instanceof ApiRequestError ? caught.message : "Purchase records could not be checked right now.");
@@ -69,20 +74,34 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
   }, [draft, isDemo, stationAssessment.message, stationAssessment.status]);
 
   const stationAvailable = Boolean(data?.stations.some(station => station.id === stationId));
-  const validationErrors = useMemo(() => [...validateConfirmedPurchase(draft, stationAvailable ? stationId : "", supplierId), ...(stationAssessment.status === "MATCH" ? [] : [stationAssessment.message])], [draft, stationAvailable, stationId, supplierId, stationAssessment]);
+  const validationErrors = useMemo(() => [
+    ...validateConfirmedPurchase(draft, stationAvailable ? stationId : "", supplierId),
+    ...validateReceiptSelections(receiveNow, stationId, productIds, tankIds, data?.products ?? [], data?.stations ?? []),
+    ...(stationAssessment.status === "MATCH" ? [] : [stationAssessment.message]),
+  ], [data, draft, productIds, receiveNow, stationAvailable, stationId, stationAssessment, supplierId, tankIds]);
   const duplicate = findDuplicateInvoice(supplierId, draft.invoiceNumber, data?.invoices ?? []);
+  const canReceiveExisting = Boolean(duplicate && !duplicate.receipt && receiveNow);
 
   const submit = async () => {
-    if (isDemo || !policy?.enabled || saving || created || !confirmed || validationErrors.length || duplicate) return;
+    if (isDemo || !policy?.enabled || saving || created || !confirmed || validationErrors.length || (duplicate && !canReceiveExisting)) return;
     const startedAt = performance.now();
     setSaving(true); setError("");
     try {
-      const input = buildConfirmedPurchaseInput(draft, stationId, supplierId, productIds);
-      const result = await api.createImportedPurchaseInvoice(input);
-      const approvals = result.priceApprovals ?? [];
-      setCreated(result.invoice);
+      let savedInvoice: PurchaseInvoice;
+      let approvals: ProductPriceApprovalNotice[] = [];
+      if (canReceiveExisting && duplicate) {
+        const result = await api.receiveImportedPurchaseInvoice(duplicate.id, { allocations: duplicate.lines.map((line, index) => ({ invoiceLineId: line.id, productId: productIds[index]!, tankId: tankIds[index] || null })) });
+        savedInvoice = result.invoice;
+        approvals = result.priceApprovals ?? [];
+      } else {
+        const result = await api.createImportedPurchaseInvoice(buildConfirmedPurchaseInput(draft, stationId, supplierId, productIds, { receiveNow, tankIds }));
+        savedInvoice = result.invoice;
+        approvals = result.priceApprovals ?? [];
+      }
+      setCreated(savedInvoice);
+      setRecoveredReceipt(canReceiveExisting);
       setPriceApprovals(approvals);
-      onSubmitted(result.invoice, approvals);
+      onSubmitted(savedInvoice, approvals);
       window.dispatchEvent(new Event("fuelnerve:records-changed"));
       await recordInvoiceImportPerformance({ stage: "SUBMISSION", durationMs: Math.min(120_000, Math.round(performance.now() - startedAt)), outcome: "SUCCESS" }, Boolean(policy.monitored));
     } catch (caught) {
@@ -107,26 +126,28 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
 
       {loading && <div className="invoice-submit-loading"><RefreshCw className="spinning"/><strong>Checking suppliers and purchase records…</strong><p>I’m making sure this invoice can be added to the selected fuel station.</p></div>}
 
-      {!loading && created && <div className="invoice-submit-success"><CheckCircle2/><span><small>Invoice created</small><h3>{created.supplier.name} · {money(Number(created.totalAmount))}</h3><p>Invoice {created.invoiceNumber} is now recorded as unpaid. Stock and payment were not changed.</p>{priceApprovals.length > 0 && <div className="invoice-submit-price-alert" role="alert"><AlertTriangle/><span><strong>{priceApprovals.length === 1 ? `${priceApprovals[0]!.evidence.product.code} purchase price changed` : `${priceApprovals.length} purchase prices changed`}</strong><small>The owner has been alerted. Purchase Agent will keep this visible until the purchase and retail selling prices are confirmed.</small></span></div>}</span><button type="button" onClick={onClose}>Done</button></div>}
+      {!loading && created && <div className="invoice-submit-success"><CheckCircle2/><span><small>{recoveredReceipt ? "Stock receipt created" : "Invoice created"}</small><h3>{created.supplier.name} · {money(Number(created.totalAmount))}</h3><p>Invoice {created.invoiceNumber} is recorded as unpaid. {receiveNow ? "The confirmed quantities were added to the selected tanks and inventory." : "Stock and payment were not changed."}</p>{priceApprovals.length > 0 && <div className="invoice-submit-price-alert" role="alert"><AlertTriangle/><span><strong>{priceApprovals.length === 1 ? `${priceApprovals[0]!.evidence.product.code} purchase price changed` : `${priceApprovals.length} purchase prices changed`}</strong><small>The owner has been alerted. Purchase Agent will keep this visible until the purchase and retail selling prices are confirmed.</small></span></div>}</span><button type="button" onClick={onClose}>Done</button></div>}
 
       {!loading && !created && <div className="invoice-submit-body">
-        <section className="invoice-submit-boundary"><ShieldCheck/><div><strong>Only one unpaid invoice will be created</strong><p>The source document stays on this device. Stock, tanks, supplier payments and bank balances will not change.</p></div></section>
+        <section className="invoice-submit-boundary"><ShieldCheck/><div><strong>One unpaid invoice and one stock receipt</strong><p>The source document stays on this device. Confirmed quantities can update inventory and the selected tanks; supplier payment and bank balances will not change.</p></div></section>
+
+        <label className="invoice-submit-stock"><input type="checkbox" checked={receiveNow} onChange={event => { setReceiveNow(event.target.checked); setConfirmed(false); }}/><span><strong>Receive this stock now</strong><small>Creates the receipt and inventory movements at the time you confirm.</small></span></label>
 
         <label className="invoice-submit-field"><span>Existing supplier</span><select aria-label="Existing supplier" value={supplierId} onChange={event => { setSupplierId(event.target.value); setConfirmed(false); }} disabled={!data || isDemo}><option value="">Choose the supplier</option>{data?.suppliers.map(supplier => <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.taxId ? ` · ${supplier.taxId}` : ""}</option>)}</select><small>{supplierId ? "Please confirm that this is the supplier named on the document." : "FuelNerve will not create a new supplier automatically."}</small></label>
 
-        <section className="invoice-submit-lines"><header><div><h3>Product links</h3><p>Link a product only when it is clearly the same item. This does not receive stock.</p></div></header>{draft.lines.map((line, index) => <article key={line.id}><span><strong>{line.description}</strong><small>{number(Number(line.quantity))} {line.unit || "units"} · {money(Number(line.quantity) * Number(line.unitRate))}</small></span><select aria-label={`Product for ${line.description}`} value={productIds[index] ?? ""} onChange={event => { const next = [...productIds]; next[index] = event.target.value || null; setProductIds(next); setConfirmed(false); }} disabled={!data || isDemo}><option value="">Keep description only</option>{data?.products.map(product => <option key={product.id} value={product.id}>{product.name} · {product.code}</option>)}</select></article>)}</section>
+        <section className="invoice-submit-lines"><header><div><h3>Products and receiving tanks</h3><p>Confirm where each OCR-read quantity will be received. A sole compatible tank is selected automatically.</p></div></header>{draft.lines.map((line, index) => { const productId = productIds[index] ?? ""; const product = data?.products.find(item => item.id === productId); const tanks = compatibleTanks(data?.stations ?? [], stationId, productId); return <article key={line.id}><span><strong>{line.description}</strong><small>{number(Number(line.quantity))} {line.unit || "units"} · {money(Number(line.quantity) * Number(line.unitRate))}</small></span><div className="invoice-submit-line-fields"><select aria-label={`Product for ${line.description}`} value={productId} onChange={event => { const selectedProductId = event.target.value || null; const nextProducts = [...productIds]; const nextTanks = [...tankIds]; nextProducts[index] = selectedProductId; nextTanks[index] = selectedProductId && data ? onlyCompatibleTankId(data.stations, stationId, selectedProductId) : null; setProductIds(nextProducts); setTankIds(nextTanks); setConfirmed(false); }} disabled={!data || isDemo}><option value="">Choose product</option>{data?.products.map(item => <option key={item.id} value={item.id}>{item.name} · {item.code}</option>)}</select>{receiveNow && product?.tankLinked && <select aria-label={`Receiving tank for ${line.description}`} value={tankIds[index] ?? ""} onChange={event => { const next = [...tankIds]; next[index] = event.target.value || null; setTankIds(next); setConfirmed(false); }} disabled={!data || isDemo}><option value="">Choose receiving tank</option>{tanks.map(tank => <option key={tank.id} value={tank.id}>{tank.code}</option>)}</select>}</div></article>; })}</section>
 
         <dl className="invoice-submit-facts"><div><dt>Invoice</dt><dd>{draft.invoiceNumber}</dd></div><div><dt>Invoice date</dt><dd>{date(draft.invoiceDate)}</dd></div><div><dt>Due date · T+3</dt><dd>{dueDate ? date(dueDate) : "Check invoice date"}</dd></div><div><dt>Unpaid amount</dt><dd>{money(Number(draft.totalAmount))}</dd></div></dl>
 
-        {duplicate && <section className="invoice-submit-warning"><AlertTriangle/><div><strong>This invoice already exists</strong><p>{duplicate.supplier.name} invoice {duplicate.invoiceNumber} is already recorded. It has not been submitted again.</p></div></section>}
+        {duplicate && <section className={canReceiveExisting ? "invoice-submit-boundary" : "invoice-submit-warning"}><AlertTriangle/><div><strong>{canReceiveExisting ? "Invoice exists; stock receipt is missing" : "This invoice already exists"}</strong><p>{canReceiveExisting ? "FuelNerve will keep the existing invoice and create only its missing inventory receipt." : `${duplicate.supplier.name} invoice ${duplicate.invoiceNumber} is already recorded. It has not been submitted again.`}</p></div></section>}
         {!duplicate && validationErrors.length > 0 && <section className="invoice-submit-warning"><AlertTriangle/><div><strong>Review this before continuing</strong>{validationErrors.slice(0, 3).map(item => <p key={item}>{item}</p>)}</div></section>}
         {error && <p className="invoice-submit-error" role="alert">{error}</p>}
 
-        {!isDemo && policy?.enabled && !duplicate && validationErrors.length === 0 && <label className="invoice-submit-confirm"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/><span><strong>I checked the supplier, invoice number, dates and amount.</strong><small>Create it as unpaid. I understand that stock and payment remain unchanged.</small></span></label>}
+        {!isDemo && policy?.enabled && (!duplicate || canReceiveExisting) && validationErrors.length === 0 && <label className="invoice-submit-confirm"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/><span><strong>I checked the supplier, products, tanks, dates and amount.</strong><small>{canReceiveExisting ? "Keep the existing invoice and create only its missing stock receipt." : `Create it as unpaid${receiveNow ? " and add the confirmed quantities to stock" : " without changing stock"}. Payment remains unchanged.`}</small></span></label>}
         {isDemo && <section className="invoice-submit-warning"><PackageX/><div><strong>Demo stays read-only</strong><p>You can inspect this confirmation, but the demo cannot create an invoice.</p></div></section>}
       </div>}
 
-      {!loading && !created && <footer><button type="button" className="secondary" disabled={saving} onClick={onBack}>Back to preview</button><button type="button" disabled={isDemo || !policy?.enabled || saving || !confirmed || validationErrors.length > 0 || Boolean(duplicate)} onClick={() => void submit()}>{saving ? "Creating invoice…" : `Create unpaid invoice · ${money(Number(draft.totalAmount))}`}</button></footer>}
+      {!loading && !created && <footer><button type="button" className="secondary" disabled={saving} onClick={onBack}>Back to preview</button><button type="button" disabled={isDemo || !policy?.enabled || saving || !confirmed || validationErrors.length > 0 || Boolean(duplicate && !canReceiveExisting)} onClick={() => void submit()}>{saving ? "Saving…" : `${canReceiveExisting ? "Receive stock for existing invoice" : receiveNow ? "Create invoice & receive stock" : "Create unpaid invoice"} · ${money(Number(draft.totalAmount))}`}</button></footer>}
     </section>
   </div>;
 }
