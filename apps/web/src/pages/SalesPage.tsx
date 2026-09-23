@@ -11,7 +11,18 @@ const paymentIcons = { CASH: Banknote, UPI: Smartphone, CARD: CreditCard, CREDIT
 export function SalesPage() {
   const [productSection, setProductSection] = useState<'FUEL' | 'SHOP'>('FUEL'); const [productSearch, setProductSearch] = useState(''); const [data, setData] = useState<SalesBootstrap | null>(null); const [shiftId, setShiftId] = useState(''); const [productId, setProductId] = useState(''); const [employeeId, setEmployeeId] = useState(''); const [paymentMethod, setPaymentMethod] = useState<keyof typeof paymentLabels>('CASH'); const [quantity, setQuantity] = useState(1); const [unitPrice, setUnitPrice] = useState(0); const [tankId, setTankId] = useState(''); const [nozzleId, setNozzleId] = useState(''); const [opening, setOpening] = useState(0); const [closing, setClosing] = useState(0); const [customerId, setCustomerId] = useState(''); const [vehicleId, setVehicleId] = useState(''); const [notes, setNotes] = useState(''); const [saving, setSaving] = useState(false); const [error, setError] = useState('');
   const load = () => api.salesBootstrap().then(result => { setData(result); const shift = result.openShifts[0]; if (shift && !shiftId) pickShift(shift, result); }).catch(error => setError(error instanceof ApiRequestError ? error.message : 'Unable to load sales.'));
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    void load();
+    const refresh = () => void api.salesBootstrap().then(setData).catch(() => undefined);
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('fuelnerve:records-changed', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('fuelnerve:records-changed', refresh);
+    };
+  }, []);
   const fuelProducts = data?.products.filter(item => item.meterLinked || ['FUEL','DEF'].includes(item.category)) ?? []; const shopProducts = data?.products.filter(item => !item.meterLinked && !['FUEL','DEF'].includes(item.category)) ?? []; const displayedProducts = (productSection === 'FUEL' ? fuelProducts : shopProducts).filter(item => `${item.name} ${item.code}`.toLowerCase().includes(productSearch.trim().toLowerCase())); const shift = data?.openShifts.find(item => item.id === shiftId); const product = data?.products.find(item => item.id === productId); const metered = Boolean(product?.meterLinked); const productNozzles = useMemo(() => shift?.nozzleReadings.filter(reading => reading.nozzle.product.id === productId) ?? [], [shift, productId]); const nozzle = productNozzles.find(reading => reading.nozzle.id === nozzleId); const tanks = nozzle?.nozzle.tankMappings.map(mapping => mapping.tank) ?? []; const meteredQuantity = Math.max(0, closing - opening); const total = (metered ? meteredQuantity : quantity) * unitPrice;
   function pickShift(next: OpenSaleShift, source = data) { setShiftId(next.id); const team = uniqueTeam(next); setEmployeeId(team[0]?.id ?? source?.employees[0]?.id ?? ''); }
   function pickProduct(next: SalesProduct) { setProductId(next.id); setUnitPrice(Number(next.sellingPrice)); setTankId(''); setNozzleId(''); setOpening(0); setClosing(0); }

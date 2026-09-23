@@ -38,6 +38,7 @@ export function IntelligenceAgentsPage() {
   const [data, setData] = useState<NerveAgentsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [recordsVersion, setRecordsVersion] = useState(0);
   const [investigation, setInvestigation] = useState<InvestigationResponse | null>(null);
   const [investigationAgent, setInvestigationAgent] = useState<NerveAgentPresentation | null>(null);
   const [investigatingKey, setInvestigatingKey] = useState<string | null>(null);
@@ -52,6 +53,17 @@ export function IntelligenceAgentsPage() {
   };
 
   useEffect(() => { void loadSubscription(); }, [user?.id]);
+  useEffect(() => {
+    const refresh = () => setRecordsVersion((value) => value + 1);
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener("fuelnerve:records-changed", refresh);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("fuelnerve:records-changed", refresh);
+      window.removeEventListener("focus", refresh);
+    };
+  }, []);
 
   const load = async () => {
     if (!selectedStationId || !intelligenceActive) { setLoading(false); return; }
@@ -65,7 +77,7 @@ export function IntelligenceAgentsPage() {
     if (accessState !== "ready") return;
     if (!intelligenceActive) { setData(null); setError(""); setLoading(false); return; }
     void load();
-  }, [selectedStationId, accessState, intelligenceActive]);
+  }, [selectedStationId, accessState, intelligenceActive, recordsVersion]);
 
   const findings = useMemo(() => data?.agents.flatMap((agent) => agent.findings) ?? [], [data]);
   const team = useMemo<TeamAgent[]>(() => agentCatalogue.map((definition) => {

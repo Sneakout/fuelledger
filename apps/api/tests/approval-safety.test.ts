@@ -109,6 +109,10 @@ describe('approval safety boundary', async () => {
     expect(tx.productPurchasePrice.upsert).toHaveBeenCalledWith(expect.objectContaining({
       where: { productId_effectiveFrom: { productId: 'product-1', effectiveFrom: new Date(purchaseEffectiveFrom) } },
     }));
+    expect(tx.productPurchasePrice.upsert).toHaveBeenCalledTimes(2);
+    expect(tx.productPurchasePrice.upsert).toHaveBeenLastCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ price: expect.anything() }),
+    }));
     expect(tx.productSellingPrice.upsert).toHaveBeenCalledWith(expect.objectContaining({
       where: { productId_effectiveFrom: { productId: 'product-1', effectiveFrom: new Date('2026-09-13T00:00:00.000Z') } },
     }));

@@ -141,6 +141,9 @@ private struct ReviewedApprovalCard: View {
                     .font(.subheadline.weight(.bold)).foregroundStyle(FuelNerveTheme.forest)
                 Text(approval.status == "APPROVED" ? "Approved and records updated" : "Not approved")
                     .font(.caption).foregroundStyle(.secondary)
+                if approval.isPriceChange, let invoiceNumber = approval.evidence.invoice?.invoiceNumber ?? approval.payload.invoiceNumber {
+                    Text("Invoice \(invoiceNumber)").font(.caption2.weight(.semibold)).foregroundStyle(FuelNerveTheme.forest.opacity(0.72))
+                }
                 Text(approval.station.name).font(.caption2).foregroundStyle(.secondary)
             }
             Spacer()

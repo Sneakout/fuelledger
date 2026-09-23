@@ -102,6 +102,15 @@ export function ProductsPage() {
       .catch(() => setError("Unable to load the product catalog."));
   useEffect(() => {
     void load();
+    const refresh = () => void load();
+    const timer = window.setInterval(refresh, 30_000);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("fuelnerve:records-changed", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("fuelnerve:records-changed", refresh);
+    };
   }, []);
   const set =
     (key: keyof ProductForm) => (value: string | number | boolean | null) =>

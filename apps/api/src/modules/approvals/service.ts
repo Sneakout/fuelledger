@@ -177,15 +177,24 @@ export async function decide(organizationId: string, ownerId: string, id: string
       if (!product) throw new AppError(404, 'PRICE_PRODUCT_NOT_FOUND', 'This product is no longer available. No prices were changed.');
       if (Math.abs(Number(product.purchasePrice) - evidence.currentPurchasePrice) >= 0.01 || Math.abs(Number(product.sellingPrice) - evidence.currentSellingPrice) >= 0.01)
         throw new AppError(409, 'APPROVAL_EVIDENCE_CHANGED', 'Product prices changed after this request was created. Review a fresh price request before approving.');
-      const [latestPurchasePrice, latestSellingPrice] = await Promise.all([
-        tx.productPurchasePrice.findFirst({ where: { productId: product.id, effectiveFrom: { lte: now } }, select: { effectiveFrom: true }, orderBy: { effectiveFrom: 'desc' } }),
-        tx.productSellingPrice.findFirst({ where: { productId: product.id, effectiveFrom: { lte: now } }, select: { effectiveFrom: true }, orderBy: { effectiveFrom: 'desc' } }),
-      ]);
+      const latestSellingPrice = await tx.productSellingPrice.findFirst({ where: { productId: product.id, effectiveFrom: { lte: now } }, select: { effectiveFrom: true }, orderBy: { effectiveFrom: 'desc' } });
       await tx.productPurchasePrice.upsert({
         where: { productId_effectiveFrom: { productId: product.id, effectiveFrom: purchaseEffectiveFrom } },
         update: { price: new Prisma.Decimal(payload.proposedPurchasePrice) },
         create: { productId: product.id, effectiveFrom: purchaseEffectiveFrom, price: new Prisma.Decimal(payload.proposedPurchasePrice) },
       });
+      // Keep the supplier invoice date in the audit trail, but make an owner-approved
+      // historical invoice rate active from the moment it is approved. Otherwise a
+      // later seed/manual history row can continue to win and the UI says "updated"
+      // while still showing the old purchase price.
+      const purchaseActivationFrom = purchaseEffectiveFrom <= now ? now : purchaseEffectiveFrom;
+      if (purchaseActivationFrom.getTime() !== purchaseEffectiveFrom.getTime()) {
+        await tx.productPurchasePrice.upsert({
+          where: { productId_effectiveFrom: { productId: product.id, effectiveFrom: purchaseActivationFrom } },
+          update: { price: new Prisma.Decimal(payload.proposedPurchasePrice) },
+          create: { productId: product.id, effectiveFrom: purchaseActivationFrom, price: new Prisma.Decimal(payload.proposedPurchasePrice) },
+        });
+      }
       await tx.productSellingPrice.upsert({
         where: { productId_effectiveFrom: { productId: product.id, effectiveFrom: sellingEffectiveFrom } },
         update: { price: new Prisma.Decimal(sellingPrice) },
@@ -194,7 +203,7 @@ export async function decide(organizationId: string, ownerId: string, id: string
       await tx.product.update({
         where: { id: product.id },
         data: {
-          ...(purchaseEffectiveFrom <= now && (!latestPurchasePrice || latestPurchasePrice.effectiveFrom <= purchaseEffectiveFrom) ? { purchasePrice: new Prisma.Decimal(payload.proposedPurchasePrice) } : {}),
+          ...(purchaseEffectiveFrom <= now ? { purchasePrice: new Prisma.Decimal(payload.proposedPurchasePrice) } : {}),
           ...(sellingEffectiveFrom <= now && (!latestSellingPrice || latestSellingPrice.effectiveFrom <= sellingEffectiveFrom) ? { sellingPrice: new Prisma.Decimal(sellingPrice) } : {}),
         },
       });

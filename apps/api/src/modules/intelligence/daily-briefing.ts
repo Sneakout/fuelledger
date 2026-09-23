@@ -89,7 +89,12 @@ export async function dailyBriefing(organizationId: string, permittedStationIds?
   const stationScope = stationId ?? 'ALL';
   const dateValue = new Date(`${today}T00:00:00.000Z`);
   const existing = await prisma.dailyOwnerBriefing.findUnique({ where: { organizationId_stationScope_briefingDate: { organizationId, stationScope, briefingDate: dateValue } } });
-  if (existing && JSON.stringify(existing.facts) === JSON.stringify(facts)) return { date: today, calculatedAt: existing.calculatedAt.toISOString(), facts, narrative: existing.narrative as Narrative, narrativeMode: existing.narrativeMode, model: existing.model };
+  if (existing && JSON.stringify(existing.facts) === JSON.stringify(facts)) {
+    // The records were checked again just now even though the resulting facts
+    // did not change. Reuse the saved narrative, but report the real review
+    // time so agent freshness is not tied to the first request of the day.
+    return { date: today, calculatedAt: now.toISOString(), facts, narrative: existing.narrative as Narrative, narrativeMode: existing.narrativeMode, model: existing.model };
+  }
   const generated = await explain(facts);
   const saved = await prisma.dailyOwnerBriefing.upsert({ where: { organizationId_stationScope_briefingDate: { organizationId, stationScope, briefingDate: dateValue } }, create: { organizationId, stationScope, briefingDate: dateValue, calculatedAt: now, facts: facts as unknown as Prisma.InputJsonValue, narrative: generated.narrative as unknown as Prisma.InputJsonValue, narrativeMode: generated.mode, model: generated.model }, update: { calculatedAt: now, facts: facts as unknown as Prisma.InputJsonValue, narrative: generated.narrative as unknown as Prisma.InputJsonValue, narrativeMode: generated.mode, model: generated.model } });
   return { date: today, calculatedAt: saved.calculatedAt.toISOString(), facts, narrative: generated.narrative, narrativeMode: generated.mode, model: generated.model };

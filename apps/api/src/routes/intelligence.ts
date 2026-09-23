@@ -22,10 +22,19 @@ intelligenceRouter.get('/daily-briefing', async (req, res) => {
 });
 intelligenceRouter.get('/agents', async (req, res) => {
   requireOwner(req.user!);
-  const parsed = z.object({ stationId: z.string().cuid() }).safeParse(req.query);
+  const parsed = z.object({
+    stationId: z.string().cuid(),
+    source: z.enum(['live', 'shadow']).default('live'),
+  }).safeParse(req.query);
   if (!parsed.success) throw new AppError(400, 'STATION_INVALID', 'Choose a valid fuel station.');
   assertStationAccess(req.user!, parsed.data.stationId);
-  if (env.NERVE_LOCAL_SHADOW_ENABLED && env.NODE_ENV !== 'production' && !req.user!.demoExpiresAt) {
+  // The owner-facing page must use the same live records as the dashboard.
+  // A saved shadow report is available only when a local tester explicitly
+  // requests it; enabling the shadow runtime must never replace live results.
+  if (parsed.data.source === 'shadow') {
+    if (!env.NERVE_LOCAL_SHADOW_ENABLED || env.NODE_ENV === 'production' || req.user!.demoExpiresAt) {
+      throw new AppError(404, 'NERVE_SHADOW_UNAVAILABLE', 'The local shadow review is not available.');
+    }
     return res.json(await nerveFindings({ ...(env.NERVE_LOCAL_REPORT_PATH ? { reportPath: env.NERVE_LOCAL_REPORT_PATH } : {}), organizationId: req.user!.organization.id, stationId: parsed.data.stationId }));
   }
   const briefing = await dailyBriefing(req.user!.organization.id, permittedStationIds(req.user!), parsed.data.stationId, { demoAccess: Boolean(req.user!.demoExpiresAt) });
@@ -33,10 +42,21 @@ intelligenceRouter.get('/agents', async (req, res) => {
 });
 intelligenceRouter.post('/investigations', async (req, res) => {
   requireOwner(req.user!);
-  const parsed = z.object({ requestId: z.string().uuid(), stationId: z.string().cuid(), findingIds: z.array(z.string().uuid()).min(1).max(10) }).strict().safeParse(req.body);
+  const parsed = z.object({
+    requestId: z.string().uuid(),
+    stationId: z.string().cuid(),
+    findingIds: z.array(z.string().uuid()).min(1).max(10),
+    source: z.enum(['live', 'shadow']).default('live'),
+  }).strict().safeParse(req.body);
   if (!parsed.success) throw new AppError(400, 'INVESTIGATION_REQUEST_INVALID', 'Choose up to ten current findings to investigate.');
   assertStationAccess(req.user!, parsed.data.stationId);
-  const useLocalShadow = env.NERVE_LOCAL_SHADOW_ENABLED && env.NODE_ENV !== 'production';
+  const useLocalShadow = parsed.data.source === 'shadow'
+    && env.NERVE_LOCAL_SHADOW_ENABLED
+    && env.NODE_ENV !== 'production'
+    && !req.user!.demoExpiresAt;
+  if (parsed.data.source === 'shadow' && !useLocalShadow) {
+    throw new AppError(404, 'NERVE_SHADOW_UNAVAILABLE', 'The local shadow review is not available.');
+  }
   const findingIds = [...new Set(parsed.data.findingIds)];
   const briefing = useLocalShadow ? null : await dailyBriefing(req.user!.organization.id, permittedStationIds(req.user!), parsed.data.stationId);
   const sourceFindings = briefing ? briefingFindingSources({ organizationId: req.user!.organization.id, stationId: parsed.data.stationId, generatedAt: briefing.calculatedAt, facts: briefing.facts, findingIds }) : undefined;
