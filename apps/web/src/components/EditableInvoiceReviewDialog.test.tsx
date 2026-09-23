@@ -46,6 +46,17 @@ Total 1207079.00`);
     expect(validateEditableInvoiceDraft(draft)).not.toContainEqual(expect.stringContaining("product amounts and tax"));
   });
 
+  it("automatically limits derived material rates and tax percentages to two decimals", () => {
+    const draft = createEditableInvoiceDraft(parseIndianInvoice(`Indian Oil Corporation Limited
+Tax Invoice No: 20274247B022177
+Invoice Date: 13-Aug-26
+EBMS 4.000 KL 27101242
+BASIC DESTINATION PRICE 4.000 KL 82203.320 KL 328813.28
+Total for material 440749.38
+Grand Total 440749.38`));
+    expect(draft.lines[0]).toMatchObject({ unitRate: "82203.32", taxRate: "34.04" });
+  });
+
   it("lets the owner edit and keep a draft without offering a record update", () => {
     const onKeep = vi.fn();
     render(<EditableInvoiceReviewDialog fileName="invoice.pdf" initialDraft={createEditableInvoiceDraft(parseIndianInvoice(invoiceText))} onCancel={vi.fn()} onKeep={onKeep}/>);

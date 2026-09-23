@@ -132,8 +132,8 @@ export function EditableInvoiceReviewDialog({ fileName, initialDraft, onCancel, 
             <label><span>HSN <em>Optional</em></span><input inputMode="numeric" value={line.hsnCode} onChange={event => updateLine(line.id, "hsnCode", event.target.value.replace(/\D/g, "").slice(0, 8))}/></label>
             <label><span>Quantity</span><input type="number" inputMode="decimal" min="0" step="0.001" value={line.quantity} onChange={event => updateLine(line.id, "quantity", event.target.value)}/></label>
             <label><span>Unit</span><input value={line.unit} onChange={event => updateLine(line.id, "unit", event.target.value.toUpperCase())} placeholder="L or KL"/></label>
-            <label><span>Rate</span><input type="number" inputMode="decimal" min="0" step="0.001" value={line.unitRate} onChange={event => updateLine(line.id, "unitRate", event.target.value)}/></label>
-            <label><span>Tax %</span><input type="number" inputMode="decimal" min="0" max="100" step="0.01" value={line.taxRate} onChange={event => updateLine(line.id, "taxRate", event.target.value)}/></label>
+            <label><span>Rate</span><input type="number" inputMode="decimal" min="0" step="0.01" value={line.unitRate} onChange={event => updateLine(line.id, "unitRate", decimalInput(event.target.value, 2))} onBlur={() => updateLine(line.id, "unitRate", roundedDecimal(line.unitRate, 2))}/></label>
+            <label><span>Tax %</span><input type="number" inputMode="decimal" min="0" max="100" step="0.01" value={line.taxRate} onChange={event => updateLine(line.id, "taxRate", decimalInput(event.target.value, 2))} onBlur={() => updateLine(line.id, "taxRate", roundedDecimal(line.taxRate, 2))}/></label>
             <div className="invoice-line-amount"><span>Base amount</span><strong>{money(number(line.quantity) * number(line.unitRate))}</strong>{number(line.taxRate) > 0 && <small>With product taxes: {money(number(line.quantity) * number(line.unitRate) * (1 + number(line.taxRate) / 100))}</small>}</div>
           </div></article>)}</div>
         </fieldset>
@@ -150,9 +150,9 @@ export function EditableInvoiceReviewDialog({ fileName, initialDraft, onCancel, 
 function toEditableLine(line: IndianInvoiceLine): EditableInvoiceLine {
   const baseAmount = line.quantity * line.unitRate;
   const taxRate = line.grossAmount && baseAmount > 0 && line.grossAmount >= baseAmount
-    ? String(Number((((line.grossAmount - baseAmount) / baseAmount) * 100).toFixed(8)))
+    ? roundedDecimal(String(((line.grossAmount - baseAmount) / baseAmount) * 100), 2)
     : "0";
-  return { id: crypto.randomUUID(), product: line.product, description: line.description, hsnCode: line.hsnCode ?? "", quantity: decimal(line.quantity), unit: line.unit ?? "", unitRate: decimal(line.unitRate), taxRate };
+  return { id: crypto.randomUUID(), product: line.product, description: line.description, hsnCode: line.hsnCode ?? "", quantity: decimal(line.quantity), unit: line.unit ?? "", unitRate: roundedDecimal(String(line.unitRate), 2), taxRate };
 }
 
 function emptyInvoiceLine(): EditableInvoiceLine {
@@ -164,6 +164,16 @@ function cloneDraft(draft: EditableInvoiceDraft): EditableInvoiceDraft {
 }
 
 function decimal(value: number) { return String(Number(value.toFixed(3))); }
+function decimalInput(value: string, places: number) {
+  const match = value.match(/^(\d*)(?:\.(\d*))?$/);
+  if (!match) return value;
+  return match[2] === undefined ? match[1]! : `${match[1]}.${match[2].slice(0, places)}`;
+}
+function roundedDecimal(value: string, places: number) {
+  if (value.trim() === "") return "";
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? String(Number(parsed.toFixed(places))) : value;
+}
 function number(value: string) { const parsed = Number(value); return Number.isFinite(parsed) ? parsed : 0; }
 function positiveNumber(value: string) { return value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) > 0; }
 function nonNegativeNumber(value: string, emptyIsZero = false) { return (emptyIsZero && value.trim() === "") || (value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0); }

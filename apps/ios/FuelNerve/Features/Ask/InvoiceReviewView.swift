@@ -648,7 +648,7 @@ struct InvoiceReviewView: View {
             let product = bestProduct(for: item, in: references)
             let base = item.quantity * item.unitCost
             let materialTaxRate = item.grossAmount.flatMap { gross in
-                base > 0 && gross >= base ? (gross - base) / base * 100 : nil
+                base > 0 && gross >= base ? (((gross - base) / base * 10_000).rounded() / 100) : nil
             }
             return DraftLine(productId: product?.id ?? "", tankId: product.flatMap { product in station(in: references)?.tanks.first(where: { $0.productId == product.id })?.id } ?? "", description: item.description, quantity: item.quantity, sourceUnit: item.unit ?? product?.unit ?? "", unitCost: item.unitCost, taxRate: materialTaxRate ?? product?.taxCategory?.rate.value ?? 0, hsnCode: item.hsnCode ?? product?.hsnCode ?? "", detectedProduct: item.product, isExpanded: false)
         }
@@ -830,8 +830,8 @@ private struct InvoiceLineEditor: View {
                         labeledField("UNIT") { TextField("KL or L", text: $line.sourceUnit).textInputAutocapitalization(.characters).brandInput() }
                     }
                     HStack(alignment: .top, spacing: 10) {
-                        labeledField("RATE") { DecimalField("Rate", value: $line.unitCost) }
-                        labeledField("TAX %") { DecimalField("Tax %", value: $line.taxRate) }
+                        labeledField("RATE") { DecimalField("Rate", value: $line.unitCost, maximumFractionDigits: 2) }
+                        labeledField("TAX %") { DecimalField("Tax %", value: $line.taxRate, maximumFractionDigits: 2) }
                     }
 
                     if line.productId.isEmpty && !line.detectedProduct.isEmpty {
@@ -897,8 +897,22 @@ fileprivate struct DraftLine: Identifiable {
 private struct DecimalField: View {
     let label: String
     @Binding var value: Double
-    init(_ label: String, value: Binding<Double>) { self.label = label; _value = value }
-    var body: some View { TextField(label, value: $value, format: .number.precision(.fractionLength(0...3))).keyboardType(.decimalPad).brandInput() }
+    let maximumFractionDigits: Int
+    init(_ label: String, value: Binding<Double>, maximumFractionDigits: Int = 3) {
+        self.label = label
+        _value = value
+        self.maximumFractionDigits = maximumFractionDigits
+    }
+    var body: some View {
+        TextField(label, value: $value, format: .number.precision(.fractionLength(0...maximumFractionDigits)))
+            .keyboardType(.decimalPad)
+            .onChange(of: value) { _, newValue in
+                let scale = pow(10, Double(maximumFractionDigits))
+                let rounded = (newValue * scale).rounded() / scale
+                if rounded != newValue { value = rounded }
+            }
+            .brandInput()
+    }
 }
 
 private struct CurrencyField: View {
