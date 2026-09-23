@@ -17,7 +17,7 @@ afterEach(cleanup);
 describe("editable invoice review", () => {
   it("creates an editable draft that follows purchase total rules", () => {
     const draft = createEditableInvoiceDraft(parseIndianInvoice(invoiceText));
-    expect(draft).toMatchObject({ supplierName: "Kerala Fuel Supplies Pvt Ltd", invoiceNumber: "KFS/2026/1842", invoiceDate: "2026-09-12", taxAmount: "78750", totalAmount: "516250" });
+    expect(draft).toMatchObject({ supplierName: "Kerala Fuel Supplies Pvt Ltd", invoiceNumber: "KFS/2026/1842", invoiceDate: "2026-09-12", dueDate: "2026-09-15", taxAmount: "78750", totalAmount: "516250" });
     expect(draft.lines[0]).toMatchObject({ product: "HSD", quantity: "5000", unit: "L", unitRate: "87.5", hsnCode: "27101944" });
     expect(validateEditableInvoiceDraft(draft)).toEqual([]);
   });

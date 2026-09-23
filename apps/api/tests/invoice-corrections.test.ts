@@ -10,7 +10,7 @@ const input = { version: 0, invoiceNumber: 'I1', invoiceDate: '2026-01-02T00:00:
 let tx: any;
 beforeEach(() => {
   vi.clearAllMocks();
-  db.purchaseInvoice.findFirst.mockResolvedValue({ id: 'i', stationId: 's', invoiceNumber: 'I1', invoiceDate: new Date('2026-01-01'), supplier: { name: 'Supplier', paymentTerms: 3 }, status: 'PAID', subtotal: d(100), taxAmount: d(0), totalAmount: d(100), notes: null, payments: [{ id: 'p', amount: d(100), origin: 'RECORDED_PAYMENT' }], lines: [{ id: 'l', quantity: d(1), unitCost: d(100), taxRate: d(0), description: 'Oil', product: null }], receipt: { id: 'r', receivedAt: new Date('2026-01-03'), lines: [] } });
+  db.purchaseInvoice.findFirst.mockResolvedValue({ id: 'i', stationId: 's', invoiceNumber: 'I1', invoiceDate: new Date('2026-01-01'), dueDate: new Date('2026-01-04'), supplier: { name: 'Supplier', paymentTerms: 3 }, status: 'PAID', subtotal: d(100), taxAmount: d(0), totalAmount: d(100), notes: null, payments: [{ id: 'p', amount: d(100), origin: 'RECORDED_PAYMENT' }], lines: [{ id: 'l', quantity: d(1), unitCost: d(100), taxRate: d(0), description: 'Oil', product: null }], receipt: { id: 'r', receivedAt: new Date('2026-01-03'), lines: [] } });
   tx = { purchaseInvoice: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn(), findUniqueOrThrow: vi.fn() }, purchaseInvoiceCorrection: { create: vi.fn() }, journal: { updateMany: vi.fn() }, purchaseReceipt: { update: vi.fn() }, receiptTimingAuditEvent: { create: vi.fn() }, shift: { findMany: vi.fn().mockResolvedValue([]) }, inventoryLedger: { updateMany: vi.fn() }, supplierPayment: { update: vi.fn(), create: vi.fn() } };
   db.$transaction.mockImplementation(async fn => fn(tx));
 });
@@ -39,7 +39,8 @@ describe('safe invoice correction', () => {
     expect(tx.supplierPayment.create).not.toHaveBeenCalled();
     expect(tx.purchaseReceipt.update).toHaveBeenCalledWith({ where: { id: 'r' }, data: { referenceNo: 'I1' } });
     expect(tx.inventoryLedger.updateMany).not.toHaveBeenCalled();
-    expect(tx.purchaseInvoiceCorrection.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ correctedById: 'u', reason: input.correctionReason, beforeLines: expect.objectContaining({ invoiceDate: '2026-01-01T00:00:00.000Z' }), afterLines: expect.objectContaining({ invoiceDate: input.invoiceDate }) }) }));
+    expect(tx.purchaseInvoice.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ dueDate: new Date(input.dueDate) }) }));
+    expect(tx.purchaseInvoiceCorrection.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ correctedById: 'u', reason: input.correctionReason, beforeLines: expect.objectContaining({ invoiceDate: '2026-01-01T00:00:00.000Z', dueDate: '2026-01-04T00:00:00.000Z' }), afterLines: expect.objectContaining({ invoiceDate: input.invoiceDate, dueDate: input.dueDate }) }) }));
   });
   it('rejects a stale editor before any correction is written', async () => {
     tx.purchaseInvoice.updateMany.mockResolvedValue({ count: 0 });

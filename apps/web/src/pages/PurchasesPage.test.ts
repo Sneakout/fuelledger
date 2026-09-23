@@ -67,12 +67,12 @@ describe("purchase invoice tank selection", () => {
 });
 
 describe("purchase invoice due date", () => {
-  it("calculates credit terms from the invoice date", () => {
-    expect(dueDateFromInvoiceDate("2026-09-04", 30)).toBe("2026-10-04");
+  it("defaults every new invoice to T+3", () => {
+    expect(dueDateFromInvoiceDate("2026-09-04")).toBe("2026-09-07");
   });
 
   it("handles month-end and leap-year boundaries", () => {
-    expect(dueDateFromInvoiceDate("2028-02-28", 2)).toBe("2028-03-01");
+    expect(dueDateFromInvoiceDate("2028-02-28")).toBe("2028-03-02");
   });
 });
 

@@ -15,7 +15,7 @@ struct InvoiceReviewView: View {
     @State private var supplierPhone = ""
     @State private var supplierEmail = ""
     @State private var supplierAddress = ""
-    @State private var supplierPaymentTerms = 0
+    @State private var supplierPaymentTerms = 3
     @State private var createNewSupplier = false
     @State private var showSupplierContactFields = false
     @State private var consigneeName = ""
@@ -205,9 +205,9 @@ struct InvoiceReviewView: View {
 
             if let invoiceDate {
                 HStack {
-                    Text("Payment due").font(.subheadline).foregroundStyle(.secondary)
+                    Text("Payment due · T+3 default").font(.subheadline).foregroundStyle(.secondary)
                     Spacer()
-                    Text(dueDate(paymentTerms: resolvedPaymentTerms, invoiceDate: invoiceDate).formatted(date: .abbreviated, time: .omitted))
+                    Text(defaultDueDate(invoiceDate: invoiceDate).formatted(date: .abbreviated, time: .omitted))
                         .font(.subheadline.weight(.semibold)).foregroundStyle(FuelNerveTheme.forest)
                 }
             }
@@ -578,7 +578,6 @@ struct InvoiceReviewView: View {
         return references.stations.first { $0.id == session.selectedStationId } ?? references.stations.first
     }
     private var supplier: InvoiceImportBootstrap.Supplier? { references?.suppliers.first { $0.id == supplierId } }
-    private var resolvedPaymentTerms: Int { createNewSupplier ? supplierPaymentTerms : supplier?.paymentTerms ?? 0 }
     private var validNewSupplier: Bool { newSupplierValidationMessage.isEmpty }
     private var newSupplierValidationMessage: String {
         let name = supplierName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -675,7 +674,7 @@ struct InvoiceReviewView: View {
     }
     private func normalized(_ value: String) -> String { value.uppercased().filter(\.isLetter) }
     private func similarity(_ left: String, _ right: String) -> Int { guard !left.isEmpty, !right.isEmpty else { return 0 }; return left == right ? 1000 : (left.contains(right) || right.contains(left) ? min(left.count, right.count) : zip(left, right).prefix { $0 == $1 }.count) }
-    private func dueDate(paymentTerms: Int, invoiceDate: Date) -> Date { Calendar(identifier: .gregorian).date(byAdding: .day, value: paymentTerms, to: invoiceDate) ?? invoiceDate }
+    private func defaultDueDate(invoiceDate: Date) -> Date { Calendar(identifier: .gregorian).date(byAdding: .day, value: 3, to: invoiceDate) ?? invoiceDate }
     private func money(_ value: Double) -> String { value.formatted(.currency(code: "INR")) }
 
     private func suggestedSupplierCode(from name: String) -> String {
@@ -775,7 +774,7 @@ struct InvoiceReviewView: View {
         let formatter = ISO8601DateFormatter()
         return PurchaseInvoiceSubmission(
             stationId: station.id, supplierId: supplier.id, invoiceNumber: invoiceNumber.trimmingCharacters(in: .whitespacesAndNewlines),
-            invoiceDate: formatter.string(from: invoiceDate), dueDate: formatter.string(from: dueDate(paymentTerms: supplier.paymentTerms, invoiceDate: invoiceDate)), invoiceTotal: invoiceTotal,
+            invoiceDate: formatter.string(from: invoiceDate), dueDate: formatter.string(from: defaultDueDate(invoiceDate: invoiceDate)), invoiceTotal: invoiceTotal,
             taxAmount: taxAmount, purchasePriceExcludedAmount: purchasePriceExcludedAmount > 0 ? purchasePriceExcludedAmount : nil, notes: "Imported with on-device OCR; confirmed by user.", receiveNow: receiveNow, paidNow: paidNow,
             paymentMethod: paidNow ? paymentMethod : nil, paymentReferenceNo: paidNow && !paymentReference.isEmpty ? paymentReference : nil,
             attachment: document.attachment,

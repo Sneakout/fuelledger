@@ -6,6 +6,7 @@ import { buildConfirmedPurchaseInput, findDuplicateInvoice, findMatchingProduct,
 import { flushInvoiceImportPerformance, recordInvoiceImportPerformance } from "../lib/invoice-import-performance";
 import type { EditableInvoiceDraft } from "./EditableInvoiceReviewDialog";
 import { assessInvoiceStation } from "../lib/invoice-local-safety";
+import { defaultPurchaseDueDate } from "../lib/purchase-due-date";
 
 export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo, onBack, onClose, onSubmitted }: {
   draft: EditableInvoiceDraft;
@@ -29,6 +30,7 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
   const [created, setCreated] = useState<PurchaseInvoice | null>(null);
   const [priceApprovals, setPriceApprovals] = useState<ProductPriceApprovalNotice[]>([]);
   const stationAssessment = useMemo(() => assessInvoiceStation(draft.consigneeName, stationName), [draft.consigneeName, stationName]);
+  const dueDate = draft.dueDate || defaultPurchaseDueDate(draft.invoiceDate);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -114,7 +116,7 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
 
         <section className="invoice-submit-lines"><header><div><h3>Product links</h3><p>Link a product only when it is clearly the same item. This does not receive stock.</p></div></header>{draft.lines.map((line, index) => <article key={line.id}><span><strong>{line.description}</strong><small>{number(Number(line.quantity))} {line.unit || "units"} · {money(Number(line.quantity) * Number(line.unitRate))}</small></span><select aria-label={`Product for ${line.description}`} value={productIds[index] ?? ""} onChange={event => { const next = [...productIds]; next[index] = event.target.value || null; setProductIds(next); setConfirmed(false); }} disabled={!data || isDemo}><option value="">Keep description only</option>{data?.products.map(product => <option key={product.id} value={product.id}>{product.name} · {product.code}</option>)}</select></article>)}</section>
 
-        <dl className="invoice-submit-facts"><div><dt>Invoice</dt><dd>{draft.invoiceNumber}</dd></div><div><dt>Invoice date</dt><dd>{date(draft.invoiceDate)}</dd></div><div><dt>Due date</dt><dd>{draft.dueDate ? date(draft.dueDate) : "Missing"}</dd></div><div><dt>Unpaid amount</dt><dd>{money(Number(draft.totalAmount))}</dd></div></dl>
+        <dl className="invoice-submit-facts"><div><dt>Invoice</dt><dd>{draft.invoiceNumber}</dd></div><div><dt>Invoice date</dt><dd>{date(draft.invoiceDate)}</dd></div><div><dt>Due date · T+3</dt><dd>{dueDate ? date(dueDate) : "Check invoice date"}</dd></div><div><dt>Unpaid amount</dt><dd>{money(Number(draft.totalAmount))}</dd></div></dl>
 
         {duplicate && <section className="invoice-submit-warning"><AlertTriangle/><div><strong>This invoice already exists</strong><p>{duplicate.supplier.name} invoice {duplicate.invoiceNumber} is already recorded. It has not been submitted again.</p></div></section>}
         {!duplicate && validationErrors.length > 0 && <section className="invoice-submit-warning"><AlertTriangle/><div><strong>Review this before continuing</strong>{validationErrors.slice(0, 3).map(item => <p key={item}>{item}</p>)}</div></section>}

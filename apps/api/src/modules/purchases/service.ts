@@ -63,11 +63,6 @@ const expenseInclude = {
   createdBy: { select: { name: true } },
 } as const;
 const outstanding = (invoice: { totalAmount: Prisma.Decimal; payments: Array<{ amount: Prisma.Decimal }> }) => Number(invoice.totalAmount) - invoice.payments.reduce((sum, row) => sum + Number(row.amount), 0);
-const calculatedDueDate = (invoiceDate: string | Date, paymentTerms: number) => {
-  const dueDate = new Date(invoiceDate);
-  dueDate.setUTCDate(dueDate.getUTCDate() + Math.max(0, Math.trunc(paymentTerms)));
-  return dueDate;
-};
 const receiptTimeToleranceMs = 60 * 1000;
 const legacyAuditLagMs = 5 * 60 * 1000;
 export function resolveReceiptTiming(requestedAt?: string, reason?: string, now = new Date()) {
@@ -651,8 +646,8 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
       await tx.purchaseInvoiceCorrection.create({ data: {
         invoiceId: id, reason: input.correctionReason, correctedById: userId,
         previousTotal: invoice.totalAmount, correctedTotal: new Prisma.Decimal(pricing.totalAmount),
-        beforeLines: { invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate.toISOString(), receivedAt: invoice.receipt?.receivedAt.toISOString() ?? null, notes: invoice.notes, lines: invoice.lines.map(line => ({id:line.id, quantity:Number(line.quantity), unitCost:Number(line.unitCost)})), payments: invoice.payments.map(p => ({id:p.id, amount:Number(p.amount), origin:p.origin})) },
-        afterLines: { invoiceNumber: input.invoiceNumber, invoiceDate: input.invoiceDate, receivedAt: input.receivedAt ?? invoice.receipt?.receivedAt.toISOString() ?? null, receivedAtReason: correctedReceiptTiming?.receivedAtReason ?? null, notes: input.notes ?? null, lines: pricing.lines.map(line => ({id:line.id, quantity:line.quantity, unitCost:line.unitCost})) }
+        beforeLines: { invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate.toISOString(), dueDate: invoice.dueDate.toISOString(), receivedAt: invoice.receipt?.receivedAt.toISOString() ?? null, notes: invoice.notes, lines: invoice.lines.map(line => ({id:line.id, quantity:Number(line.quantity), unitCost:Number(line.unitCost)})), payments: invoice.payments.map(p => ({id:p.id, amount:Number(p.amount), origin:p.origin})) },
+        afterLines: { invoiceNumber: input.invoiceNumber, invoiceDate: input.invoiceDate, dueDate: input.dueDate, receivedAt: input.receivedAt ?? invoice.receipt?.receivedAt.toISOString() ?? null, receivedAtReason: correctedReceiptTiming?.receivedAtReason ?? null, notes: input.notes ?? null, lines: pricing.lines.map(line => ({id:line.id, quantity:line.quantity, unitCost:line.unitCost})) }
       } });
       let status: 'PAID' | 'PART_PAID' | 'OPEN' = pricing.totalAmount - effectivePaid < 0.01 ? 'PAID' : effectivePaid > 0 ? 'PART_PAID' : 'OPEN';
       await tx.purchaseInvoice.update({
@@ -660,7 +655,7 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
         data: {
           invoiceNumber: input.invoiceNumber,
           invoiceDate: new Date(input.invoiceDate),
-          dueDate: calculatedDueDate(input.invoiceDate, invoice.supplier.paymentTerms),
+          dueDate: new Date(input.dueDate),
           notes: input.notes || null,
           ...(shouldRecalculate
             ? {

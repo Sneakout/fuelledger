@@ -6,7 +6,7 @@ import { useStation } from "../components/StationProvider";
 import { createEditableInvoiceDraft, EditableInvoiceReviewDialog, type EditableInvoiceDraft } from "../components/EditableInvoiceReviewDialog";
 import { InvoiceChangePreviewDialog } from "../components/InvoiceChangePreviewDialog";
 import { ConfirmedPurchaseDialog } from "../components/ConfirmedPurchaseDialog";
-import { api, ApiRequestError, type AskFuelNerveResponse, type CatalogProduct, type InvestigationFollowUpPrompt, type InvestigationFollowUpResponse, type InvestigationResponse, type NerveAgentPresentation, type NerveAgentsResponse, type NerveFinding } from "../lib/api";
+import { api, ApiRequestError, type AskFuelNerveResponse, type CatalogProduct, type InvestigationFollowUpPrompt, type InvestigationFollowUpResponse, type InvestigationResponse, type NerveAgentPresentation, type NerveAgentsResponse, type NerveFinding, type SubscriptionStatus } from "../lib/api";
 import type { ParsedIndianInvoice } from "../lib/indian-invoice-parser";
 import { assessInvoiceStation, assessSingleProductInvoicePrice } from "../lib/invoice-local-safety";
 import { flushInvoiceImportPerformance, rememberInvoiceImportPerformance } from "../lib/invoice-import-performance";
@@ -33,6 +33,8 @@ export function IntelligenceAgentsPage() {
   const { agentKey } = useParams();
   const { user } = useAuth();
   const { selectedStationId, selectedStation } = useStation();
+  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
+  const [accessState, setAccessState] = useState<"checking" | "ready" | "failed">("checking");
   const [data, setData] = useState<NerveAgentsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -41,15 +43,29 @@ export function IntelligenceAgentsPage() {
   const [investigatingKey, setInvestigatingKey] = useState<string | null>(null);
   const [investigationError, setInvestigationError] = useState("");
   const investigationTrigger = useRef<HTMLButtonElement | null>(null);
+  const intelligenceActive = Boolean(subscription?.intelligenceEnabledAt && (!subscription.intelligenceExpiresAt || new Date(subscription.intelligenceExpiresAt) > new Date()));
+
+  const loadSubscription = async () => {
+    setAccessState("checking");
+    try { setSubscription(await api.subscription()); setAccessState("ready"); }
+    catch { setSubscription(null); setAccessState("failed"); }
+  };
+
+  useEffect(() => { void loadSubscription(); }, [user?.id]);
 
   const load = async () => {
-    if (!selectedStationId) return;
+    if (!selectedStationId || !intelligenceActive) { setLoading(false); return; }
     setLoading(true); setError("");
     try { setData(await api.nerveAgents(selectedStationId)); }
     catch (caught) { setData(null); setError(caught instanceof ApiRequestError ? caught.message : "The latest review could not be loaded."); }
     finally { setLoading(false); }
   };
-  useEffect(() => { setInvestigation(null); setInvestigationAgent(null); void load(); }, [selectedStationId]);
+  useEffect(() => {
+    setInvestigation(null); setInvestigationAgent(null);
+    if (accessState !== "ready") return;
+    if (!intelligenceActive) { setData(null); setError(""); setLoading(false); return; }
+    void load();
+  }, [selectedStationId, accessState, intelligenceActive]);
 
   const findings = useMemo(() => data?.agents.flatMap((agent) => agent.findings) ?? [], [data]);
   const team = useMemo<TeamAgent[]>(() => agentCatalogue.map((definition) => {
@@ -76,6 +92,14 @@ export function IntelligenceAgentsPage() {
     window.requestAnimationFrame(() => investigationTrigger.current?.focus());
   };
 
+  if (accessState === "checking") return <main className="page nerve-page"><div className="loading-inline nerve-loading"><span/><p>Checking your Intelligence access…</p></div></main>;
+
+  if (accessState === "failed") return <main className="page nerve-page">
+    <section className="nerve-unavailable"><MessageCircleQuestion/><div><h2>We couldn’t check your Intelligence access</h2><p>FuelNerve Core continues working normally.</p></div><button className="secondary" onClick={() => void loadSubscription()}><RefreshCw/> Try again</button></section>
+  </main>;
+
+  if (!intelligenceActive) return <IntelligenceUpgradePage owner={user?.role === "OWNER"} firstName={user?.name.split(" ")[0] ?? "there"}/>;
+
   if (agentKey) return <main className="page nerve-page nerve-agent-page">
     <Link className="agent-back" to="/insights"><ArrowLeft/> All agents</Link>
     {!selectedAgent ? <section className="nerve-unavailable"><MessageCircleQuestion/><div><h2>That agent could not be found</h2><p>Return to Nerve Intelligence and choose one of your six specialists.</p></div></section> : <>
@@ -98,6 +122,30 @@ export function IntelligenceAgentsPage() {
     {error && <section className="nerve-unavailable"><MessageCircleQuestion/><div><h2>Nerve Intelligence is temporarily unavailable</h2><p>{error}</p><small>FuelNerve continues working normally.</small></div><button className="secondary" onClick={() => void load()}><RefreshCw/> Try again</button></section>}
     {loading && <div className="loading-inline nerve-loading"><span/><p>Checking the latest records…</p></div>}
     {data?.stale && <div className="nerve-stale"><Clock3/> These reviews are more than 24 hours old. Open an agent to see its latest saved findings.</div>}
+  </main>;
+}
+
+function IntelligenceUpgradePage({ owner, firstName }: { owner: boolean; firstName: string }) {
+  return <main className="page nerve-page nerve-upgrade-page">
+    <header className="today-heading"><div><span className="eyebrow">{`${dayGreeting()}, ${firstName}`}</span><h1>Nerve Intelligence</h1><p>Your FuelNerve Core account continues to work normally.</p></div></header>
+    <section className="nerve-upgrade-hero" aria-labelledby="intelligence-inactive-title">
+      <div className="nerve-upgrade-copy">
+        <span className="nerve-upgrade-icon"><Sparkles/></span>
+        <span className="eyebrow">CORE + FUELNERVE INTELLIGENCE</span>
+        <h2 id="intelligence-inactive-title">FuelNerve Intelligence is not active</h2>
+        <p>Add six specialised AI agents that review your station records and bring the important decisions to you.</p>
+        <div className="nerve-upgrade-price"><strong>₹1,499</strong><span>/month</span><em>or ₹14,999/year · GST additional</em></div>
+        {owner
+          ? <Link className="nerve-upgrade-action" to="/subscription">View plan and activate <ArrowRight/></Link>
+          : <p className="nerve-upgrade-owner-note">Ask your account owner to activate Core + FuelNerve Intelligence.</p>}
+      </div>
+      <div className="nerve-upgrade-benefits" aria-label="How FuelNerve Intelligence helps">
+        <article><Droplets/><div><h3>Watch stock and shifts</h3><p>Spot low stock, unusual movement and reconciliation issues early.</p></div></article>
+        <article><FileCheck2/><div><h3>Check every purchase</h3><p>Read invoices and flag quantity, duplicate or purchase-price changes.</p></div></article>
+        <article><TrendingUp/><div><h3>Brief the owner</h3><p>Turn trusted records into one clear daily view with actions and evidence.</p></div></article>
+      </div>
+    </section>
+    <p className="nerve-upgrade-footnote"><ShieldCheck/> Intelligence reviews and explains. Your team stays in control of every change.</p>
   </main>;
 }
 

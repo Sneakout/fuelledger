@@ -1,6 +1,7 @@
 import type { PurchaseInvoiceInput } from "@fuelledger/shared";
 import type { PurchaseInvoice, PurchaseProduct, Supplier } from "./api";
 import { calculatedInvoiceTotal, validateEditableInvoiceDraft, type EditableInvoiceDraft } from "../components/EditableInvoiceReviewDialog";
+import { defaultPurchaseDueDate } from "./purchase-due-date";
 
 export function findMatchingSupplier(draft: EditableInvoiceDraft, suppliers: Supplier[]) {
   const gstin = normalize(draft.supplierGSTIN);
@@ -31,10 +32,11 @@ export function findDuplicateInvoice(supplierId: string, invoiceNumber: string, 
 }
 
 export function validateConfirmedPurchase(draft: EditableInvoiceDraft, stationId: string, supplierId: string) {
-  const errors = validateEditableInvoiceDraft(draft);
+  const dueDate = draft.dueDate || defaultPurchaseDueDate(draft.invoiceDate);
+  const errors = validateEditableInvoiceDraft({ ...draft, dueDate });
   if (!stationId) errors.push("The selected fuel station is not available in Purchases.");
   if (!supplierId) errors.push("Choose the existing supplier for this invoice.");
-  if (!draft.dueDate) errors.push("Add the supplier’s due date before creating the invoice.");
+  if (!dueDate) errors.push("Enter a valid invoice date so FuelNerve can set the T+3 due date.");
   if (Math.abs(Number(draft.totalAmount) - calculatedInvoiceTotal(draft)) >= 0.02) errors.push("Make the invoice total match the product amounts and tax to the nearest paise.");
   return [...new Set(errors)];
 }
@@ -47,7 +49,7 @@ export function buildConfirmedPurchaseInput(draft: EditableInvoiceDraft, station
     supplierId,
     invoiceNumber: draft.invoiceNumber.trim(),
     invoiceDate: isoDate(draft.invoiceDate),
-    dueDate: isoDate(draft.dueDate),
+    dueDate: isoDate(draft.dueDate || defaultPurchaseDueDate(draft.invoiceDate)),
     invoiceTotal: Number(draft.totalAmount),
     taxAmount: Number(draft.taxAmount || 0),
     purchasePriceExcludedAmount: Number(draft.purchasePriceExcludedAmount || 0) || undefined,

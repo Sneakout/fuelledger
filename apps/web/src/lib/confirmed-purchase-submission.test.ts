@@ -39,9 +39,10 @@ describe("confirmed purchase submission", () => {
     expect(input.lines[0]).toMatchObject({ productId: "product-1", tankId: null, description: "HSD", quantity: 100, unitCost: 100 });
   });
 
-  it("blocks submission when the due date or existing supplier is missing", () => {
+  it("defaults a missing due date to T+3 while still requiring an existing supplier", () => {
     expect(validateConfirmedPurchase({ ...draft, dueDate: "" }, "station-1", "").join(" ")).toContain("existing supplier");
-    expect(validateConfirmedPurchase({ ...draft, dueDate: "" }, "station-1", "").join(" ")).toContain("due date");
+    expect(validateConfirmedPurchase({ ...draft, dueDate: "" }, "station-1", "supplier-1")).toEqual([]);
+    expect(buildConfirmedPurchaseInput({ ...draft, dueDate: "" }, "station-1", "supplier-1", ["product-1"]).dueDate).toBe("2026-09-05T00:00:00.000Z");
   });
 
   it("detects a supplier-scoped duplicate despite harmless number formatting", () => {

@@ -18,6 +18,7 @@ import {
   type PurchaseStation,
   type Supplier,
 } from "../lib/api";
+import { defaultPurchaseDueDate } from "../lib/purchase-due-date";
 const money = (v: number | string) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -52,18 +53,7 @@ export const onlyCompatibleTankId = (
       ) ?? [];
   return tanks.length === 1 ? tanks[0]!.id : "";
 };
-export const dueDateFromInvoiceDate = (
-  invoiceDate: string,
-  paymentTerms: number,
-) => {
-  const date = new Date(`${invoiceDate}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return invoiceDate;
-  date.setDate(date.getDate() + Math.max(0, Math.trunc(paymentTerms)));
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
+export const dueDateFromInvoiceDate = defaultPurchaseDueDate;
 const iso = (date: string) => new Date(`${date}T00:00:00`).toISOString();
 const today = () => new Date().toISOString().slice(0, 10);
 const localDateTimeNow = () => {
@@ -149,7 +139,7 @@ export function PurchasesPage() {
     supplierId: "",
     invoiceNumber: "",
     invoiceDate: today(),
-    dueDate: today(),
+    dueDate: dueDateFromInvoiceDate(today()),
     taxAmount: 0,
     invoiceTotal: "",
     notes: "",
@@ -186,14 +176,11 @@ export function PurchasesPage() {
     setData(result);
     setInvoice((x) => {
       const supplierId = x.supplierId || result.suppliers[0]?.id || "";
-      const terms =
-        result.suppliers.find((item) => item.id === supplierId)?.paymentTerms ??
-        0;
       return {
         ...x,
         stationId: x.stationId || result.stations[0]?.id || "",
         supplierId,
-        dueDate: dueDateFromInvoiceDate(x.invoiceDate, terms),
+        dueDate: dueDateFromInvoiceDate(x.invoiceDate),
       };
     });
     setPayment((x) => ({
@@ -373,11 +360,7 @@ export function PurchasesPage() {
         ...x,
         invoiceNumber: "",
         invoiceDate: today(),
-        dueDate: dueDateFromInvoiceDate(
-          today(),
-          data?.suppliers.find((item) => item.id === x.supplierId)
-            ?.paymentTerms ?? 0,
-        ),
+        dueDate: dueDateFromInvoiceDate(today()),
         taxAmount: 0,
         notes: "",
         receivedAt: localDateTimeNow(),
@@ -798,16 +781,10 @@ export function PurchasesPage() {
                       disabled={mode === "edit-invoice"}
                       onChange={(e) => {
                         const supplierId = e.target.value;
-                        const terms =
-                          data.suppliers.find((item) => item.id === supplierId)
-                            ?.paymentTerms ?? 0;
                         setInvoice({
                           ...invoice,
                           supplierId,
-                          dueDate: dueDateFromInvoiceDate(
-                            invoice.invoiceDate,
-                            terms,
-                          ),
+                          dueDate: dueDateFromInvoiceDate(invoice.invoiceDate),
                         });
                       }}
                     >
@@ -864,14 +841,10 @@ export function PurchasesPage() {
                       value={invoice.invoiceDate}
                       onChange={(e) => {
                         const invoiceDate = e.target.value;
-                        const terms =
-                          data.suppliers.find(
-                            (item) => item.id === invoice.supplierId,
-                          )?.paymentTerms ?? 0;
                         setInvoice({
                           ...invoice,
                           invoiceDate,
-                          dueDate: dueDateFromInvoiceDate(invoiceDate, terms),
+                          dueDate: dueDateFromInvoiceDate(invoiceDate),
                         });
                         if (mode === "invoice") {
                           setLines((current) =>
@@ -908,8 +881,8 @@ export function PurchasesPage() {
                     />
                   </label>
                   <label className="field">
-                    <span>Due date (calculated automatically)</span>
-                    <input type="date" value={invoice.dueDate} readOnly />
+                    <span>Due date {mode === "invoice" ? "(T+3 default)" : ""}</span>
+                    <input type="date" min={invoice.invoiceDate} value={invoice.dueDate} onChange={(e) => setInvoice({ ...invoice, dueDate: e.target.value })} />
                   </label>
                   <label className="field">
                     <span>Supplier invoice total (optional override)</span>

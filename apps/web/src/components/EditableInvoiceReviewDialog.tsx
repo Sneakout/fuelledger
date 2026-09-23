@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileCheck2, Plus, ShieldCheck, Trash2, X } from "lucide-react";
 import type { IndianInvoiceLine, ParsedIndianInvoice } from "../lib/indian-invoice-parser";
+import { defaultPurchaseDueDate } from "../lib/purchase-due-date";
 
 export type EditableInvoiceLine = {
   id: string;
@@ -35,7 +36,7 @@ export function createEditableInvoiceDraft(invoice: ParsedIndianInvoice): Editab
     consigneeCode: invoice.consigneeCode?.value ?? "",
     invoiceNumber: invoice.invoiceNumber?.value ?? "",
     invoiceDate: invoice.invoiceDate?.value ?? "",
-    dueDate: invoice.dueDate?.value ?? "",
+    dueDate: invoice.dueDate?.value ?? defaultPurchaseDueDate(invoice.invoiceDate?.value ?? ""),
     taxAmount: invoice.tax.total === null ? "" : decimal(invoice.tax.total),
     purchasePriceExcludedAmount: "",
     totalAmount: invoice.totalAmount ? decimal(invoice.totalAmount.value) : "",
@@ -93,7 +94,7 @@ export function EditableInvoiceReviewDialog({ fileName, initialDraft, onCancel, 
     return () => { document.body.style.overflow = previousOverflow; };
   }, []);
 
-  const update = (field: keyof Omit<EditableInvoiceDraft, "lines">, value: string) => setDraft(current => ({ ...current, [field]: value }));
+  const update = (field: keyof Omit<EditableInvoiceDraft, "lines">, value: string) => setDraft(current => ({ ...current, [field]: value, ...(field === "invoiceDate" ? { dueDate: defaultPurchaseDueDate(value) } : {}) }));
   const updateLine = (id: string, field: keyof Omit<EditableInvoiceLine, "id">, value: string) => setDraft(current => ({ ...current, lines: current.lines.map(line => line.id === id ? { ...line, [field]: value } : line) }));
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
@@ -119,7 +120,7 @@ export function EditableInvoiceReviewDialog({ fileName, initialDraft, onCancel, 
           <label><span>Dealer code <em>Optional</em></span><input value={draft.consigneeCode ?? ""} onChange={event => update("consigneeCode", event.target.value.replace(/[^A-Za-z0-9/-]/g, ""))} autoComplete="off"/></label>
           <label><span>Invoice number</span><input value={draft.invoiceNumber} onChange={event => update("invoiceNumber", event.target.value.toUpperCase())} autoCapitalize="characters" autoComplete="off"/></label>
           <label><span>Invoice date</span><input type="date" value={draft.invoiceDate} onChange={event => update("invoiceDate", event.target.value)}/></label>
-          <label><span>Due date <em>Optional</em></span><input type="date" value={draft.dueDate} min={draft.invoiceDate || undefined} onChange={event => update("dueDate", event.target.value)}/></label>
+          <label><span>Due date <em>T+3 default</em></span><input type="date" value={draft.dueDate} min={draft.invoiceDate || undefined} onChange={event => update("dueDate", event.target.value)}/></label>
           <label><span>Taxes and charges</span><input type="number" inputMode="decimal" min="0" step="0.01" value={draft.taxAmount} onChange={event => update("taxAmount", event.target.value)}/></label>
           <label><span>Non-product adjustments <small>Optional</small></span><input type="number" inputMode="decimal" min="0" step="0.01" value={draft.purchasePriceExcludedAmount ?? ""} onChange={event => update("purchasePriceExcludedAmount", event.target.value)} placeholder="Deposits or unrelated charges"/></label>
           <label><span>Invoice total</span><input type="number" inputMode="decimal" min="0" step="0.01" value={draft.totalAmount} onChange={event => update("totalAmount", event.target.value)}/></label>
