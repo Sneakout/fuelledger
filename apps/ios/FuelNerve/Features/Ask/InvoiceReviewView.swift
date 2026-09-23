@@ -166,7 +166,7 @@ struct InvoiceReviewView: View {
                 Text("INVOICE DATE").brandFieldLabel()
                 if invoiceDate != nil {
                     DatePicker("Invoice date", selection: Binding(get: { invoiceDate ?? .now }, set: { invoiceDate = $0 }), displayedComponents: .date)
-                        .labelsHidden().tint(FuelNerveTheme.green)
+                        .labelsHidden().fuelNervePickerField()
                 } else {
                     Button { invoiceDate = .now } label: {
                         Label("Choose invoice date", systemImage: "calendar")
@@ -375,7 +375,7 @@ struct InvoiceReviewView: View {
                     ForEach(references?.suppliers.filter(\.active) ?? []) { Text($0.name).tag($0.id) }
                 }
                 .labelsHidden()
-                .tint(FuelNerveTheme.green)
+                .fuelNervePickerField()
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 if !supplierName.isEmpty {
@@ -441,7 +441,8 @@ struct InvoiceReviewView: View {
                     Picker("Paid by", selection: $paymentMethod) {
                         ForEach(["CASH", "UPI", "CARD", "OTHER"], id: \.self) { Text($0.capitalized).tag($0) }
                     }
-                    .tint(FuelNerveTheme.green)
+                    .fuelNervePickerField()
+                    .frame(maxWidth: 150)
                     TextField("Payment reference", text: $paymentReference)
                         .textFieldStyle(.roundedBorder)
                 }
@@ -815,10 +816,8 @@ private struct InvoiceLineEditor: View {
                                 Text(line.detectedProduct.isEmpty ? "Choose product" : line.detectedProduct).tag("")
                                 ForEach(products) { Text("\($0.name) (\($0.code))").tag($0.id) }
                             }
-                            .tint(FuelNerveTheme.green)
-                            .padding(.horizontal, 11)
-                            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-                            .background(.white, in: RoundedRectangle(cornerRadius: 12))
+                            .fuelNervePickerField()
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         labeledField("HSN") { TextField("Optional", text: $line.hsnCode).keyboardType(.numberPad).brandInput() }
                             .frame(maxWidth: 120)
@@ -842,7 +841,7 @@ private struct InvoiceLineEditor: View {
                             Text("Choose tank").tag("")
                             ForEach(station?.tanks.filter { $0.productId == product.id } ?? []) { Text($0.code).tag($0.id) }
                         }
-                        .tint(FuelNerveTheme.green)
+                        .fuelNervePickerField()
                     }
                 }
                 .padding(.top, 9)

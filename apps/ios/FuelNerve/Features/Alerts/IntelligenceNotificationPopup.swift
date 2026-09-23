@@ -158,6 +158,188 @@ struct IntelligenceNotificationPopup: View {
     }
 }
 
+struct LoadPlanningNotificationPopup: View {
+    @Environment(AppSession.self) private var session
+    @Environment(\.openURL) private var openURL
+
+    let alert: OwnerAlert
+    let acknowledge: () async -> Bool
+    let remindLater: () -> Void
+
+    @State private var recommendation: LoadPlanRecommendation
+    @State private var planning = false
+    @State private var planned = false
+    @State private var message: String?
+
+    init(alert: OwnerAlert, recommendation: LoadPlanRecommendation, acknowledge: @escaping () async -> Bool, remindLater: @escaping () -> Void) {
+        self.alert = alert
+        self.acknowledge = acknowledge
+        self.remindLater = remindLater
+        _recommendation = State(initialValue: recommendation)
+    }
+
+    var body: some View {
+        ZStack {
+            FuelNerveTheme.forest.ignoresSafeArea()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("NERVE INTELLIGENCE").font(.caption.bold()).tracking(1.4).foregroundStyle(FuelNerveTheme.green)
+                        Text("Plan ahead of a possible price rise").font(.title.bold()).foregroundStyle(FuelNerveTheme.forest)
+                        Text(alert.detail).font(.body).foregroundStyle(FuelNerveTheme.forest)
+                        Text("Outlook, not a confirmed supplier price change.").font(.caption).foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 11) {
+                        HStack {
+                            Text("Available space in your tanks").font(.headline).foregroundStyle(FuelNerveTheme.forest)
+                            Spacer()
+                            Image(systemName: "cylinder.split.1x2.fill").foregroundStyle(FuelNerveTheme.green)
+                        }
+                        ForEach(recommendation.lines) { line in ullageCard(line) }
+                        Label("Calculated from live book stock at \(recommendation.checkedAt.formatted(date: .omitted, time: .shortened)).", systemImage: "checkmark.shield.fill")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+
+                    if planned {
+                        VStack(alignment: .leading, spacing: 9) {
+                            Label("Load plan ready for review", systemImage: "checkmark.circle.fill")
+                                .font(.headline).foregroundStyle(FuelNerveTheme.green)
+                            Text(planSummary).font(.subheadline).foregroundStyle(FuelNerveTheme.forest)
+                            Text("No order has been placed. Confirm supplier, compartment split and safe delivery quantity before ordering.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            if let destination = session.environment.evidenceURL(for: "/purchases") {
+                                Button { openURL(destination) } label: {
+                                    Label("Open Purchases to complete the plan", systemImage: "cart.fill")
+                                        .font(.subheadline.bold()).frame(maxWidth: .infinity).frame(height: 48)
+                                }
+                                .buttonStyle(.plain).foregroundStyle(.white)
+                                .background(FuelNerveTheme.forest, in: RoundedRectangle(cornerRadius: 15))
+                            }
+                        }
+                        .padding(16).background(FuelNerveTheme.lime.opacity(0.18), in: RoundedRectangle(cornerRadius: 19))
+                    } else {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Prepare your next order now. Review quantities and supplier prices before confirming.")
+                                .font(.subheadline).foregroundStyle(FuelNerveTheme.forest)
+                            LoadPlanSwipeControl(working: planning) { await preparePlan() }
+                            Text("Creates a draft for your review. Nothing is ordered by this action.")
+                                .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .center)
+                        }
+                    }
+
+                    if let message {
+                        Label(message, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red)
+                    }
+
+                    if planned {
+                        Button("Done") { Task { _ = await acknowledge() } }
+                            .font(.headline).foregroundStyle(FuelNerveTheme.green).frame(maxWidth: .infinity).frame(height: 48)
+                            .overlay(RoundedRectangle(cornerRadius: 15).stroke(FuelNerveTheme.green.opacity(0.35)))
+                    }
+                }
+                .padding(22).background(.white, in: RoundedRectangle(cornerRadius: 30)).padding(20)
+            }
+        }
+        .interactiveDismissDisabled(planning)
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 13) {
+            Image(systemName: "sparkles").font(.title2).foregroundStyle(FuelNerveTheme.forest)
+                .frame(width: 54, height: 54).background(FuelNerveTheme.lime, in: RoundedRectangle(cornerRadius: 17))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Purchase Agent").font(.title2.bold()).foregroundStyle(FuelNerveTheme.forest)
+                Text(recommendation.stationName).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(action: remindLater) {
+                Image(systemName: "xmark").font(.headline).foregroundStyle(FuelNerveTheme.forest)
+                    .frame(width: 42, height: 42).background(FuelNerveTheme.canvas, in: Circle())
+            }.disabled(planning).accessibilityLabel("Close and remind me later")
+        }
+    }
+
+    private func ullageCard(_ line: LoadPlanRecommendation.Line) -> some View {
+        HStack(spacing: 13) {
+            Image(systemName: "cylinder.fill").font(.title2).foregroundStyle(FuelNerveTheme.green)
+                .frame(width: 48, height: 58).background(FuelNerveTheme.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 13))
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(line.productCode) · \(line.tankCodes.joined(separator: ", "))").font(.caption.bold()).tracking(0.8).foregroundStyle(.secondary)
+                Text(kilolitres(line.ullage)).font(.title.bold()).foregroundStyle(FuelNerveTheme.forest)
+                Text("\(line.ullage.litres) available within working capacity").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(14).background(FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 17))
+    }
+
+    private var planSummary: String {
+        recommendation.lines.map { "\($0.productCode) \(kilolitres($0.ullage))" }.joined(separator: " · ")
+    }
+
+    private func kilolitres(_ litres: Double) -> String {
+        (litres / 1_000).formatted(.number.precision(.fractionLength(0...2))) + " KL"
+    }
+
+    @MainActor private func preparePlan() async -> Bool {
+        guard !planning else { return false }
+        planning = true; message = nil
+        defer { planning = false }
+        do {
+            let snapshot = try await session.ownerService.snapshot(stationId: session.selectedStationId)
+            guard let refreshed = LoadPlanRecommendation(snapshot: snapshot) else {
+                message = "FuelNerve cannot safely calculate tank space from the latest records. Review Inventory first."
+                return false
+            }
+            recommendation = refreshed
+            planned = true
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            return true
+        } catch {
+            session.handleAuthenticationFailure(error)
+            message = "FuelNerve could not refresh tank space. No load plan was prepared."
+            return false
+        }
+    }
+}
+
+private struct LoadPlanSwipeControl: View {
+    let working: Bool
+    let prepare: () async -> Bool
+    @State private var drag: CGFloat = 0
+
+    var body: some View {
+        GeometryReader { proxy in
+            let thumb: CGFloat = 58
+            let maximum = max(0, proxy.size.width - thumb - 8)
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: 30).fill(FuelNerveTheme.forest)
+                Text(working ? "Checking live tank space…" : "Swipe right to plan order")
+                    .font(.subheadline.bold()).foregroundStyle(.white).frame(maxWidth: .infinity)
+                Circle().fill(FuelNerveTheme.lime).frame(width: thumb, height: thumb)
+                    .overlay {
+                        if working { ProgressView().tint(FuelNerveTheme.forest) }
+                        else { Image(systemName: "arrow.right").font(.title3.bold()).foregroundStyle(FuelNerveTheme.forest) }
+                    }
+                    .offset(x: min(maximum, max(0, drag + 4)))
+                    .gesture(DragGesture().onChanged { if !working { drag = max(0, min(maximum, $0.translation.width)) } }.onEnded { _ in
+                        guard !working, drag >= maximum * 0.82 else { withAnimation(.snappy) { drag = 0 }; return }
+                        Task {
+                            let success = await prepare()
+                            await MainActor.run { withAnimation(.snappy) { drag = success ? maximum : 0 } }
+                        }
+                    })
+            }
+        }
+        .frame(height: 66)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Swipe right to plan order")
+        .accessibilityHint("Refreshes live tank balances and prepares a draft load plan.")
+    }
+}
+
 extension OwnerAlert {
     var hasKnownIntelligenceAgent: Bool {
         guard let key = packet?.responsibleAgent?.key else { return false }

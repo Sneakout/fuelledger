@@ -5,13 +5,27 @@ import { env } from '../config/env.js';
 import { AppError } from '../lib/errors.js';
 import { assertStationAccess, permittedStationIds, requireOwner } from '../lib/station-access.js';
 import { authenticate } from '../middleware/authenticate.js';
-import { getSettings, listAlerts, markAlert, recentDeliveries, registerPushDevice, runScheduledNotifications, sendTestNotification, unregisterPushDevice, updateSettings } from '../modules/notifications/service.js';
+import { getSettings, listAlerts, markAlert, notifyMarketPriceOutlook, recentDeliveries, registerPushDevice, runScheduledNotifications, sendTestNotification, unregisterPushDevice, updateSettings } from '../modules/notifications/service.js';
 
 export const notificationsRouter = Router();
 
 notificationsRouter.get('/cron/daily', async (req, res) => {
   if (!env.CRON_SECRET || req.get('authorization') !== `Bearer ${env.CRON_SECRET}`) throw new AppError(401, 'CRON_UNAUTHORIZED', 'This scheduled task is not authorized.');
   res.json(await runScheduledNotifications());
+});
+
+const marketOutlookSchema = z.object({
+  organizationId: z.string().cuid(),
+  stationId: z.string().cuid(),
+  signalId: z.string().trim().min(1).max(120),
+  observedAt: z.iso.datetime(),
+  rationale: z.string().trim().min(20).max(500),
+});
+notificationsRouter.post('/cron/market-outlook', async (req, res) => {
+  if (!env.CRON_SECRET || req.get('authorization') !== `Bearer ${env.CRON_SECRET}`) throw new AppError(401, 'CRON_UNAUTHORIZED', 'This market outlook is not authorized.');
+  const parsed = marketOutlookSchema.safeParse(req.body);
+  if (!parsed.success) throw new AppError(400, 'MARKET_OUTLOOK_INVALID', 'Review the market outlook details.', parsed.error.flatten());
+  res.json(await notifyMarketPriceOutlook({ ...parsed.data, observedAt: new Date(parsed.data.observedAt) }));
 });
 
 notificationsRouter.use(authenticate);

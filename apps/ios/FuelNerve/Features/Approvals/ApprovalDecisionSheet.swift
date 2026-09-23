@@ -63,7 +63,7 @@ struct ApprovalDecisionSheet: View {
                     .font(.caption2).foregroundStyle(.secondary).frame(maxWidth: .infinity)
             }.padding(20)
         }
-        .background(.white).interactiveDismissDisabled(approving).presentationDetents([.large]).presentationDragIndicator(.hidden)
+        .background(FuelNerveTheme.canvas).interactiveDismissDisabled(approving).presentationDetents([.large]).fuelNerveSheet()
     }
 
     private var header: some View {
@@ -115,6 +115,7 @@ struct ApprovalDecisionSheet: View {
                 Text("FuelNerve suggested a price that keeps the previous rupee margin. Change it if your approved retail price is different.").font(.caption).foregroundStyle(.secondary)
                 TextField("New selling price", value: $sellingPrice, format: .currency(code: "INR")).keyboardType(.decimalPad).textFieldStyle(.roundedBorder)
                 DatePicker("Selling price effective", selection: $sellingEffectiveDate, in: minimumSellingEffectiveDate..., displayedComponents: .date)
+                    .fuelNervePickerField()
                 if !priceConfirmationValid { Label(priceValidationMessage, systemImage: "exclamationmark.triangle.fill").font(.caption).foregroundStyle(.red) }
             }
         }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(FuelNerveTheme.green.opacity(0.07), in: RoundedRectangle(cornerRadius: 18))

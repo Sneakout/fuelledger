@@ -6,7 +6,7 @@ import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 import { Prisma } from "@prisma/client";
-import { env } from "./config/env.js";
+import { env, trustedOrigins } from "./config/env.js";
 import { AppError } from "./lib/errors.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
@@ -51,18 +51,18 @@ export function createApp() {
           defaultSrc: ["'self'"],
           scriptSrc: ["'self'", "https://accounts.google.com"],
           frameSrc: ["'self'", "https://accounts.google.com"],
-          connectSrc: ["'self'", env.CORS_ORIGIN],
+          connectSrc: ["'self'", ...trustedOrigins],
           imgSrc: ["'self'", "data:", "https:"],
           styleSrc: ["'self'", "'unsafe-inline'", "https:"],
         },
       },
     }),
   );
-  app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
+  app.use(cors({ origin: trustedOrigins, credentials: true }));
   app.use((req, _res, next) => {
     if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
     const origin = req.get("origin");
-    if (origin && origin !== env.CORS_ORIGIN && origin !== env.APP_URL) {
+    if (origin && !trustedOrigins.includes(origin)) {
       return next(
         new AppError(
           403,

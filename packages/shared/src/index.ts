@@ -19,7 +19,10 @@ export const userSchema = z.object({
   demoExpiresAt: z.string().datetime().optional(),
 });
 export const loginSchema = z.object({
-  email: z.email("Enter a valid email address"),
+  email: z.string().trim().min(1).refine(
+    (value) => z.email().safeParse(value).success || /^\+?[0-9][0-9\s()-]{7,18}$/.test(value),
+    "Enter a valid email address or mobile number",
+  ),
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
 export const signupSchema = z.object({
@@ -47,13 +50,19 @@ export const demoAccessSchema = z
   });
 export const subscriptionPlans = ["CORE", "CORE_INTELLIGENCE"] as const;
 export const subscriptionBillingPeriods = ["MONTHLY", "YEARLY", "LIFETIME", "FOUNDING_YEARLY"] as const;
-export const customerSubscriptionUpdateSchema = z.object({
-  plan: z.enum(subscriptionPlans), billingPeriod: z.enum(subscriptionBillingPeriods),
-  paymentConfirmed: z.boolean(), setupFeePaid: z.boolean(),
-}).superRefine((value, context) => {
-  if (value.plan === "CORE" && value.billingPeriod === "FOUNDING_YEARLY") context.addIssue({ code: "custom", path: ["billingPeriod"], message: "The founding offer is available only with Core + Intelligence." });
-  if (value.plan === "CORE_INTELLIGENCE" && value.billingPeriod === "LIFETIME") context.addIssue({ code: "custom", path: ["billingPeriod"], message: "Lifetime access is available only for Core." });
-});
+export const customerSubscriptionUpdateSchema = z
+  .object({
+    plan: z.enum(subscriptionPlans),
+    billingPeriod: z.enum(subscriptionBillingPeriods),
+    paymentConfirmed: z.boolean(),
+    setupFeePaid: z.boolean(),
+  })
+  .superRefine((value, context) => {
+    if (value.plan === "CORE" && value.billingPeriod === "FOUNDING_YEARLY")
+      context.addIssue({ code: "custom", path: ["billingPeriod"], message: "The founding offer is available only with Core + Intelligence." });
+    if (value.plan === "CORE_INTELLIGENCE" && value.billingPeriod === "LIFETIME")
+      context.addIssue({ code: "custom", path: ["billingPeriod"], message: "Lifetime access is available only for Core." });
+  });
 export type User = z.infer<typeof userSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type SignupInput = z.infer<typeof signupSchema>;

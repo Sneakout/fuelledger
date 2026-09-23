@@ -114,6 +114,7 @@ enum OwnerNotificationType {
   APPROVAL_REQUIRED
   DAILY_SUMMARY
   OVERDUE_CUSTOMER
+  MARKET_PRICE_OUTLOOK
   SYSTEM_TEST
 }
 
@@ -1266,6 +1267,7 @@ model User {
   id                         String                      @id @default(cuid())
   organizationId             String                      @map("organization_id")
   email                      String                      @unique
+  phone                      String?                     @unique
   name                       String
   passwordHash               String                      @map("password_hash")
   loginEnabled               Boolean                     @default(true) @map("login_enabled")

@@ -1406,6 +1406,9 @@ export type DashboardBootstrap = {
     unit: string;
     station: { id: string; name: string; code: string };
     bookStock: number;
+    expectedFromLastDip?: number | null;
+    bookDifferenceFromLastDip?: number | null;
+    lastClosingDipAt?: string | null;
     workingCapacity: number;
     fillPercent: number;
     sellingPrice: number;
@@ -1413,7 +1416,7 @@ export type DashboardBootstrap = {
     densityRecordedAt: string | null;
     physicalStock: number | null;
     physicalReadingAt: string | null;
-    status: "EMPTY" | "LOW" | "HEALTHY";
+    status: "OVER_CAPACITY" | "EMPTY" | "LOW" | "HEALTHY";
   }>;
 };
 export type DailyBriefingFact = {

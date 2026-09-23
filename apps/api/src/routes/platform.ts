@@ -6,8 +6,17 @@ import { prisma } from "../lib/prisma.js";
 import { authenticate } from "../middleware/authenticate.js";
 
 export const platformRouter = Router();
-const planPricesPaise = { CORE: { MONTHLY: 69_900, YEARLY: 598_800, LIFETIME: 2_400_000 }, CORE_INTELLIGENCE: { MONTHLY: 149_900, YEARLY: 1_499_900, FOUNDING_YEARLY: 1_199_900 } } as const;
-const planExpiry = (period: "MONTHLY" | "YEARLY" | "LIFETIME" | "FOUNDING_YEARLY", from: Date) => { if (period === "LIFETIME") return null; const expires = new Date(from); if (period === "MONTHLY") expires.setUTCMonth(expires.getUTCMonth() + 1); else expires.setUTCFullYear(expires.getUTCFullYear() + 1); return expires; };
+const planPricesPaise = {
+  CORE: { MONTHLY: 69_900, YEARLY: 598_800, LIFETIME: 2_400_000 },
+  CORE_INTELLIGENCE: { MONTHLY: 149_900, YEARLY: 1_499_900, FOUNDING_YEARLY: 1_199_900 },
+} as const;
+const planExpiry = (billingPeriod: "MONTHLY" | "YEARLY" | "LIFETIME" | "FOUNDING_YEARLY", from: Date) => {
+  if (billingPeriod === "LIFETIME") return null;
+  const expires = new Date(from);
+  if (billingPeriod === "MONTHLY") expires.setUTCMonth(expires.getUTCMonth() + 1);
+  else expires.setUTCFullYear(expires.getUTCFullYear() + 1);
+  return expires;
+};
 platformRouter.use(authenticate);
 const requirePlatformAdmin = (email: string) => {
   if (!isPlatformAdminEmail(email))
@@ -41,9 +50,13 @@ platformRouter.get("/customers", async (req, res) => {
       lifetimeAccessPaidAt: true,
       subscriptionUpdatedAt: true,
       subscriptionUpdatedBy: true,
-      intelligenceEnabledAt: true, intelligenceExpiresAt: true,
-      subscriptionPlan: true, subscriptionBillingPeriod: true, subscriptionPricePaise: true,
-      subscriptionActivatedAt: true, subscriptionExpiresAt: true,
+      intelligenceEnabledAt: true,
+      intelligenceExpiresAt: true,
+      subscriptionPlan: true,
+      subscriptionBillingPeriod: true,
+      subscriptionPricePaise: true,
+      subscriptionActivatedAt: true,
+      subscriptionExpiresAt: true,
       users: {
         where: { role: "OWNER" },
         orderBy: { createdAt: "asc" },
@@ -71,7 +84,8 @@ platformRouter.put("/customers/:id/subscription", async (req, res) => {
   const now = new Date();
   const { plan, billingPeriod, paymentConfirmed, setupFeePaid } = parsed.data;
   const pricePaise = planPricesPaise[plan][billingPeriod as keyof (typeof planPricesPaise)[typeof plan]];
-  if (pricePaise === undefined) throw new AppError(400, "SUBSCRIPTION_COMBINATION_INVALID", "Choose a billing option available for this plan.");
+  if (pricePaise === undefined)
+    throw new AppError(400, "SUBSCRIPTION_COMBINATION_INVALID", "Choose a billing option available for this plan.");
   const sameActivePlan = Boolean(existing.subscriptionActivatedAt && existing.subscriptionPlan === plan && existing.subscriptionBillingPeriod === billingPeriod);
   const activatedAt = paymentConfirmed ? (sameActivePlan ? existing.subscriptionActivatedAt : now) : null;
   const expiresAt = paymentConfirmed ? (sameActivePlan ? existing.subscriptionExpiresAt : planExpiry(billingPeriod, now)) : null;
@@ -84,8 +98,11 @@ platformRouter.put("/customers/:id/subscription", async (req, res) => {
       lifetimeAccessPaidAt: lifetimeAccess ? existing.lifetimeAccessPaidAt ?? now : null,
       subscriptionUpdatedAt: now,
       subscriptionUpdatedBy: req.user!.email,
-      subscriptionPlan: plan, subscriptionBillingPeriod: billingPeriod, subscriptionPricePaise: pricePaise,
-      subscriptionActivatedAt: activatedAt, subscriptionExpiresAt: expiresAt,
+      subscriptionPlan: plan,
+      subscriptionBillingPeriod: billingPeriod,
+      subscriptionPricePaise: pricePaise,
+      subscriptionActivatedAt: activatedAt,
+      subscriptionExpiresAt: expiresAt,
       intelligenceEnabledAt: intelligenceEnabled ? existing.intelligenceEnabledAt ?? now : null,
       intelligenceExpiresAt: intelligenceEnabled ? expiresAt : null,
     },
@@ -100,4 +117,19 @@ platformRouter.get("/subscription", async (req, res) => {
   });
   if (!subscription) throw new AppError(404, "ORGANIZATION_NOT_FOUND", "Your organization was not found.");
   res.json(subscription);
+});
+
+platformRouter.get("/capabilities", async (_req, res) => {
+  // Mutations are individually advertised and still require server-side
+  // authorization, validation, idempotency, and an explicit user decision.
+  res.json({
+    version: 1,
+    readOnly: true,
+    approvals: true,
+    alertAcknowledgement: false,
+    pushRegistration: true,
+    proposals: false,
+    execution: false,
+    invoiceCapture: true,
+  });
 });

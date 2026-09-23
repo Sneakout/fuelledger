@@ -27,15 +27,20 @@ struct OwnerApproval: Decodable, Identifiable, Sendable {
 }
 
 protocol ApprovalService: Sendable {
-    func approvals() async throws -> [OwnerApproval]
+    func approvals(status: String?) async throws -> [OwnerApproval]
     func decide(id: String, approve: Bool, note: String, version: Int, sellingPrice: Double?, sellingPriceEffectiveFrom: Date?) async throws -> OwnerApproval
+}
+
+extension ApprovalService {
+    func approvals() async throws -> [OwnerApproval] { try await approvals(status: "PENDING") }
 }
 
 struct LiveApprovalService: ApprovalService {
     let client: APIClient
-    func approvals() async throws -> [OwnerApproval] {
+    func approvals(status: String?) async throws -> [OwnerApproval] {
         struct Response: Decodable, Sendable { let approvals: [OwnerApproval] }
-        return try await client.get("approvals", query: [URLQueryItem(name: "status", value: "PENDING")], as: Response.self).approvals
+        let query = status.map { [URLQueryItem(name: "status", value: $0)] } ?? []
+        return try await client.get("approvals", query: query, as: Response.self).approvals
     }
     func decide(id: String, approve: Bool, note: String, version: Int, sellingPrice: Double? = nil, sellingPriceEffectiveFrom: Date? = nil) async throws -> OwnerApproval {
         struct Body: Encodable, Sendable { let decision: String; let note: String; let version: Int; let sellingPrice: Double?; let sellingPriceEffectiveFrom: String? }
@@ -45,8 +50,8 @@ struct LiveApprovalService: ApprovalService {
 }
 
 struct PreviewApprovalService: ApprovalService {
-    func approvals() async throws -> [OwnerApproval] {
+    func approvals(status: String?) async throws -> [OwnerApproval] {
         [.init(id: "approval-1", actionType: "INVENTORY_ADJUSTMENT", status: "PENDING", reason: "Verified dip shortage after delivery reconciliation", payload: .init(stationId: "station", productId: "ms", tankId: "tank", quantityDelta: -42, notes: "Verified dip shortage after delivery reconciliation", invoiceId: nil, invoiceNumber: nil, proposedPurchasePrice: nil, suggestedSellingPrice: nil, purchaseEffectiveFrom: nil), evidence: .init(product: .init(id: "ms", name: "Motor Spirit", code: "MS", unit: "LITRE"), tank: .init(id: "tank", code: "T-1"), bookStockBefore: 6240, proposedBookStock: 6198, invoice: nil, currentPurchasePrice: nil, proposedPurchasePrice: nil, currentSellingPrice: nil, suggestedSellingPrice: nil, purchaseEffectiveFrom: nil, checkedAt: ISO8601DateFormatter().string(from: .now), evidencePath: "/inventory"), requestedAt: .now.addingTimeInterval(-900), requestedBy: .init(id: "manager", name: "Station Manager", role: "MANAGER"), station: .init(id: "station", name: "Greenway Fuel Point", code: "GFP"), decidedAt: nil, decidedBy: nil, decisionNote: nil, execution: nil, version: 1)]
     }
-    func decide(id: String, approve: Bool, note: String, version: Int, sellingPrice: Double? = nil, sellingPriceEffectiveFrom: Date? = nil) async throws -> OwnerApproval { try await approvals()[0] }
+    func decide(id: String, approve: Bool, note: String, version: Int, sellingPrice: Double? = nil, sellingPriceEffectiveFrom: Date? = nil) async throws -> OwnerApproval { try await approvals(status: "PENDING")[0] }
 }

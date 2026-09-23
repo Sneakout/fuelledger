@@ -160,6 +160,10 @@ private struct OwnerTabView: View {
             } else {
                 CoreNotificationPopup(alert: alert, acknowledge: { await acknowledge(alert) }) { popupCoordinator.deferActive() }
             }
+        case .loadPlanning(let alert, let recommendation):
+            LoadPlanningNotificationPopup(alert: alert, recommendation: recommendation, acknowledge: { await acknowledge(alert) }) {
+                popupCoordinator.deferActive()
+            }
         case .dailyBrief(let briefing, let stationName, _):
             DailyBriefPopup(briefing: briefing, stationName: stationName, dismiss: { popupCoordinator.completeActive() }, openFullBrief: {
                 popupCoordinator.completeActive()

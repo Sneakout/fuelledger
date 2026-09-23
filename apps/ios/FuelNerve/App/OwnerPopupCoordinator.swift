@@ -4,12 +4,14 @@ import Observation
 enum OwnerPopupPresentation: Identifiable {
     case approval(OwnerApproval)
     case notification(OwnerAlert)
+    case loadPlanning(OwnerAlert, LoadPlanRecommendation)
     case dailyBrief(DailyBriefing, stationName: String, seenKey: String)
 
     var id: String {
         switch self {
         case .approval(let value): "approval:\(value.id)"
         case .notification(let value): "notification:\(value.id)"
+        case .loadPlanning(let value, _): "notification:\(value.id)"
         case .dailyBrief(_, _, let key): "brief:\(key)"
         }
     }
@@ -68,6 +70,13 @@ final class OwnerPopupCoordinator {
         if let alert = alerts.first(where: isOperationalInterruption) {
             active = .notification(alert); return
         }
+        // 4. A market outlook can suggest a draft only after refreshing live tank balances.
+        if session.hasIntelligence,
+           let alert = alerts.first(where: isMarketPriceOutlook),
+           let snapshot = try? await session.ownerService.snapshot(stationId: stationId),
+           let recommendation = LoadPlanRecommendation(snapshot: snapshot) {
+            active = .loadPlanning(alert, recommendation); return
+        }
         // 4. Other material items. Informational messages remain in Alerts.
         if let alert = alerts.first(where: { $0.severity == .urgent || $0.severity == .attention }) {
             active = .notification(alert); return
@@ -104,5 +113,9 @@ final class OwnerPopupCoordinator {
         guard let packet = alert.packet else { return false }
         return packet.status == "OPEN" || packet.status == "EMPTY" || packet.status == "READING_MISSING"
             || (packet.recordType == "SHIFT_RECONCILIATION" && alert.severity == .urgent)
+    }
+
+    private func isMarketPriceOutlook(_ alert: OwnerAlert) -> Bool {
+        alert.notificationType == "MARKET_PRICE_OUTLOOK" || alert.packet?.recordType == "MARKET_PRICE_OUTLOOK"
     }
 }

@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 import Security
 
 enum APIError: Error {
@@ -122,7 +123,7 @@ actor APIClient {
         for cookie in cookieStorage.cookies ?? [] where cookie.domain == host || cookie.domain == ".\(host)" {
             cookieStorage.deleteCookie(cookie)
         }
-        if persistsSessionCookie { SessionCookieVault.clear() }
+        if persistsSessionCookie { SessionCookieVault.clear(for: baseURL) }
         session.reset { }
     }
 
@@ -136,7 +137,7 @@ actor APIClient {
                 cookieStorage.setCookie(cookie)
             }
         }
-        if persistsSessionCookie { SessionCookieVault.store(cookieStorage.cookies(for: baseURL) ?? []) }
+        if persistsSessionCookie { SessionCookieVault.store(cookieStorage.cookies(for: baseURL) ?? [], for: baseURL) }
     }
 
     private func applySessionCookies(to request: inout URLRequest, for url: URL) {
@@ -153,7 +154,7 @@ actor APIClient {
 
     private static let allowedReadOnlyWrites: Set<String> = [
         "auth/login", "auth/google", "auth/change-password", "auth/logout", "intelligence/ask",
-        "notifications/devices", "purchases/invoices",
+        "notifications/devices", "purchases/invoices", "purchases/suppliers",
     ]
 
     private static func allowedMutation(_ path: String) -> Bool {
@@ -165,7 +166,8 @@ actor APIClient {
 
 private enum SessionCookieVault {
     private static let service = "tech.mindvector.fuelnerve.session-cookie"
-    private static let account = "fuelnerve-api"
+    private static let legacyAccount = "fuelnerve-api"
+    private static let logger = Logger(subsystem: "tech.mindvector.fuelnerve", category: "session")
 
     private struct StoredCookie: Codable {
         let name: String
@@ -176,21 +178,25 @@ private enum SessionCookieVault {
         let secure: Bool
     }
 
-    static func store(_ cookies: [HTTPCookie]) {
+    static func store(_ cookies: [HTTPCookie], for baseURL: URL) {
         guard let cookie = cookies.first(where: { $0.name == "__Host-fuelledger_session" })
-                ?? cookies.first(where: { $0.name == "fuelledger_session" }),
-              let data = try? JSONEncoder().encode(StoredCookie(
-                name: cookie.name,
-                value: cookie.value,
-                domain: cookie.domain,
-                path: cookie.path,
-                expiresAt: cookie.expiresDate,
-                secure: cookie.isSecure
-              )) else {
-            clear()
+                ?? cookies.first(where: { $0.name == "fuelledger_session" }) else {
+            clear(for: baseURL)
             return
         }
-        clear()
+        let stored = StoredCookie(
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+            expiresAt: cookie.expiresDate,
+            secure: cookie.isSecure
+        )
+        guard let data = try? JSONEncoder().encode(stored) else {
+            logger.error("Could not encode the saved session.")
+            return
+        }
+        let account = account(for: baseURL)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -198,25 +204,47 @@ private enum SessionCookieVault {
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecValueData as String: data,
         ]
-        SecItemAdd(query as CFDictionary, nil)
+        let status = SecItemAdd(query as CFDictionary, nil)
+        if status == errSecDuplicateItem {
+            let match: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: service,
+                kSecAttrAccount as String: account,
+            ]
+            let update: [String: Any] = [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            ]
+            let updateStatus = SecItemUpdate(match as CFDictionary, update as CFDictionary)
+            if updateStatus != errSecSuccess { logger.error("Could not update the saved session. Keychain status: \(updateStatus, privacy: .public)") }
+        } else if status != errSecSuccess {
+            logger.error("Could not save the session. Keychain status: \(status, privacy: .public)")
+        }
     }
 
     static func restore(into storage: HTTPCookieStorage, for baseURL: URL) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data,
+        let scopedAccount = account(for: baseURL)
+        let scoped = savedData(account: scopedAccount)
+        let sourceAccount: String
+        let data: Data
+        if let scoped {
+            sourceAccount = scopedAccount
+            data = scoped
+        } else if let legacy = savedData(account: legacyAccount) {
+            sourceAccount = legacyAccount
+            data = legacy
+        } else {
+            return
+        }
+        guard
               let saved = try? JSONDecoder().decode(StoredCookie.self, from: data),
-              saved.expiresAt.map({ $0 > .now }) != false,
               let host = baseURL.host,
               saved.domain == host || saved.domain == ".\(host)" else {
-            clear()
+            if sourceAccount == scopedAccount { remove(account: sourceAccount) }
+            return
+        }
+        guard saved.expiresAt.map({ $0 > .now }) != false else {
+            remove(account: sourceAccount)
             return
         }
         var properties: [HTTPCookiePropertyKey: Any] = [
@@ -227,16 +255,56 @@ private enum SessionCookieVault {
             .secure: saved.secure ? "TRUE" : "FALSE",
         ]
         if let expiresAt = saved.expiresAt { properties[.expires] = expiresAt }
-        if let cookie = HTTPCookie(properties: properties) { storage.setCookie(cookie) }
+        guard let cookie = HTTPCookie(properties: properties) else {
+            logger.error("Could not rebuild the saved session cookie.")
+            remove(account: sourceAccount)
+            return
+        }
+        storage.setCookie(cookie)
+        if sourceAccount == legacyAccount {
+            store([cookie], for: baseURL)
+            remove(account: legacyAccount)
+        }
     }
 
-    static func clear() {
+    static func clear(for baseURL: URL) {
+        remove(account: account(for: baseURL))
+        remove(account: legacyAccount)
+    }
+
+    private static func account(for baseURL: URL) -> String {
+        let scheme = baseURL.scheme?.lowercased() ?? "unknown"
+        let host = baseURL.host?.lowercased() ?? "unknown"
+        let port = baseURL.port.map { ":\($0)" } ?? ""
+        return "fuelnerve-api|\(scheme)://\(host)\(port)"
+    }
+
+    private static func savedData(account: String) -> Data? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status != errSecSuccess && status != errSecItemNotFound {
+            logger.error("Could not read the saved session. Keychain status: \(status, privacy: .public)")
+        }
+        return status == errSecSuccess ? result as? Data : nil
+    }
+
+    private static func remove(account: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(query as CFDictionary)
+        let status = SecItemDelete(query as CFDictionary)
+        if status != errSecSuccess && status != errSecItemNotFound {
+            logger.error("Could not remove the saved session. Keychain status: \(status, privacy: .public)")
+        }
     }
 }
 

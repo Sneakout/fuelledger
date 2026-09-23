@@ -4,6 +4,17 @@ import Testing
 
 @Suite(.serialized)
 struct ContractSecurityTests {
+    @Test func localKeychainCanPersistAndRestoreSessionData() throws {
+        let store = KeychainStore()
+        let account = "local-session-test-\(UUID().uuidString)"
+        let expected = Data("opaque-session".utf8)
+        defer { try? store.remove(account: account) }
+
+        try store.save(token: expected, account: account)
+
+        #expect(try KeychainStore().token(account: account) == expected)
+    }
+
     @Test func sanitizedContractsDecodeAndIgnoreUnknownFields() throws {
         struct UserEnvelope: Decodable { let user: AuthenticatedUser }
         let user = try JSONDecoder.fuelNerve.decode(UserEnvelope.self, from: fixture("auth-me")).user

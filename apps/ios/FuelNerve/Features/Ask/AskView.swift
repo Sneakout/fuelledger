@@ -88,12 +88,18 @@ struct AskView: View {
             .navigationTitle("Ask")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
-            .confirmationDialog("Add a purchase invoice", isPresented: $showingInvoiceChoices, titleVisibility: .visible) {
-                Button("Choose photo") { choosingInvoicePhoto = true }
-                Button("Choose PDF or image") { choosingInvoiceFile = true }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("FuelNerve will check the document and show every extracted detail before anything is updated.")
+            .sheet(isPresented: $showingInvoiceChoices) {
+                InvoiceSourcePicker {
+                    showingInvoiceChoices = false
+                    choosingInvoicePhoto = true
+                } chooseFile: {
+                    showingInvoiceChoices = false
+                    choosingInvoiceFile = true
+                } dismiss: {
+                    showingInvoiceChoices = false
+                }
+                .presentationDetents([.height(360)])
+                .fuelNerveSheet()
             }
             .photosPicker(isPresented: $choosingInvoicePhoto, selection: $selectedInvoicePhoto, matching: .images)
             .onChange(of: session.selectedStationId) { _, stationId in if answerStationId != stationId { answer = nil; staleAnswer = false; message = nil } }
@@ -118,6 +124,7 @@ struct AskView: View {
             }
             .sheet(item: $invoiceDocument) { document in
                 InvoiceReviewView(document: document) { invoiceDocument = nil }
+                    .fuelNerveSheet()
             }
         }
     }
@@ -146,6 +153,42 @@ struct AskView: View {
             catch { session.handleAuthenticationFailure(error); staleAnswer = answer != nil; message = "FuelNerve could not answer right now. Your previous verified answer remains visible." }
             asking = false
         }
+    }
+}
+
+private struct InvoiceSourcePicker: View {
+    let choosePhoto: () -> Void
+    let chooseFile: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 13) {
+                Image(systemName: "doc.viewfinder.fill").font(.title2).foregroundStyle(FuelNerveTheme.forest)
+                    .frame(width: 52, height: 52).background(FuelNerveTheme.lime, in: RoundedRectangle(cornerRadius: 16))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Add purchase invoice").font(.title2.bold()).foregroundStyle(FuelNerveTheme.forest)
+                    Text("Choose how you want FuelNerve to read it.").font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button(action: dismiss) { Image(systemName: "xmark").frame(width: 38, height: 38).background(.white, in: Circle()) }
+                    .foregroundStyle(FuelNerveTheme.forest).accessibilityLabel("Close invoice choices")
+            }
+            sourceButton("Take or choose a photo", detail: "Best for a paper invoice", symbol: "camera.fill", action: choosePhoto)
+            sourceButton("Choose PDF or image", detail: "Open a document from Files", symbol: "doc.fill", action: chooseFile)
+            Label("The document is checked before any record can change.", systemImage: "checkmark.shield.fill")
+                .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity)
+        }.padding(20)
+    }
+
+    private func sourceButton(_ title: String, detail: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 13) {
+                Image(systemName: symbol).foregroundStyle(FuelNerveTheme.green).frame(width: 42, height: 42).background(FuelNerveTheme.green.opacity(0.09), in: RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 3) { Text(title).font(.subheadline.bold()); Text(detail).font(.caption).foregroundStyle(.secondary) }
+                Spacer(); Image(systemName: "chevron.right").foregroundStyle(FuelNerveTheme.green)
+            }.foregroundStyle(FuelNerveTheme.forest).padding(13).background(.white, in: RoundedRectangle(cornerRadius: 17))
+        }.buttonStyle(.plain)
     }
 }
 

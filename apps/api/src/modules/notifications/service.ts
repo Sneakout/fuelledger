@@ -59,7 +59,7 @@ const purchaseAgent = { key: 'purchase-check', name: 'Purchase Agent', responsib
 const nerveAssistant = { key: 'owner-assistant', name: 'Nerve Assistant', responsibility: 'Coordinates questions across FuelNerve specialists' } as const;
 function responsibleAgent(type: OwnerNotificationType, recordType: string) {
   if (recordType === 'DAILY_BRIEFING') return nerveAssistant;
-  if (recordType === 'PURCHASE_INVOICE' || recordType === 'SUPPLIER_PAYABLE' || recordType === 'PURCHASE_RECEIPT' || recordType === 'PRODUCT_PRICE_CHANGE_REQUEST') return purchaseAgent;
+  if (recordType === 'PURCHASE_INVOICE' || recordType === 'SUPPLIER_PAYABLE' || recordType === 'PURCHASE_RECEIPT' || recordType === 'PRODUCT_PRICE_CHANGE_REQUEST' || recordType === 'MARKET_PRICE_OUTLOOK') return purchaseAgent;
   return agentForType[type] ?? null;
 }
 function presentSettings(settings: (NotificationSettingFields & { id?: string; updatedAt?: Date }) | null) {
@@ -113,6 +113,7 @@ function alertPresentation(input: AlertInput, packet: OwnerNotificationPacket, i
     DENSITY_MISSING: ['Morning density is due', '/inventory'], LOW_STOCK: ['Fuel stock needs attention', '/inventory'],
     SHIFT_VARIANCE: ['Shift variance needs review', '/reconciliation'], SHIFT_OPEN: ['A shift is still open', '/operations'],
     APPROVAL_REQUIRED: ['An owner decision is waiting', '/inventory'],
+    MARKET_PRICE_OUTLOOK: ['Plan ahead of a possible price rise', '/inventory'],
     DAILY_SUMMARY: ['Your daily owner briefing', '/reports'], OVERDUE_CUSTOMER: ['Customer balances need follow-up', '/customers'],
     SYSTEM_TEST: ['FuelNerve alert test', '/notifications'],
   } as const;
@@ -275,6 +276,47 @@ export async function sendTestNotification(organizationId: string) {
   if (!settings.providerReady) throw new AppError(503, 'WHATSAPP_NOT_CONFIGURED', 'WhatsApp delivery is not configured yet.');
   const now = new Date();
   return sendOwnerNotification({ organizationId, type: 'SYSTEM_TEST', dedupeKey: `test:${organizationId}:${now.getTime()}`, packet: { subjectName: 'Owner notification test', recordType: 'SYSTEM_TEST', product: null, eventDate: now.toISOString(), dueDate: null, amount: null, quantity: null, status: 'TEST', daysOverdueOrWaiting: null, station: { id: null, name: 'All fuel stations' }, evidence: [{ label: 'Open notification settings', path: '/notifications', recordType: 'NOTIFICATION_SETTINGS', recordId: null }], availableActions: ['ACKNOWLEDGE', 'VIEW_RECORD'] }, message: () => `FuelNerve test message\n\nWhatsApp alerts are connected for ${indiaDate()}. You will receive only the alerts you enable in FuelNerve.\n\nOpen FuelNerve: ${env.APP_URL}` });
+}
+
+export async function notifyMarketPriceOutlook(input: {
+  organizationId: string;
+  stationId: string;
+  signalId: string;
+  observedAt: Date;
+  rationale: string;
+}) {
+  const [organization, station] = await Promise.all([
+    prisma.organization.findUnique({ where: { id: input.organizationId }, select: { intelligenceEnabledAt: true, intelligenceExpiresAt: true } }),
+    prisma.station.findFirst({ where: { id: input.stationId, organizationId: input.organizationId }, select: { id: true, name: true } }),
+  ]);
+  if (!station) throw new AppError(404, 'STATION_NOT_FOUND', 'The fuel station for this market outlook was not found.');
+  const now = new Date();
+  if (!organization?.intelligenceEnabledAt || (organization.intelligenceExpiresAt && organization.intelligenceExpiresAt <= now)) {
+    return { status: 'SKIPPED' as const, reason: 'intelligence_plan_inactive' };
+  }
+  return sendOwnerNotification({
+    organizationId: input.organizationId,
+    stationId: station.id,
+    type: 'MARKET_PRICE_OUTLOOK',
+    dedupeKey: `market-price-outlook:${input.organizationId}:${station.id}:${input.signalId}`,
+    title: () => 'Plan ahead of a possible price rise',
+    severity: 'ATTENTION',
+    packet: {
+      subjectName: 'Fuel purchase price outlook',
+      recordType: 'MARKET_PRICE_OUTLOOK',
+      product: null,
+      eventDate: input.observedAt.toISOString(),
+      dueDate: null,
+      amount: null,
+      quantity: null,
+      status: 'PRICE_INCREASE_POSSIBLE',
+      daysOverdueOrWaiting: null,
+      station: { id: station.id, name: station.name },
+      evidence: [{ label: 'Review live tank stock', path: '/inventory', recordType: 'TANK_STOCK', recordId: null }],
+      availableActions: ['ACKNOWLEDGE', 'REMIND_LATER', 'VIEW_RECORD', 'PREPARE_DRAFT'],
+    },
+    message: () => `${input.rationale}\n\nThis is a market outlook, not a confirmed supplier price change.`,
+  });
 }
 
 export async function notifyShiftVariance(organizationId: string, shift: { id: string; station: { id: string; name: string }; shiftNumber: number; closedAt?: Date | null; totals: { variance: number } | null }) {

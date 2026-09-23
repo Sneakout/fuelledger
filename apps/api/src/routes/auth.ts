@@ -1,4 +1,5 @@
 import { Router } from "express";
+import type { Request } from "express";
 import {
   changePasswordSchema,
   demoAccessSchema,
@@ -28,6 +29,8 @@ const sessionCookie =
   process.env.NODE_ENV === "production"
     ? "__Host-fuelledger_session"
     : "fuelledger_session";
+const persistentClient = (req: Request) =>
+  req.get("x-fuelnerve-client")?.toLowerCase() === "ios";
 const setSession = (
   res: Parameters<Parameters<typeof authRouter.post>[1]>[1],
   result: Awaited<ReturnType<typeof login>>,
@@ -37,7 +40,7 @@ const setSession = (
     sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 8 * 60 * 60 * 1000,
+    maxAge: result.maxAgeMs,
   });
   res.json({ user: result.user });
 };
@@ -54,7 +57,7 @@ authRouter.post("/login", async (req, res) => {
   await assertNotThrottled(key);
   let result;
   try {
-    result = await login(parsed.data, req.get("user-agent"));
+    result = await login(parsed.data, req.get("user-agent"), { persistent: persistentClient(req) });
     await clearThrottle(key);
   } catch (error) {
     await recordFailure(key);
@@ -71,7 +74,7 @@ authRouter.post("/signup", async (req, res) => {
       "Please check the information entered.",
       parsed.error.flatten(),
     );
-  setSession(res, await signup(parsed.data, req.get("user-agent")));
+  setSession(res, await signup(parsed.data, req.get("user-agent"), { persistent: persistentClient(req) }));
 });
 authRouter.post("/google", async (req, res) => {
   const parsed = googleAuthSchema.safeParse(req.body);
@@ -82,7 +85,7 @@ authRouter.post("/google", async (req, res) => {
       "Google sign-in information is invalid.",
       parsed.error.flatten(),
     );
-  setSession(res, await googleAuth(parsed.data, req.get("user-agent")));
+  setSession(res, await googleAuth(parsed.data, req.get("user-agent"), { persistent: persistentClient(req) }));
 });
 authRouter.post("/demo", async (req, res) => {
   const parsed = demoAccessSchema.safeParse(req.body);

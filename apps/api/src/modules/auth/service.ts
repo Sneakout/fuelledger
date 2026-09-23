@@ -18,9 +18,13 @@ import { defaultExpenseCategories } from "../../lib/default-expense-categories.j
 export async function login(
   input: LoginInput,
   userAgent?: string,
-): Promise<{ token: string; user: User }> {
-  const record = await prisma.user.findUnique({
-    where: { email: input.email.toLowerCase() },
+  options: { persistent?: boolean } = {},
+): Promise<{ token: string; user: User; maxAgeMs: number }> {
+  const identifier = input.email.trim();
+  const record = await prisma.user.findFirst({
+    where: identifier.includes("@")
+      ? { email: identifier.toLowerCase() }
+      : { phone: normalizeMobile(identifier) },
     include: userInclude,
   });
   if (
@@ -32,16 +36,21 @@ export async function login(
     throw new AppError(
       401,
       "INVALID_CREDENTIALS",
-      "Email or password is incorrect.",
+      "Email, mobile number or password is incorrect.",
     );
   await prisma.user.update({
     where: { id: record.id },
     data: { lastLoginAt: new Date() },
   });
-  return session(record, userAgent);
+  return session(record, userAgent, options);
 }
 
-export async function signup(input: SignupInput, userAgent?: string) {
+function normalizeMobile(value: string) {
+  const digits = value.replace(/\D/g, "");
+  return digits.length === 10 ? `91${digits}` : digits;
+}
+
+export async function signup(input: SignupInput, userAgent?: string, options: { persistent?: boolean } = {}) {
   const email = input.email.toLowerCase();
   if (await prisma.user.findUnique({ where: { email } }))
     throw new AppError(
@@ -77,10 +86,10 @@ export async function signup(input: SignupInput, userAgent?: string) {
       include: userInclude,
     });
   });
-  return session(record, userAgent);
+  return session(record, userAgent, options);
 }
 
-export async function googleAuth(input: GoogleAuthInput, userAgent?: string) {
+export async function googleAuth(input: GoogleAuthInput, userAgent?: string, options: { persistent?: boolean } = {}) {
   if (!env.GOOGLE_CLIENT_ID)
     throw new AppError(
       503,
@@ -140,7 +149,7 @@ export async function googleAuth(input: GoogleAuthInput, userAgent?: string) {
     where: { id: record.id },
     data: { lastLoginAt: new Date() },
   });
-  return session(record, userAgent);
+  return session(record, userAgent, options);
 }
 
 export async function startDemo(input: DemoAccessInput) {
@@ -382,10 +391,12 @@ function present(
 async function session(
   record: Parameters<typeof present>[0],
   userAgent?: string,
+  options: { persistent?: boolean } = {},
 ) {
   const user = present(record);
   const id = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const maxAgeMs = options.persistent ? 30 * 24 * 60 * 60 * 1000 : 8 * 60 * 60 * 1000;
+  const expiresAt = new Date(Date.now() + maxAgeMs);
   await prisma.userSession.create({
     data: {
       id,
@@ -402,7 +413,7 @@ async function session(
       jti: id,
     },
     env.JWT_SECRET,
-    { expiresIn: "8h" },
+    { expiresIn: Math.floor(maxAgeMs / 1000) },
   );
-  return { token, user };
+  return { token, user, maxAgeMs };
 }

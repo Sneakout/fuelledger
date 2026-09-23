@@ -15,11 +15,10 @@ struct TodayView: View {
                     VStack(spacing: 18) {
                         StationHero(snapshot: snapshot)
                         if snapshotStale { StaleDataNotice(updatedAt: snapshot.asOf) { Task { await load() } } }
-                        DashboardActionSection(actions: snapshot.alerts)
                         MetricGrid(snapshot: snapshot)
-                        ShiftStatusCard(open: snapshot.openShifts, pending: snapshot.pendingReconciliations)
                         TankStockSection(tanks: snapshot.tanks)
                         CollectionSection(collections: snapshot.collections, total: snapshot.collectedToday)
+                        ShiftStatusCard(open: snapshot.openShifts, pending: snapshot.pendingReconciliations)
                     }.padding(.horizontal, 18).padding(.bottom, 28)
                 } else if let error {
                     ContentUnavailableView("Unable to load today", systemImage: "wifi.exclamationmark", description: Text(error))
@@ -29,13 +28,32 @@ struct TodayView: View {
             .background(FuelNerveTheme.canvas)
             .navigationTitle("Today")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { if loading { ProgressView() } } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        SettingsView()
+                    } label: {
+                        Text(profileInitials)
+                            .font(.caption.bold())
+                            .foregroundStyle(FuelNerveTheme.forest)
+                            .frame(width: 34, height: 34)
+                            .background(FuelNerveTheme.lime, in: Circle())
+                    }
+                    .accessibilityLabel("Open profile")
+                }
+                ToolbarItem(placement: .topBarTrailing) { if loading { ProgressView() } }
+            }
             .refreshable { await load() }
             .task(id: session.selectedStationId) { await load() }
             .task {
                 for await _ in NotificationCenter.default.notifications(named: .fuelNerveRecordsChanged) { await load() }
             }
         }
+    }
+
+    private var profileInitials: String {
+        let parts = (session.user?.name ?? "Owner").split(separator: " ").prefix(2)
+        return parts.compactMap(\.first).map(String.init).joined().uppercased()
     }
 
     private func load() async {
@@ -54,41 +72,6 @@ struct TodayView: View {
             session.handleAuthenticationFailure(error)
             snapshotStale = snapshot != nil
             if snapshot == nil { self.error = "Please check your connection and fuel station access, then try again." }
-        }
-    }
-}
-
-private struct DashboardActionSection: View {
-    let actions: [OwnerAlert]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("What needs action").font(.title3.bold()).foregroundStyle(FuelNerveTheme.forest)
-                Spacer()
-                Text("\(actions.count)").font(.caption.bold()).foregroundStyle(actions.isEmpty ? FuelNerveTheme.green : FuelNerveTheme.gold)
-                    .frame(minWidth: 30, minHeight: 30).background((actions.isEmpty ? Color.green : Color.orange).opacity(0.1), in: Circle())
-            }
-            if actions.isEmpty {
-                Label("Nothing urgent", systemImage: "checkmark.circle.fill")
-                    .font(.subheadline.weight(.semibold)).foregroundStyle(FuelNerveTheme.green)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding().background(.white, in: RoundedRectangle(cornerRadius: 18))
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(actions.enumerated()), id: \.element.id) { index, action in
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: action.severity == .urgent ? "exclamationmark.triangle.fill" : "bell.badge.fill")
-                                .foregroundStyle(action.severity == .urgent ? .red : FuelNerveTheme.gold).frame(width: 24)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(action.title).font(.subheadline.weight(.bold)).foregroundStyle(FuelNerveTheme.forest)
-                                Text(action.detail).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                            }
-                            Spacer(minLength: 0)
-                        }.padding(.vertical, 13)
-                        if index < actions.count - 1 { Divider() }
-                    }
-                }.padding(.horizontal, 16).background(.white, in: RoundedRectangle(cornerRadius: 18))
-            }
         }
     }
 }
@@ -187,30 +170,14 @@ private struct StationHero: View {
                     .background(.white.opacity(0.12), in: Capsule())
                     .foregroundStyle(.white)
             }
-            HStack(alignment: .top, spacing: 11) {
-                Image(systemName: needsAttention ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
-                    .font(.title3)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(headline).font(.subheadline.weight(.bold))
-                    Text(statusDetail).font(.caption).foregroundStyle(.white.opacity(0.68))
-                }
-            }
-            .foregroundStyle(needsAttention ? FuelNerveTheme.lime : .white.opacity(0.9))
+            Label("Live owner overview", systemImage: "chart.bar.fill")
+                .font(.subheadline.weight(.bold)).foregroundStyle(FuelNerveTheme.lime)
         }
         .padding(20)
         .background(LinearGradient(colors: [FuelNerveTheme.forest, Color(red: 0.06, green: 0.38, blue: 0.28)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 24))
     }
 
     private var greeting: String { Calendar.current.component(.hour, from: .now) < 12 ? "Good morning" : Calendar.current.component(.hour, from: .now) < 17 ? "Good afternoon" : "Good evening" }
-    private var needsAttention: Bool { snapshot.openShifts > 0 || snapshot.pendingReconciliations > 0 }
-    private var headline: String {
-        if snapshot.openShifts > 0 { return "\(snapshot.openShifts) open shift\(snapshot.openShifts == 1 ? "" : "s") needs attention" }
-        if snapshot.pendingReconciliations > 0 { return "\(snapshot.pendingReconciliations) reconciliation\(snapshot.pendingReconciliations == 1 ? "" : "s") to review" }
-        return "Your station is on track"
-    }
-    private var statusDetail: String {
-        needsAttention ? "Open today’s priorities below." : "Everything recorded is up to date."
-    }
 }
 
 private struct MetricGrid: View {
@@ -246,14 +213,72 @@ private struct TankStockSection: View {
             SectionTitle(title: "Fuel stock", detail: "Live book balance", symbol: "cylinder.split.1x2")
             if tanks.isEmpty { Text("No MS or HSD tanks are available.").font(.subheadline).foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(24).background(.white, in: RoundedRectangle(cornerRadius: 18)) }
             ForEach(tanks) { tank in
-                HStack(spacing: 14) {
-                    ZStack { Circle().stroke(Color.gray.opacity(0.12), lineWidth: 7); Circle().trim(from: 0, to: tank.fillPercent / 100).stroke(tank.status == "LOW" ? FuelNerveTheme.gold : FuelNerveTheme.green, style: StrokeStyle(lineWidth: 7, lineCap: .round)).rotationEffect(.degrees(-90)); Text("\(Int(tank.fillPercent))%").font(.caption2.bold()) }.frame(width: 58, height: 58)
-                    VStack(alignment: .leading, spacing: 4) { Text("\(tank.productCode) · \(tank.code)").font(.headline); Text(tank.status == "LOW" ? "Replenishment attention" : "Stock level healthy").font(.caption).foregroundStyle(tank.status == "LOW" ? FuelNerveTheme.gold : .secondary) }
+                HStack(spacing: 18) {
+                    TankLevelGraphic(percent: tank.fillPercent, status: tank.status)
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack { Text(tank.productCode).font(.caption.bold()).tracking(1).foregroundStyle(FuelNerveTheme.green); Text("· \(tank.code)").font(.caption).foregroundStyle(.secondary) }
+                        Text(tank.bookStock.litres).font(.title3.bold()).foregroundStyle(FuelNerveTheme.forest)
+                        Text("of \(tank.workingCapacity.litres) capacity").font(.caption).foregroundStyle(.secondary)
+                        if tank.status == "OVER_CAPACITY" {
+                            Label("Recorded stock exceeds safe capacity", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption2.weight(.bold)).foregroundStyle(.red)
+                        }
+                        HStack(spacing: 12) {
+                            if tank.sellingPrice > 0 { Label("₹\(tank.sellingPrice.formatted(.number.precision(.fractionLength(0...2))))/L", systemImage: "indianrupeesign.circle") }
+                            if let density = tank.density { Label("\(density.formatted(.number.precision(.fractionLength(0...1)))) kg/m³", systemImage: "drop.degreesign") }
+                        }.font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    }
                     Spacer()
-                    VStack(alignment: .trailing, spacing: 3) { Text(tank.bookStock.litres).font(.headline); Text("of \(tank.workingCapacity.litres)").font(.caption2).foregroundStyle(.secondary) }
-                }.padding().background(.white, in: RoundedRectangle(cornerRadius: 18))
+                }.padding(16).background(.white, in: RoundedRectangle(cornerRadius: 20))
             }
         }
+    }
+}
+
+private struct TankLevelGraphic: View {
+    let percent: Double
+    let status: String
+    private var level: Double { max(0, min(1, percent / 100)) }
+    private var colour: Color { status == "OVER_CAPACITY" || status == "EMPTY" ? .red : status == "LOW" ? FuelNerveTheme.gold : FuelNerveTheme.green }
+
+    var body: some View {
+        VStack(spacing: 7) {
+            Text("\(Int(percent.rounded()))%")
+                .font(.caption.weight(.bold))
+                .monospacedDigit()
+                .foregroundStyle(colour)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 4)
+                .background(colour.opacity(0.1), in: Capsule())
+
+            ZStack(alignment: .bottom) {
+                RoundedRectangle(cornerRadius: 11)
+                    .fill(Color(red: 0.93, green: 0.96, blue: 0.94))
+                GeometryReader { proxy in
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(
+                                LinearGradient(
+                                    colors: [colour.opacity(0.58), colour],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                            .frame(height: proxy.size.height * level)
+                    }
+                    .padding(5)
+                }
+            }
+            .frame(width: 58, height: 82)
+            .overlay(
+                RoundedRectangle(cornerRadius: 11)
+                    .stroke(colour.opacity(0.65), lineWidth: 2)
+            )
+        }
+        .frame(width: 64)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(Int(percent.rounded())) percent full")
     }
 }
 

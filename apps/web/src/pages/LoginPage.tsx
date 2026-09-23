@@ -117,7 +117,7 @@ export function LoginPage() {
           FuelNerve
         </div>
         <div>
-          <span className="eyebrow light">Fuel station business OS</span>
+          <span className="eyebrow light">Your fuel business, intelligently managed.</span>
           <h1>
             Every litre.
             <br />
@@ -199,18 +199,18 @@ export function LoginPage() {
             </>
           )}
           <label>
-            Email address
+            {mode === "signup" ? "Email address" : "Email or mobile number"}
             <div className="input-wrap">
               <Mail size={18} />
               <input
-                type="email"
+                type={mode === "signup" ? "email" : "text"}
                 name="email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                autoComplete="email"
+                autoComplete={mode === "signup" ? "email" : "username"}
                 autoCapitalize="none"
                 spellCheck={false}
-                placeholder="you@company.com"
+                placeholder={mode === "signup" ? "Enter your email address" : "Enter email or mobile number"}
                 required
               />
             </div>

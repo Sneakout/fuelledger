@@ -157,7 +157,7 @@ export function OperationsPage() {
     const config = station.configurations[0];
     const last = station.lastClosing;
     setOpenTanks(
-      config?.tanks.map((t) => ({ id: t.id, value: Number(last?.tankReadings.find(reading=>reading.id===t.id)?.value??station.availableTankStock.find(reading=>reading.id===t.id)?.value??t.openingStock) })) ??
+      config?.tanks.map((t) => ({ id: t.id, value: Number(last?.tankReadings.find(reading=>reading.id===t.id)?.expectedOpening??station.availableTankStock.find(reading=>reading.id===t.id)?.value??t.openingStock) })) ??
         [],
     );
     setOpenNozzles(
@@ -366,21 +366,13 @@ export function OperationsPage() {
               value={closeCash}
               onChange={setCloseCash}
             />
-            <ClosingStockBridge
-              shift={active}
-              actuals={closeTanks}
-              closingMeters={closeNozzles}
-              testing={testingReadings}
-              tolerance={data.stockVarianceTolerance}
-              onChange={(v) => replace(closeTanks, v.id, v.value, setCloseTanks)}
-            />
             <div className="nozzle-closing">
               <div className="nozzle-closing-heading">
                 <div>
-                  <h3>Nozzle closing & staff collection</h3>
+                  <h3>Closing nozzle meter readings</h3>
                   <p>
-                    Enter the closing meter and money handed over. Fuel sales are
-                    calculated and added to Sales automatically.
+                    Enter each closing meter and the money handed over. Fuel sales
+                    are calculated and added to Sales automatically.
                   </p>
                 </div>
                 <span>
@@ -506,6 +498,14 @@ export function OperationsPage() {
                 })}
               </div>
             </div>
+            <ClosingStockBridge
+              shift={active}
+              actuals={closeTanks}
+              closingMeters={closeNozzles}
+              testing={testingReadings}
+              tolerance={data.stockVarianceTolerance}
+              onChange={(v) => replace(closeTanks, v.id, v.value, setCloseTanks)}
+            />
             <label className="field">
               <span>Closing note {active.tankReadings.some((reading) => {
                 const actual = closeTanks.find((item) => item.id === reading.tankId)?.value ?? Number(reading.openingDip);
@@ -593,27 +593,11 @@ export function OperationsPage() {
             value={openingCash}
             onChange={setOpeningCash}
           />
-          <Readings
-            title="Opening tank readings"
-            items={
-              config?.tanks.map((t) => ({
-                id: t.id,
-                label: `${t.code} · ${t.product.code}`,
-                opening: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.value??selected?.availableTankStock.find(reading=>reading.id===t.id)?.value??t.openingStock),
-                lastActual: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.lastActual ?? 0),
-                receivedBetween: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.receivedBetween ?? 0),
-                adjustmentsBetween: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.adjustmentsBetween ?? 0),
-                expectedOpening: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.expectedOpening ?? 0),
-              })) ?? []
-            }
-            values={openTanks}
-            onChange={(v) => replace(openTanks, v.id, v.value, setOpenTanks)}
-          />
           <section className="opening-nozzle-table">
-            <h3>Opening meter readings & optional attendants</h3>
+            <h3>Opening nozzle meter readings</h3>
             <div className="opening-nozzle-head" aria-hidden="true">
               <span>Nozzle & product</span>
-              <span>Assigned attendant</span>
+              <span>Attendant (optional)</span>
               <span>Opening meter (L)</span>
             </div>
             {config?.dispensers.flatMap((dispenser) =>
@@ -660,6 +644,22 @@ export function OperationsPage() {
               </p>
             )}
           </section>
+          <Readings
+            title="Opening tank readings"
+            items={
+              config?.tanks.map((t) => ({
+                id: t.id,
+                label: `${t.code} · ${t.product.code}`,
+                opening: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.expectedOpening??selected?.availableTankStock.find(reading=>reading.id===t.id)?.value??t.openingStock),
+                lastActual: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.lastActual ?? 0),
+                receivedBetween: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.receivedBetween ?? 0),
+                adjustmentsBetween: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.adjustmentsBetween ?? 0),
+                expectedOpening: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.expectedOpening ?? 0),
+              })) ?? []
+            }
+            values={openTanks}
+            onChange={(v) => replace(openTanks, v.id, v.value, setOpenTanks)}
+          />
           <label className="field">
             <span>Opening note (optional)</span>
             <input value={notes} onChange={(e) => setNotes(e.target.value)} />
@@ -718,7 +718,7 @@ function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance,
 }) {
   return <section className="closing-stock-bridge">
     <div className="closing-stock-heading">
-      <div><h3>Closing stock bridge</h3><p>Enter only the actual dip. The rest is calculated from this shift.</p></div>
+      <div><h3>Closing tank readings</h3><p>Enter only the actual dip. The stock bridge is calculated from this shift.</p></div>
       <small>Allowed difference: {litres(tolerance)}</small>
     </div>
     <div className="stock-bridge-table">

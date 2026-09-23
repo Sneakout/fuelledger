@@ -3,6 +3,7 @@ import { demoAccessSchema,googleAuthSchema,loginSchema,signupSchema } from './in
 
 describe('loginSchema', () => {
   it('accepts valid credentials', () => expect(loginSchema.safeParse({ email: 'owner@example.com', password: 'password123' }).success).toBe(true));
+  it('accepts an Indian mobile login', () => expect(loginSchema.safeParse({ email: '+91 98765 43210', password: 'password123' }).success).toBe(true));
   it('rejects malformed credentials', () => expect(loginSchema.safeParse({ email: 'bad', password: 'tiny' }).success).toBe(false));
 });
 

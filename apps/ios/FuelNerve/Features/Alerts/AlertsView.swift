@@ -3,7 +3,9 @@ import SwiftUI
 struct AlertsView: View {
     @Environment(AppSession.self) private var session
     @State private var alerts: [OwnerAlert] = []
+    @State private var dashboardAlertIds: Set<String> = []
     @State private var approvals: [OwnerApproval] = []
+    @State private var reviewedApprovals: [OwnerApproval] = []
     @State private var selectedApproval: OwnerApproval?
     @State private var loading = true
     @State private var errorMessage: String?
@@ -16,17 +18,22 @@ struct AlertsView: View {
             ZStack {
                 FuelNerveTheme.canvas.ignoresSafeArea()
                 if loading { ProgressView("Reviewing station signals…") }
-                else if alerts.isEmpty && approvals.isEmpty && stale { VStack(spacing: 12) { ContentUnavailableView("Alerts unavailable", systemImage: "wifi.exclamationmark", description: Text("FuelNerve could not load verified alerts for this station.")); Button("Try again") { Task { await load() } }.buttonStyle(.borderedProminent).tint(FuelNerveTheme.forest) } }
-                else if alerts.isEmpty && approvals.isEmpty { ContentUnavailableView("All clear", systemImage: "checkmark.shield", description: Text("There are no alerts or decisions needing your attention.")) }
+                else if alerts.isEmpty && approvals.isEmpty && reviewedApprovals.isEmpty && stale { VStack(spacing: 12) { ContentUnavailableView("Alerts unavailable", systemImage: "wifi.exclamationmark", description: Text("FuelNerve could not load verified alerts for this station.")); Button("Try again") { Task { await load() } }.buttonStyle(.borderedProminent).tint(FuelNerveTheme.forest) } }
+                else if alerts.isEmpty && approvals.isEmpty && reviewedApprovals.isEmpty { ContentUnavailableView("All clear", systemImage: "checkmark.shield", description: Text("There are no alerts or decisions needing your attention.")) }
                 else {
                     ScrollView {
-                        LazyVStack(spacing: 14) {
+                        LazyVStack(alignment: .leading, spacing: 14) {
                             if stale, let lastUpdated { StaleDataNotice(updatedAt: lastUpdated) { Task { await load() } } }
+                            if !approvals.isEmpty || !alerts.isEmpty { Text("NEEDS YOUR ATTENTION").font(.caption.bold()).tracking(1.1).foregroundStyle(FuelNerveTheme.gold) }
                             ForEach(approvals) { approval in
                                 ApprovalAlertCard(approval: approval, intelligenceEnabled: session.hasIntelligence) { selectedApproval = approval }
                             }
                             ForEach(alerts) { alert in
-                                AlertCard(alert: alert, acknowledgementEnabled: session.capabilities.alertAcknowledgement) { acknowledge(alert) }
+                                AlertCard(alert: alert, acknowledgementEnabled: session.capabilities.alertAcknowledgement && !dashboardAlertIds.contains(alert.id), isLiveSignal: dashboardAlertIds.contains(alert.id)) { acknowledge(alert) }
+                            }
+                            if !reviewedApprovals.isEmpty {
+                                Text("RECENTLY REVIEWED").font(.caption.bold()).tracking(1.1).foregroundStyle(.secondary).padding(.top, 10)
+                                ForEach(reviewedApprovals) { approval in ReviewedApprovalCard(approval: approval) }
                             }
                         }.padding()
                     }.refreshable { await load() }
@@ -44,6 +51,11 @@ struct AlertsView: View {
                     openPendingApprovalIfAvailable()
                 }
             }
+            .task {
+                for await _ in NotificationCenter.default.notifications(named: .fuelNerveRecordsChanged) {
+                    await load()
+                }
+            }
             .sheet(item: $selectedApproval) { approval in
                 ApprovalDecisionSheet(approval: approval, intelligenceEnabled: session.hasIntelligence, dismiss: { selectedApproval = nil }) { sellingPrice, effectiveFrom in
                     await approve(approval, sellingPrice: sellingPrice, effectiveFrom: effectiveFrom)
@@ -55,14 +67,27 @@ struct AlertsView: View {
 
     private func load() async {
         let stationId = session.selectedStationId
-        if loadedStationId != stationId { alerts = []; approvals = []; lastUpdated = nil; stale = false }
-        loading = alerts.isEmpty && approvals.isEmpty
+        if loadedStationId != stationId { alerts = []; dashboardAlertIds = []; approvals = []; reviewedApprovals = []; lastUpdated = nil; stale = false }
+        loading = alerts.isEmpty && approvals.isEmpty && reviewedApprovals.isEmpty
         do {
-            alerts = try await session.alertService.alerts(stationId: stationId)
+            async let notificationRequest = session.alertService.alerts(stationId: stationId)
+            async let dashboardRequest = session.ownerService.snapshot(stationId: stationId)
+            let (notifications, dashboard) = try await (notificationRequest, dashboardRequest)
+            var merged = notifications
+            var derivedIds = Set<String>()
+            for alert in dashboard.alerts where !merged.contains(where: { $0.title == alert.title && $0.evidencePath == alert.evidencePath }) {
+                merged.append(alert)
+                derivedIds.insert(alert.id)
+            }
+            alerts = merged.sorted { $0.createdAt > $1.createdAt }
+            dashboardAlertIds = derivedIds
             if session.capabilities.approvals {
-                approvals = try await session.approvalService.approvals().filter { stationId == nil || $0.station.id == stationId }
+                let allApprovals = try await session.approvalService.approvals(status: nil).filter { stationId == nil || $0.station.id == stationId }
+                approvals = allApprovals.filter { $0.status == "PENDING" }
+                reviewedApprovals = Array(allApprovals.filter { $0.status != "PENDING" }.prefix(10))
             } else {
                 approvals = []
+                reviewedApprovals = []
             }
             loadedStationId = stationId; lastUpdated = .now; stale = false; errorMessage = nil
             openPendingApprovalIfAvailable()
@@ -88,7 +113,8 @@ struct AlertsView: View {
     private func approve(_ approval: OwnerApproval, sellingPrice: Double?, effectiveFrom: Date?) async -> Bool {
         do {
             _ = try await session.approvalService.decide(id: approval.id, approve: true, note: "", version: approval.version, sellingPrice: sellingPrice, sellingPriceEffectiveFrom: effectiveFrom)
-            approvals.removeAll { $0.id == approval.id }
+            await load()
+            NotificationCenter.default.post(name: .fuelNerveRecordsChanged, object: nil)
             return true
         } catch APIError.server(let status, _, _) where status == 409 {
             errorMessage = "This request changed or was already reviewed. Refresh to see its latest status."
@@ -99,6 +125,28 @@ struct AlertsView: View {
             errorMessage = "The decision was not saved. No records were changed."
             return false
         }
+    }
+}
+
+private struct ReviewedApprovalCard: View {
+    let approval: OwnerApproval
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: approval.status == "APPROVED" ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .font(.title3).foregroundStyle(approval.status == "APPROVED" ? FuelNerveTheme.green : .secondary)
+                .frame(width: 38, height: 38).background(Color.gray.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(approval.isPriceChange ? "\(approval.evidence.product.code) price decision" : "\(approval.evidence.product.code) stock decision")
+                    .font(.subheadline.weight(.bold)).foregroundStyle(FuelNerveTheme.forest)
+                Text(approval.status == "APPROVED" ? "Approved and records updated" : "Not approved")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(approval.station.name).font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if let decidedAt = approval.decidedAt { Text(decidedAt, style: .relative).font(.caption2).foregroundStyle(.secondary) }
+        }
+        .padding(14).background(.white.opacity(0.78), in: RoundedRectangle(cornerRadius: 18))
     }
 }
 
@@ -145,6 +193,7 @@ private struct ApprovalAlertCard: View {
 private struct AlertCard: View {
     let alert: OwnerAlert
     let acknowledgementEnabled: Bool
+    let isLiveSignal: Bool
     let acknowledge: () -> Void
     private var accent: Color { alert.severity == .urgent ? .red : alert.severity == .attention ? FuelNerveTheme.gold : FuelNerveTheme.green }
     private var symbol: String { alert.severity == .urgent ? "exclamationmark.triangle.fill" : alert.severity == .attention ? "gauge.with.dots.needle.33percent" : "sparkles" }
@@ -169,6 +218,8 @@ private struct AlertCard: View {
                     Label("Reviewed", systemImage: "checkmark.circle.fill").font(.caption).foregroundStyle(FuelNerveTheme.green)
                 } else if acknowledgementEnabled {
                     Button("Acknowledge", action: acknowledge).buttonStyle(.borderedProminent).tint(FuelNerveTheme.forest).controlSize(.small)
+                } else if isLiveSignal {
+                    Label("Live status", systemImage: "arrow.triangle.2.circlepath").font(.caption).foregroundStyle(FuelNerveTheme.green)
                 } else {
                     Label("Read-only", systemImage: "eye").font(.caption).foregroundStyle(.secondary)
                 }

@@ -1,6 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
-import { tankBookStocksAt } from '../../lib/stock.js';
+import { tankBookStocksAt, tankMovementDeltasBetween } from '../../lib/stock.js';
 import { buildReport } from '../reports/service.js';
 
 const isoDate=(date:Date)=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -53,6 +53,18 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
     prisma.approvalRequest.findMany({where:{organizationId,status:'PENDING',actionType:'PRODUCT_PRICE_CHANGE',...(scopeIds?{stationId:{in:scopeIds}}:{})},select:{id:true,reason:true,evidence:true},orderBy:{requestedAt:'desc'},take:20}),
   ]);
   const bookStockByTank=await tankBookStocksAt(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),now);
+  const stationIds=[...new Set(tanks.map(tank=>tank.configuration.station.id))];
+  const lastClosings=stationIds.length?await prisma.shift.findMany({where:{stationId:{in:stationIds},closedAt:{not:null}},distinct:['stationId'],orderBy:{closedAt:'desc'},select:{stationId:true,closedAt:true,tankReadings:{select:{tankId:true,closingDip:true}}}}):[];
+  const expectedFromLastDip=new Map<string,{stock:number;closedAt:string}>();
+  await Promise.all(lastClosings.map(async closing=>{
+    if(!closing.closedAt)return;
+    const stationTanks=tanks.filter(tank=>tank.configuration.station.id===closing.stationId).map(tank=>({id:tank.id,stationId:closing.stationId,productId:tank.productId,openingStock:tank.openingStock}));
+    const changes=await tankMovementDeltasBetween(prisma,organizationId,stationTanks,closing.closedAt,now);
+    for(const reading of closing.tankReadings){
+      if(reading.closingDip===null)continue;
+      expectedFromLastDip.set(reading.tankId,{stock:number(reading.closingDip)+number(changes.get(reading.tankId)),closedAt:closing.closedAt.toISOString()});
+    }
+  }));
   const total=(from:Date,to:Date)=>recentSales.filter(row=>row.occurredAt>=from&&row.occurredAt<to).reduce((sum,row)=>sum+number(row.totalAmount),0);
   const thisWeek=total(weekStart,tomorrow),previousWeek=total(previousStart,weekStart),weekChange=previousWeek?((thisWeek-previousWeek)/previousWeek)*100:null;
   const trend=Array.from({length:7},(_,index)=>{const date=addDays(weekStart,index),next=addDays(date,1);return{date:isoDate(date),amount:total(date,next)};});
@@ -70,15 +82,17 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
   const stationHealth=report.stations.map(station=>{const stationSales=report.sales.byStation.find(row=>row.key===station.id);const stationOpen=open.filter(row=>row.station.id===station.id).length;const stationPending=pending.filter(row=>row.station.id===station.id).length;const stationLow=lowStock.filter(row=>row.key.startsWith(`${station.id}:`)).length;return{id:station.id,name:station.name,code:station.code,sales:stationSales?.amount??0,transactions:stationSales?.transactions??0,openShifts:stationOpen,pendingReconciliations:stationPending,stockAlerts:stationLow,status:stationPending||stationLow?'ATTENTION':stationOpen?'RUNNING':'CALM'};});
   const tankStocks=tanks.filter(tank=>['MS','HSD'].includes(tank.product.code)).map(tank=>{
     const bookStock=number(bookStockByTank.get(tank.id)??tank.openingStock);
+    const shiftBasis=expectedFromLastDip.get(tank.id);
     const workingCapacity=number(tank.workingCapacity);
-    const fillPercent=workingCapacity>0?Math.max(0,Math.min(100,bookStock/workingCapacity*100)):0;
+    const fillPercent=workingCapacity>0?Math.max(0,bookStock/workingCapacity*100):0;
     const latestReading=tank.physicalReadings[0],latestDensity=tank.densityReadings[0];
     return{
       id:tank.id,code:tank.code,product:tank.product.name,productCode:tank.product.code,unit:tank.product.unit,
       station:tank.configuration.station,bookStock,workingCapacity,fillPercent,sellingPrice:number(effectivePriceAt(tank.product.sellingPrice,tank.product.sellingPriceHistory,now)),density:latestDensity?number(latestDensity.density):null,densityRecordedAt:latestDensity?.recordedAt.toISOString()??null,
+      expectedFromLastDip:shiftBasis?.stock??null,bookDifferenceFromLastDip:shiftBasis?bookStock-shiftBasis.stock:null,lastClosingDipAt:shiftBasis?.closedAt??null,
       physicalStock:latestReading?number(latestReading.physicalStock):null,
       physicalReadingAt:latestReading?.recordedAt.toISOString()??null,
-      status:bookStock<=0?'EMPTY':fillPercent<=20?'LOW':'HEALTHY' as 'EMPTY'|'LOW'|'HEALTHY',
+      status:bookStock>workingCapacity?'OVER_CAPACITY':bookStock<=0?'EMPTY':fillPercent<=20?'LOW':'HEALTHY' as 'OVER_CAPACITY'|'EMPTY'|'LOW'|'HEALTHY',
     };
   });
   return{asOf:now.toISOString(),today:report.summary,collections:report.sales.byPayment,topProducts:report.sales.byProduct.slice(0,5),trend:{days:trend,thisWeek,previousWeek,weekChange},operations:{openShifts:open.length,pendingReconciliations:pending.length,cashVariance},actions,stationHealth,tankStocks};

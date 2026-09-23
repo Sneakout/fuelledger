@@ -15,120 +15,109 @@ struct SignInView: View {
     var body: some View {
         ZStack {
             FuelNerveTheme.forest.ignoresSafeArea()
-            ScrollView {
-                VStack(spacing: 0) {
-                    brandHeader
-                    VStack(alignment: .leading, spacing: 11) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("WELCOME BACK")
-                                .font(.caption.weight(.bold))
-                                .tracking(1.6)
-                                .foregroundStyle(FuelNerveTheme.green)
-                            Text("Welcome back")
-                                .font(.system(size: 27, weight: .bold, design: .rounded))
-                                .foregroundStyle(FuelNerveTheme.forest)
-                            Text("Sign in to continue to FuelNerve.")
-                                .font(.subheadline).foregroundStyle(.secondary)
-                        }
+            Circle()
+                .fill(FuelNerveTheme.lime.opacity(0.1))
+                .frame(width: 330, height: 330)
+                .blur(radius: 2)
+                .offset(x: 190, y: -360)
+            Circle()
+                .fill(Color.white.opacity(0.04))
+                .frame(width: 280, height: 280)
+                .offset(x: -190, y: 390)
 
-                        VStack(alignment: .leading, spacing: 12) {
-                            signInField(title: "Email or mobile number", symbol: "person.crop.circle") {
-                                TextField("Enter email or mobile number", text: $email)
-                                    .textContentType(.username)
-                                    .keyboardType(.emailAddress)
-                                    .textInputAutocapitalization(.never)
-                                    .autocorrectionDisabled()
-                                    .focused($focusedField, equals: .email)
-                                    .submitLabel(.next)
-                                    .onSubmit { focusedField = .password }
-                            }
-                            signInField(title: "Password", symbol: "lock") {
-                                SecureField("Enter your password", text: $password)
-                                    .textContentType(.password)
-                                    .focused($focusedField, equals: .password)
-                                    .submitLabel(.go)
-                                    .onSubmit { if canSignIn { signIn() } }
-                            }
-                        }
-
-                        if let message {
-                            Label(message, systemImage: "exclamationmark.circle.fill")
-                                .font(.callout).foregroundStyle(Color.red)
-                                .accessibilityLabel("Sign-in error: \(message)")
-                        }
-
-                        Button { signIn() } label: {
-                            Group {
-                                if signingIn { ProgressView().tint(.white) }
-                                else { Text("Sign in securely").fontWeight(.bold) }
-                            }
-                            .frame(maxWidth: .infinity).frame(height: 46)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(FuelNerveTheme.forest)
-                        .background(canSignIn ? FuelNerveTheme.lime : Color.secondary.opacity(0.18), in: RoundedRectangle(cornerRadius: 15))
-                        .disabled(!canSignIn)
-
-                        HStack(spacing: 9) {
-                            Rectangle().fill(Color.secondary.opacity(0.16)).frame(height: 1)
-                            Text("or").font(.caption).foregroundStyle(.secondary)
-                            Rectangle().fill(Color.secondary.opacity(0.16)).frame(height: 1)
-                        }
-
-                        GoogleSignInButton(scheme: .light, style: .wide, state: signingIn ? .disabled : .normal) {
-                            signInWithGoogle()
-                        }
-                        .frame(height: 48)
-                        .clipShape(RoundedRectangle(cornerRadius: 13))
-                        .disabled(signingIn)
-
-                        if session.environment.name != .production {
-                            environmentLabel
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 4)
-                        }
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack {
+                        Spacer(minLength: 24)
+                        signInCard
+                        Spacer(minLength: 24)
                     }
-                    .padding(.horizontal, 22)
-                    .padding(.top, 20)
-                    .padding(.bottom, 22)
-                    .background(Color.white, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 12)
+                    .frame(maxWidth: 520)
+                    .frame(maxWidth: .infinity)
+                    .frame(minHeight: proxy.size.height)
+                    .padding(.horizontal, 16)
                 }
-                .frame(maxWidth: 520)
-                .frame(maxWidth: .infinity)
-                .padding(.top, 8)
+                .scrollDismissesKeyboard(.interactively)
             }
-            .scrollDismissesKeyboard(.interactively)
         }
     }
 
-    private var brandHeader: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            HStack(spacing: 11) {
+    private var signInCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
                 Image(systemName: "fuelpump.fill")
-                    .font(.system(size: 19, weight: .semibold))
+                    .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(FuelNerveTheme.forest)
-                    .frame(width: 44, height: 44)
-                    .background(FuelNerveTheme.lime, in: RoundedRectangle(cornerRadius: 13))
-                Text("FuelNerve").font(.title3.bold()).foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .background(FuelNerveTheme.lime, in: RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("FuelNerve").font(.title3.bold()).foregroundStyle(FuelNerveTheme.forest)
+                    Text("EVERY LITRE · EVERY RUPEE")
+                        .font(.system(size: 8, weight: .bold)).tracking(1.1).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "checkmark.shield.fill").foregroundStyle(FuelNerveTheme.green)
             }
-            VStack(alignment: .leading, spacing: 10) {
-                Text("YOUR FUEL BUSINESS")
-                    .font(.caption2.weight(.bold)).tracking(1.5).foregroundStyle(.white.opacity(0.68))
-                (Text("Every litre. Every product.\n") + Text("Every rupee.").foregroundColor(FuelNerveTheme.lime))
-                    .font(.system(size: 31, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("One clear view of your fuel station, from the forecourt to the books.")
-                    .font(.subheadline).foregroundStyle(.white.opacity(0.7))
-                    .lineSpacing(3)
+
+            Divider().opacity(0.65)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("WELCOME BACK")
+                    .font(.caption.weight(.bold)).tracking(1.6).foregroundStyle(FuelNerveTheme.green)
+                Text("Sign in to your station")
+                    .font(.system(size: 26, weight: .bold, design: .rounded)).foregroundStyle(FuelNerveTheme.forest)
+                Text("Continue securely to your FuelNerve workspace.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 12) {
+                signInField(title: "Email or mobile number", symbol: "person.crop.circle") {
+                    TextField("Enter email or mobile number", text: $email)
+                        .textContentType(.username).keyboardType(.emailAddress)
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .focused($focusedField, equals: .email).submitLabel(.next)
+                        .onSubmit { focusedField = .password }
+                }
+                signInField(title: "Password", symbol: "lock") {
+                    SecureField("Enter your password", text: $password)
+                        .textContentType(.password).focused($focusedField, equals: .password)
+                        .submitLabel(.go).onSubmit { if canSignIn { signIn() } }
+                }
+            }
+
+            if let message {
+                Label(message, systemImage: "exclamationmark.circle.fill")
+                    .font(.callout).foregroundStyle(Color.red)
+                    .accessibilityLabel("Sign-in error: \(message)")
+            }
+
+            Button { signIn() } label: {
+                Group {
+                    if signingIn { ProgressView().tint(.white) }
+                    else { Text("Sign in securely").fontWeight(.bold) }
+                }
+                .frame(maxWidth: .infinity).frame(height: 48)
+            }
+            .buttonStyle(.plain).foregroundStyle(FuelNerveTheme.forest)
+            .background(canSignIn ? FuelNerveTheme.lime : Color.secondary.opacity(0.18), in: RoundedRectangle(cornerRadius: 15))
+            .disabled(!canSignIn)
+
+            HStack(spacing: 9) {
+                Rectangle().fill(Color.secondary.opacity(0.16)).frame(height: 1)
+                Text("or").font(.caption).foregroundStyle(.secondary)
+                Rectangle().fill(Color.secondary.opacity(0.16)).frame(height: 1)
+            }
+
+            GoogleSignInButton(scheme: .light, style: .wide, state: signingIn ? .disabled : .normal) { signInWithGoogle() }
+                .frame(height: 48).clipShape(RoundedRectangle(cornerRadius: 13)).disabled(signingIn)
+
+            if session.environment.name != .production {
+                environmentLabel.frame(maxWidth: .infinity).padding(.top, 2)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 24)
-        .padding(.top, 18)
-        .padding(.bottom, 28)
+        .padding(22)
+        .background(Color.white, in: RoundedRectangle(cornerRadius: 30, style: .continuous))
+        .shadow(color: Color.black.opacity(0.16), radius: 30, y: 14)
     }
 
     private func signInField<Content: View>(title: String, symbol: String, @ViewBuilder content: () -> Content) -> some View {

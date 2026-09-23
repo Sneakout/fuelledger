@@ -44,7 +44,8 @@ export function SubscriptionPage() {
   }, [user?.id, user?.role, attempt]);
   if (user?.role !== "OWNER") return <main className="page"><div className="form-error">Only the owner can manage the subscription.</div></main>;
   const lifetime = Boolean(status?.lifetimeAccessPaidAt);
-  const stateLabel = loading ? "Checking your plan…" : error ? "Plan status unavailable" : lifetime ? "Core · Lifetime active" : status?.setupFeePaidAt ? "Core · Setup paid" : "Core · Awaiting activation";
+  const intelligenceActive = Boolean(status?.intelligenceEnabledAt && (!status.intelligenceExpiresAt || new Date(status.intelligenceExpiresAt) > new Date()));
+  const stateLabel = loading ? "Checking your plan…" : error ? "Plan status unavailable" : intelligenceActive ? "Core + FuelNerve Intelligence · Active" : lifetime ? "Core · Lifetime active" : status?.setupFeePaidAt ? "Core · Setup paid" : "Core · Awaiting activation";
   const paidAt = status?.lifetimeAccessPaidAt || status?.setupFeePaidAt;
   return <main className="page subscription-page">
     <section className="sp-hero">

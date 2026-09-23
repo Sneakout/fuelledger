@@ -4,7 +4,8 @@ import { AppError } from '../lib/errors.js';
 import { safeSaveContext } from '../lib/safe-save.js';
 import { assertStationAccess, permittedStationIds } from '../lib/station-access.js';
 import { authenticate } from '../middleware/authenticate.js';
-import { adjust, bootstrap, recordDensity, recordTankReading } from '../modules/inventory/service.js';
+import { bootstrap, recordDensity, recordTankReading } from '../modules/inventory/service.js';
+import { requestInventoryAdjustment } from '../modules/approvals/service.js';
 
 export const inventoryRouter = Router();
 inventoryRouter.use(authenticate);
@@ -16,7 +17,7 @@ inventoryRouter.post('/adjustments', async (req, res) => {
   const parsed = inventoryAdjustmentSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError(400, 'ADJUSTMENT_INVALID', 'Please enter a valid stock adjustment.', parsed.error.flatten());
   assertStationAccess(req.user!, parsed.data.stationId);
-  res.status(201).json({ entry: await adjust(req.user!.organization.id, req.user!.id, parsed.data) });
+  res.status(202).json({ approval: await requestInventoryAdjustment(req.user!.organization.id, req.user!.id, req.get('Idempotency-Key')!, parsed.data) });
 });
 
 inventoryRouter.post('/tank-readings', async (req, res) => {

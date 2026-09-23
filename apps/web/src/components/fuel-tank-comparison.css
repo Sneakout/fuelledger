@@ -1,0 +1,33 @@
+.tank-stock-comparison {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #c9ded3;
+  border-radius: 10px;
+  background: #f5faf7;
+  color: #244b3d;
+}
+.tank-stock-comparison span {
+  display: block;
+  font-size: 10px;
+  line-height: 1.35;
+}
+.tank-stock-comparison strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 14px;
+}
+.tank-stock-comparison.has-difference {
+  border-color: #edc49e;
+  background: #fff7ed;
+}
+.tank-stock-comparison p {
+  margin: 6px 0 0;
+  color: #8d4a25;
+  font-size: 10px;
+  line-height: 1.4;
+}
+.tank-stock-comparison a {
+  color: inherit;
+  font-weight: 750;
+  text-decoration: underline;
+}

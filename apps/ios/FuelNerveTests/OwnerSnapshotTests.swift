@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import FuelNerve
 
@@ -7,6 +8,35 @@ struct OwnerSnapshotTests {
         #expect(snapshot.salesToday > 0)
         #expect(snapshot.tanks.count == 2)
         #expect(snapshot.stations.count == 2)
+    }
+
+    @Test func loadPlanUsesBookStockAndWorkingCapacityForExactUllage() {
+        let snapshot = OwnerSnapshot(
+            asOf: Date(timeIntervalSince1970: 1_800_000_000), stationName: "Station C",
+            salesToday: 0, transactions: 0, collectedToday: 0, netProfitToday: 0, meteredVolume: 0,
+            openShifts: 0, pendingReconciliations: 0, stations: [],
+            tanks: [
+                OwnerTank(id: "ms-1", code: "MS-1", productCode: "MS", bookStock: 11_000, workingCapacity: 19_000, fillPercent: 57.9, status: "HEALTHY", sellingPrice: 0, density: nil),
+                OwnerTank(id: "hsd-1", code: "HSD-1", productCode: "HSD", bookStock: 15_000, workingCapacity: 19_000, fillPercent: 78.9, status: "HEALTHY", sellingPrice: 0, density: nil),
+            ], collections: [], alerts: []
+        )
+
+        let plan = LoadPlanRecommendation(snapshot: snapshot)
+
+        #expect(plan?.lines.first(where: { $0.productCode == "MS" })?.ullage == 8_000)
+        #expect(plan?.lines.first(where: { $0.productCode == "HSD" })?.ullage == 4_000)
+        #expect(plan?.checkedAt == snapshot.asOf)
+    }
+
+    @Test func loadPlanWithholdsQuantitiesWhenTankBalanceIsInvalid() {
+        let snapshot = OwnerSnapshot(
+            asOf: .now, stationName: "Station C", salesToday: 0, transactions: 0, collectedToday: 0,
+            netProfitToday: 0, meteredVolume: 0, openShifts: 0, pendingReconciliations: 0, stations: [],
+            tanks: [OwnerTank(id: "ms-1", code: "MS-1", productCode: "MS", bookStock: 20_000, workingCapacity: 19_000, fillPercent: 105.3, status: "OVER_CAPACITY", sellingPrice: 0, density: nil)],
+            collections: [], alerts: []
+        )
+
+        #expect(LoadPlanRecommendation(snapshot: snapshot) == nil)
     }
 
     @Test func localEnvironmentAllowsExplicitPreviewData() throws {

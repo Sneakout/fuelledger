@@ -8,6 +8,24 @@ enum FuelNerveTheme {
     static let canvas = Color(red: 0.97, green: 0.98, blue: 0.97)
 }
 
+extension View {
+    func fuelNervePickerField() -> some View {
+        self
+            .tint(FuelNerveTheme.green)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 46)
+            .background(.white, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(FuelNerveTheme.green.opacity(0.18)))
+    }
+
+    func fuelNerveSheet() -> some View {
+        self
+            .presentationBackground(FuelNerveTheme.canvas)
+            .presentationCornerRadius(30)
+            .presentationDragIndicator(.hidden)
+    }
+}
+
 struct MetricCard: View {
     let title: String
     let value: String
