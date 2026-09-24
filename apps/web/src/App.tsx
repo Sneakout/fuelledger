@@ -49,11 +49,7 @@ const InventoryPage = lazy(() =>
 const LoginPage = lazy(() =>
   import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })),
 );
-const NotificationsPage = lazy(() =>
-  import("./pages/NotificationsPage").then((module) => ({
-    default: module.NotificationsPage,
-  })),
-);
+const HelpPage = lazy(() => import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })));
 const IntelligenceAgentsPage = lazy(() =>
   import("./pages/IntelligenceAgentsPage").then((module) => ({ default: module.IntelligenceAgentsPage })),
 );
@@ -136,7 +132,8 @@ export default function App() {
           <Route path="reports" element={<ReportsPage />} />
           <Route path="reports/downloads" element={<DownloadReportsPage />} />
           <Route path="staff" element={<StaffPage />} />
-          <Route path="notifications" element={<NotificationsPage />} />
+          <Route path="help" element={<HelpPage />} />
+          <Route path="notifications" element={<Navigate to="/help" replace />} />
           <Route path="insights" element={<IntelligenceAgentsPage />} />
           <Route path="insights/:agentKey" element={<IntelligenceAgentsPage />} />
           <Route path="intelligence-agents" element={<IntelligenceAgentsPage />} />

@@ -12,7 +12,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const googleLogin=useCallback(async(input:GoogleAuthInput)=>{const result=await api.googleAuth(input);setUser(result.user);},[]);
   const startDemo=useCallback(async(input:DemoAccessInput)=>{const result=await api.startDemo(input);setUser(result.user);},[]);
   const changePassword=useCallback(async(password:string)=>{await api.changePassword({password});const result=await api.me();setUser(result.user);},[]);
-  const logout = useCallback(async () => { await api.logout(); setUser(null); }, []);
+  const logout = useCallback(async () => {
+    try { await api.logout(); }
+    finally { setUser(null); }
+  }, []);
   const value = useMemo(() => ({ user, loading, login,signup,googleLogin,startDemo,changePassword,logout }), [user, loading, login,signup,googleLogin,startDemo,changePassword,logout]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

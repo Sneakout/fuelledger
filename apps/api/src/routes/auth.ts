@@ -1,5 +1,4 @@
 import { Router } from "express";
-import type { Request } from "express";
 import {
   changePasswordSchema,
   demoAccessSchema,
@@ -29,8 +28,6 @@ const sessionCookie =
   process.env.NODE_ENV === "production"
     ? "__Host-fuelledger_session"
     : "fuelledger_session";
-const persistentClient = (req: Request) =>
-  req.get("x-fuelnerve-client")?.toLowerCase() === "ios";
 const setSession = (
   res: Parameters<Parameters<typeof authRouter.post>[1]>[1],
   result: Awaited<ReturnType<typeof login>>,
@@ -57,7 +54,7 @@ authRouter.post("/login", async (req, res) => {
   await assertNotThrottled(key);
   let result;
   try {
-    result = await login(parsed.data, req.get("user-agent"), { persistent: persistentClient(req) });
+    result = await login(parsed.data, req.get("user-agent"));
     await clearThrottle(key);
   } catch (error) {
     await recordFailure(key);
@@ -74,7 +71,7 @@ authRouter.post("/signup", async (req, res) => {
       "Please check the information entered.",
       parsed.error.flatten(),
     );
-  setSession(res, await signup(parsed.data, req.get("user-agent"), { persistent: persistentClient(req) }));
+  setSession(res, await signup(parsed.data, req.get("user-agent")));
 });
 authRouter.post("/google", async (req, res) => {
   const parsed = googleAuthSchema.safeParse(req.body);
@@ -85,7 +82,7 @@ authRouter.post("/google", async (req, res) => {
       "Google sign-in information is invalid.",
       parsed.error.flatten(),
     );
-  setSession(res, await googleAuth(parsed.data, req.get("user-agent"), { persistent: persistentClient(req) }));
+  setSession(res, await googleAuth(parsed.data, req.get("user-agent")));
 });
 authRouter.post("/demo", async (req, res) => {
   const parsed = demoAccessSchema.safeParse(req.body);

@@ -28,6 +28,7 @@ import { notificationsRouter } from "./routes/notifications.js";
 import { intelligenceRouter } from "./routes/intelligence.js";
 import { approvalsRouter } from "./routes/approvals.js";
 import { nerveReadRouter } from "./routes/nerve-read.js";
+import { supportRouter } from "./routes/support.js";
 
 export function createApp() {
   const app = express();
@@ -111,6 +112,7 @@ export function createApp() {
   app.use("/api/intelligence", intelligenceRouter);
   app.use("/api/approvals", approvalsRouter);
   app.use("/api/nerve/v1", nerveReadRouter);
+  app.use("/api/support", supportRouter);
   app.use("/api", (_req, _res) => {
     throw new AppError(
       404,

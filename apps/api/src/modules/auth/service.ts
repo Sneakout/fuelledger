@@ -18,7 +18,6 @@ import { defaultExpenseCategories } from "../../lib/default-expense-categories.j
 export async function login(
   input: LoginInput,
   userAgent?: string,
-  options: { persistent?: boolean } = {},
 ): Promise<{ token: string; user: User; maxAgeMs: number }> {
   const identifier = input.email.trim();
   const record = await prisma.user.findFirst({
@@ -42,7 +41,7 @@ export async function login(
     where: { id: record.id },
     data: { lastLoginAt: new Date() },
   });
-  return session(record, userAgent, options);
+  return session(record, userAgent);
 }
 
 function normalizeMobile(value: string) {
@@ -50,7 +49,7 @@ function normalizeMobile(value: string) {
   return digits.length === 10 ? `91${digits}` : digits;
 }
 
-export async function signup(input: SignupInput, userAgent?: string, options: { persistent?: boolean } = {}) {
+export async function signup(input: SignupInput, userAgent?: string) {
   const email = input.email.toLowerCase();
   if (await prisma.user.findUnique({ where: { email } }))
     throw new AppError(
@@ -86,10 +85,10 @@ export async function signup(input: SignupInput, userAgent?: string, options: { 
       include: userInclude,
     });
   });
-  return session(record, userAgent, options);
+  return session(record, userAgent);
 }
 
-export async function googleAuth(input: GoogleAuthInput, userAgent?: string, options: { persistent?: boolean } = {}) {
+export async function googleAuth(input: GoogleAuthInput, userAgent?: string) {
   if (!env.GOOGLE_CLIENT_ID)
     throw new AppError(
       503,
@@ -149,7 +148,7 @@ export async function googleAuth(input: GoogleAuthInput, userAgent?: string, opt
     where: { id: record.id },
     data: { lastLoginAt: new Date() },
   });
-  return session(record, userAgent, options);
+  return session(record, userAgent);
 }
 
 export async function startDemo(input: DemoAccessInput) {
@@ -391,11 +390,14 @@ function present(
 async function session(
   record: Parameters<typeof present>[0],
   userAgent?: string,
-  options: { persistent?: boolean } = {},
 ) {
   const user = present(record);
   const id = crypto.randomUUID();
-  const maxAgeMs = options.persistent ? 30 * 24 * 60 * 60 * 1000 : 8 * 60 * 60 * 1000;
+  // A normal FuelNerve sign-in is a remembered sign-in on every supported
+  // client. Sessions can still be revoked immediately by signing out, an
+  // administrator action or a security change; the long expiry is only a
+  // safety ceiling for abandoned sessions.
+  const maxAgeMs = 365 * 24 * 60 * 60 * 1000;
   const expiresAt = new Date(Date.now() + maxAgeMs);
   await prisma.userSession.create({
     data: {

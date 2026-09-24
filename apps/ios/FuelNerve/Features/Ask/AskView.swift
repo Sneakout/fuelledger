@@ -246,12 +246,6 @@ private struct AnswerView: View {
                 }.padding().background(FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 14))
             }
             if response.answer.facts.count > 3 { Text("\(response.answer.facts.count - 3) more verified items").font(.caption.weight(.semibold)).foregroundStyle(.secondary) }
-            if response.intent == "SHOW_RECORDS" {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Supporting records").font(.headline).foregroundStyle(FuelNerveTheme.forest)
-                    ForEach(uniqueEvidence) { record in EvidenceLink(label: record.label, path: record.resolverPath) }
-                }
-            }
             if let choices = response.supportedFollowUps, !choices.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Ask about this snapshot").font(.caption.bold()).foregroundStyle(.secondary)
@@ -260,13 +254,8 @@ private struct AnswerView: View {
                             .buttonStyle(.bordered).tint(FuelNerveTheme.green)
                     }
                 }
-            } else { ForEach(response.answer.facts) { fact in EvidenceLink(label: fact.evidenceLabel, path: fact.evidencePath) } }
+            }
         }.padding(18).background(.white, in: RoundedRectangle(cornerRadius: 22)).overlay(RoundedRectangle(cornerRadius: 22).stroke(FuelNerveTheme.green.opacity(0.1)))
-    }
-
-    private var uniqueEvidence: [FuelNerveAnswer.SupportingRecord] {
-        var seen = Set<String>()
-        return response.answer.facts.flatMap { $0.supportingRecords ?? [] }.filter { seen.insert($0.evidenceId).inserted }
     }
     private func notice(_ text: String, color: Color) -> some View { Label(text, systemImage: "exclamationmark.triangle.fill").font(.caption.weight(.semibold)).foregroundStyle(color).padding(10).frame(maxWidth: .infinity, alignment: .leading).background(color.opacity(0.08), in: RoundedRectangle(cornerRadius: 12)) }
     private func snapshotLabel(_ value: String) -> String { guard let date = ISO8601DateFormatter().date(from: value) else { return value }; return date.formatted(date: .abbreviated, time: .shortened) }

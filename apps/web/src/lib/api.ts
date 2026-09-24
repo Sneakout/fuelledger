@@ -17,6 +17,7 @@ import type {
   ReceiptInput,
   ReconciliationInput,
   SaleInput,
+  ServiceTicketInput,
   SignupInput,
   StationAccessInput,
   StationEquipmentInput,
@@ -397,6 +398,17 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  updateCustomerNotifications: (id: string, input: Omit<NotificationSettings, "providerReady">) =>
+    request<{ settings: NotificationSettings }>(`/platform/customers/${id}/notifications`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  serviceTickets: () => request<{ tickets: ServiceTicket[] }>("/support/tickets"),
+  createServiceTicket: (input: ServiceTicketInput) =>
+    request<{ ticket: ServiceTicket }>("/support/tickets", { method: "POST", body: JSON.stringify(input) }),
+  platformServiceTickets: () => request<{ tickets: PlatformServiceTicket[] }>("/platform/service-tickets"),
+  updatePlatformServiceTicket: (id: string, input: { status: ServiceTicketStatus; adminNote?: string }) =>
+    request<{ ticket: Pick<PlatformServiceTicket, "id" | "status" | "adminNote" | "resolvedAt" | "updatedAt"> }>(`/platform/service-tickets/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   subscription: () => request<SubscriptionStatus>("/platform/subscription"),
 };
 export type NotificationSettings = {
@@ -457,8 +469,29 @@ export type PlatformCustomer = {
   subscriptionExpiresAt: string | null;
   owner: { name: string; email: string; lastLoginAt: string | null } | null;
   petrolPumps: number;
+  notificationSettings: NotificationSettings;
 };
 export type PlatformCustomersBootstrap = { customers: PlatformCustomer[] };
+export type ServiceTicketStatus = "OPEN" | "IN_PROGRESS" | "RESOLVED";
+export type ServiceTicket = {
+  id: string;
+  ticketNumber: number;
+  reference: string;
+  issue: string;
+  subIssue: string | null;
+  comments: string;
+  status: ServiceTicketStatus;
+  hasScreenshot: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+export type PlatformServiceTicket = ServiceTicket & {
+  screenshotFileName: string | null;
+  adminNote: string | null;
+  resolvedAt: string | null;
+  organization: { id: string; name: string };
+  createdBy: { name: string; email: string };
+};
 export type SubscriptionPlan = "CORE" | "CORE_INTELLIGENCE";
 export type SubscriptionBillingPeriod = "MONTHLY" | "YEARLY" | "LIFETIME" | "FOUNDING_YEARLY";
 export type SubscriptionStatus = {

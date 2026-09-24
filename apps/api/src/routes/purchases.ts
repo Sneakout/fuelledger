@@ -11,6 +11,7 @@ import { authenticate } from "../middleware/authenticate.js";
 import { invoiceImportReleasePolicy } from "../modules/purchases/invoice-import-release.js";
 import { requestProductPriceChangeFromInvoice } from "../modules/approvals/service.js";
 import * as service from "../modules/purchases/service.js";
+import { notifyCatalogRecordCreated } from "../modules/notifications/service.js";
 
 export const purchasesRouter = Router();
 type ValidationIssue = { path?: PropertyKey[]; message?: string };
@@ -77,7 +78,7 @@ purchasesRouter.get("/bootstrap", async (req, res) => res.json(await service.boo
 purchasesRouter.get("/receipt-timing-audit", async (req, res) => res.json(await service.receiptTimingAudit(req.user!.organization.id, permittedStationIds(req.user!))));
 purchasesRouter.get("/receipt-shift-impact", async (req, res) => res.json(await service.receiptShiftImpact(req.user!.organization.id, String(req.query.stationId ?? ""), String(req.query.receivedAt ?? ""), permittedStationIds(req.user!))));
 purchasesRouter.get("/receipts/:id/timing-preview", async (req, res) => res.json(await service.receiptTimingRepairPreview(req.user!.organization.id, req.params.id!, String(req.query.receivedAt ?? ""), permittedStationIds(req.user!))));
-purchasesRouter.post("/suppliers", async (req, res) => res.status(201).json({ supplier: await service.createSupplier(req.user!.organization.id, parse(supplierInputSchema.safeParse(req.body), "SUPPLIER_INVALID", "Please review the supplier details.")) }));
+purchasesRouter.post("/suppliers", async (req, res) => { const supplier=await service.createSupplier(req.user!.organization.id, parse(supplierInputSchema.safeParse(req.body), "SUPPLIER_INVALID", "Please review the supplier details.")); if(req.user!.role==="MANAGER") void notifyCatalogRecordCreated({organizationId:req.user!.organization.id,...(req.user!.stations[0]?.id?{stationId:req.user!.stations[0].id}:{}),actorName:req.user!.name,recordType:'SUPPLIER',recordId:supplier.id,recordName:supplier.name,code:supplier.code}).catch(()=>undefined); res.status(201).json({ supplier }); });
 purchasesRouter.put("/suppliers/:id", async (req, res) => res.json({ supplier: await service.updateSupplier(req.user!.organization.id, req.params.id!, parse(supplierInputSchema.safeParse(req.body), "SUPPLIER_INVALID", "Please review the supplier details.")) }));
 
 purchasesRouter.post("/invoice-import", async (req, res) => {

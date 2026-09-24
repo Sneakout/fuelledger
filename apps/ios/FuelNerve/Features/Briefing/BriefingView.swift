@@ -160,7 +160,11 @@ private struct BriefingSignal: View {
             }
             Text(item.explanation).foregroundStyle(.secondary)
             Label(item.action, systemImage: "arrow.right.circle.fill").font(.subheadline.weight(.semibold)).foregroundStyle(FuelNerveTheme.forest)
-            EvidenceLink(label: fact.evidenceLabel, path: fact.evidencePath)
+            NavigationLink {
+                IntelligenceEvidenceView(focus: fact.category)
+            } label: {
+                Label(fact.evidenceLabel, systemImage: "doc.text.magnifyingglass").font(.caption.weight(.semibold))
+            }
         }.padding(18).background(.white, in: RoundedRectangle(cornerRadius: 20))
         .overlay(alignment: .leading) { Capsule().fill(accent).frame(width: 4).padding(.vertical, 16) }
     }
@@ -168,6 +172,85 @@ private struct BriefingSignal: View {
     private var accent: Color { fact.severity == "URGENT" ? .red : fact.severity == "ATTENTION" ? FuelNerveTheme.gold : FuelNerveTheme.green }
     private var symbol: String { switch fact.category { case "SHIFT": "clock.badge.exclamationmark"; case "STOCK": "cylinder.split.1x2"; case "CREDIT": "person.crop.circle.badge.exclamationmark"; case "PROFIT": "chart.line.uptrend.xyaxis"; case "PURCHASE": "cart"; default: "sparkles" } }
     private var agent: String { switch fact.category { case "SHIFT": "SHIFT AGENT"; case "STOCK": "STOCK AGENT"; case "CREDIT": "CREDIT AGENT"; case "PROFIT": "PROFIT AGENT"; case "PURCHASE": "PURCHASE AGENT"; default: "OWNER ASSISTANT" } }
+}
+
+private struct IntelligenceEvidenceView: View {
+    @Environment(AppSession.self) private var session
+    let focus: String
+    @State private var view: IntelligenceOwnerView?
+    @State private var loading = true
+    @State private var failed = false
+
+    var body: some View {
+        ZStack {
+            FuelNerveTheme.canvas.ignoresSafeArea()
+            if loading { ProgressView("Loading live station records…") }
+            else if let view {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Text("LIVE OWNER VIEW").font(.caption.bold()).tracking(1.2).foregroundStyle(FuelNerveTheme.green)
+                        Text(session.selectedStation?.name ?? "Fuel station").font(.largeTitle.bold()).foregroundStyle(FuelNerveTheme.forest)
+                        Text("Updated \(view.asOf.formatted(date: .abbreviated, time: .shortened))").font(.caption).foregroundStyle(.secondary)
+                        if focus == "CREDIT" { customerSection(view) }
+                        else if focus == "SHIFT" { shiftSection(view) }
+                        else { performanceSection(view) }
+                    }.padding()
+                }.refreshable { await load() }
+            } else if failed {
+                ContentUnavailableView("Live view unavailable", systemImage: "arrow.clockwise", description: Text("Pull to refresh or try again shortly."))
+            }
+        }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
+        .task(id: session.selectedStationId) { await load() }
+    }
+
+    private var title: String { focus == "CREDIT" ? "Customer credit" : focus == "SHIFT" ? "Shifts" : "Business today" }
+
+    @ViewBuilder private func customerSection(_ value: IntelligenceOwnerView) -> some View {
+        metricCard("Total outstanding", value.customers.reduce(0) { $0 + $1.outstanding }.rupees, "person.2.fill")
+        sectionTitle("Customer-wise outstanding")
+        if value.customers.isEmpty { emptyCard("No customer balance is outstanding.") }
+        ForEach(value.customers) { customer in
+            HStack { VStack(alignment: .leading) { Text(customer.name).font(.headline); Text(customer.code).font(.caption).foregroundStyle(.secondary) }; Spacer(); Text(customer.outstanding.rupees).font(.headline).foregroundStyle(FuelNerveTheme.forest) }
+                .padding().background(.white, in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
+    @ViewBuilder private func performanceSection(_ value: IntelligenceOwnerView) -> some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+            metricCard("Sales", value.summary.sales.rupees, "indianrupeesign.circle.fill")
+            metricCard("Collections", value.summary.collections.rupees, "banknote.fill")
+            metricCard("Net profit", value.summary.netProfit.rupees, "chart.line.uptrend.xyaxis")
+            metricCard("Fuel sold", value.summary.meteredVolume.litres, "fuelpump.fill")
+        }
+        sectionTitle("Collection mix")
+        ForEach(value.collections) { row in
+            HStack { Text(row.method.capitalized); Spacer(); Text(row.amount.rupees).fontWeight(.semibold) }
+                .padding().background(.white, in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    @ViewBuilder private func shiftSection(_ value: IntelligenceOwnerView) -> some View {
+        metricCard("Open shifts", String(value.summary.openShifts), "clock.fill")
+        metricCard("Awaiting reconciliation", String(value.summary.pendingReconciliations), "checkmark.seal.fill")
+        performanceSection(value)
+    }
+
+    private func metricCard(_ label: String, _ value: String, _ symbol: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) { Image(systemName: symbol).foregroundStyle(FuelNerveTheme.green); Text(label).font(.caption).foregroundStyle(.secondary); Text(value).font(.title2.bold()).foregroundStyle(FuelNerveTheme.forest) }
+            .frame(maxWidth: .infinity, alignment: .leading).padding().background(.white, in: RoundedRectangle(cornerRadius: 18))
+    }
+    private func sectionTitle(_ text: String) -> some View { Text(text).font(.title3.bold()).foregroundStyle(FuelNerveTheme.forest).padding(.top, 4) }
+    private func emptyCard(_ text: String) -> some View { Text(text).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding().background(.white, in: RoundedRectangle(cornerRadius: 16)) }
+
+    private func load() async {
+        guard session.hasIntelligence, let stationId = session.selectedStationId else { loading = false; failed = true; return }
+        loading = view == nil
+        do { view = try await session.briefingService.ownerView(stationId: stationId); failed = false }
+        catch { session.handleAuthenticationFailure(error); failed = true }
+        loading = false
+    }
 }
 
 private struct PlanBadge: View {

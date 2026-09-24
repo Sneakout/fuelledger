@@ -5,7 +5,7 @@ import { paymentMethods } from "@fuelledger/shared";
 import { Prisma } from "@prisma/client";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
-import { notifyShiftVariance } from "../notifications/service.js";
+import { notifyCreditAllocation, notifyShiftVariance } from "../notifications/service.js";
 import { collectionAccount, postJournal } from "../accounting/service.js";
 
 const automaticSaleNote =
@@ -392,6 +392,24 @@ export async function reconcile(
       autoUnallocated,
     );
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  if (result.reconciliation?.id) {
+    const creditEntries = await prisma.customerLedgerEntry.findMany({
+      where: { organizationId, shiftCreditAllocation: { reconciliationId: result.reconciliation.id }, amount: { gt: 0 } },
+      include: { customer: { select: { id: true, name: true } }, shiftCreditAllocation: { select: { id: true, dueDate: true } } },
+    });
+    await Promise.all(creditEntries.map(entry => notifyCreditAllocation({
+      allocationId: entry.shiftCreditAllocation!.id,
+      organizationId,
+      stationId: result.station.id,
+      stationName: result.station.name,
+      customerId: entry.customer.id,
+      customerName: entry.customer.name,
+      shiftNumber: result.shiftNumber,
+      amount: Number(entry.amount),
+      dueDate: entry.shiftCreditAllocation!.dueDate,
+      occurredAt: entry.occurredAt,
+    }).catch(() => undefined)));
+  }
   await notifyShiftVariance(organizationId, result).catch(() => undefined);
   return result;
 }

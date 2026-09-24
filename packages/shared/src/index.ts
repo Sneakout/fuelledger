@@ -867,6 +867,26 @@ const attachmentSchema = z.object({
   size: z.coerce.number().int().positive().max(500_000),
   contentBase64: z.string().min(1).max(700_000),
 });
+export const serviceTicketIssues = [
+  "ACCESS_LOGIN",
+  "SALES_SHIFTS",
+  "STOCK_TANKS",
+  "PURCHASES_INVOICES",
+  "CUSTOMERS_CREDIT",
+  "ACCOUNTING_PAYMENTS",
+  "NERVE_INTELLIGENCE",
+  "ALERTS_NOTIFICATIONS",
+  "OTHER",
+] as const;
+export const serviceTicketInputSchema = z.object({
+  issue: z.enum(serviceTicketIssues),
+  subIssue: z.string().trim().max(80).optional().or(z.literal("")),
+  comments: z.string().trim().min(5, "Tell us briefly what went wrong.").max(2_000),
+  screenshot: attachmentSchema.extend({
+    mimeType: z.enum(["image/jpeg", "image/png", "image/webp"]),
+  }).nullable().optional(),
+});
+export type ServiceTicketInput = z.infer<typeof serviceTicketInputSchema>;
 const settlementMethods = ["CASH", "UPI", "CARD", "OTHER"] as const;
 export const supplierInputSchema = z.object({
   name: z.string().trim().min(2).max(120),

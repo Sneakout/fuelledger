@@ -5,6 +5,7 @@ import GoogleSignIn
 extension Notification.Name {
     static let fuelNervePushToken = Notification.Name("fuelNervePushToken")
     static let fuelNerveOpenApproval = Notification.Name("fuelNerveOpenApproval")
+    static let fuelNerveOpenAlert = Notification.Name("fuelNerveOpenAlert")
     static let fuelNerveOpenBriefing = Notification.Name("fuelNerveOpenBriefing")
     static let fuelNerveRecordsChanged = Notification.Name("fuelNerveRecordsChanged")
 }
@@ -36,6 +37,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                 NotificationCenter.default.post(name: .fuelNerveOpenApproval, object: approvalId)
             }
         }
+        if let alertId = notification.request.content.userInfo["alertId"] as? String, !alertId.isEmpty {
+            await MainActor.run { NotificationCenter.default.post(name: .fuelNerveOpenAlert, object: alertId) }
+        }
         return [.banner, .sound, .badge]
     }
 
@@ -51,6 +55,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
                 NotificationCenter.default.post(name: .fuelNerveOpenApproval, object: approvalId)
             }
             return
+        }
+        if let alertId = response.notification.request.content.userInfo["alertId"] as? String, !alertId.isEmpty {
+            await MainActor.run { NotificationCenter.default.post(name: .fuelNerveOpenAlert, object: alertId) }
         }
         guard let path = response.notification.request.content.userInfo["evidencePath"] as? String,
               let url = AppEnvironment.configured().evidenceURL(for: path) else { return }

@@ -1,9 +1,11 @@
 import { Router } from "express";
-import { customerSubscriptionUpdateSchema } from "@fuelledger/shared";
+import { customerSubscriptionUpdateSchema, ownerNotificationSettingsSchema } from "@fuelledger/shared";
+import { z } from "zod";
 import { isPlatformAdminEmail } from "../config/env.js";
 import { AppError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
 import { authenticate } from "../middleware/authenticate.js";
+import { presentNotificationSettings, updateSettings } from "../modules/notifications/service.js";
 
 export const platformRouter = Router();
 const planPricesPaise = {
@@ -63,16 +65,61 @@ platformRouter.get("/customers", async (req, res) => {
         take: 1,
         select: { name: true, email: true, lastLoginAt: true },
       },
+      notificationSettings: true,
       _count: { select: { stations: true } },
     },
   });
   res.json({
-    customers: customers.map(({ users, _count, ...customer }) => ({
+    customers: customers.map(({ users, _count, notificationSettings, ...customer }) => ({
       ...customer,
       owner: users[0] ?? null,
       petrolPumps: _count.stations,
+      notificationSettings: presentNotificationSettings(notificationSettings),
     })),
   });
+});
+platformRouter.get("/service-tickets", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const tickets = await prisma.serviceTicket.findMany({
+    orderBy: [{ status: "asc" }, { createdAt: "desc" }],
+    take: 250,
+    select: {
+      id: true, ticketNumber: true, issue: true, subIssue: true, comments: true, status: true,
+      screenshotFileName: true, adminNote: true, createdAt: true, updatedAt: true, resolvedAt: true,
+      organization: { select: { id: true, name: true } },
+      createdBy: { select: { name: true, email: true } },
+    },
+  });
+  res.json({ tickets: tickets.map((ticket) => ({ ...ticket, reference: `FN-${String(ticket.ticketNumber).padStart(6, "0")}`, hasScreenshot: Boolean(ticket.screenshotFileName) })) });
+});
+platformRouter.patch("/service-tickets/:id", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const parsed = z.object({ status: z.enum(["OPEN", "IN_PROGRESS", "RESOLVED"]), adminNote: z.string().trim().max(2_000).optional() }).safeParse(req.body);
+  if (!parsed.success) throw new AppError(400, "SERVICE_TICKET_UPDATE_INVALID", "Review the ticket update.", parsed.error.flatten());
+  const existing = await prisma.serviceTicket.findUnique({ where: { id: req.params.id! }, select: { id: true } });
+  if (!existing) throw new AppError(404, "SERVICE_TICKET_NOT_FOUND", "This service ticket was not found.");
+  const ticket = await prisma.serviceTicket.update({
+    where: { id: existing.id },
+    data: { status: parsed.data.status, adminNote: parsed.data.adminNote || null, resolvedAt: parsed.data.status === "RESOLVED" ? new Date() : null },
+    select: { id: true, status: true, adminNote: true, resolvedAt: true, updatedAt: true },
+  });
+  res.json({ ticket });
+});
+platformRouter.get("/service-tickets/:id/screenshot", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const screenshot = await prisma.serviceTicket.findUnique({ where: { id: req.params.id! }, select: { screenshotFileName: true, screenshotMimeType: true, screenshotContent: true } });
+  if (!screenshot?.screenshotContent || !screenshot.screenshotMimeType || !screenshot.screenshotFileName)
+    throw new AppError(404, "SCREENSHOT_NOT_FOUND", "This ticket does not have a screenshot.");
+  res.type(screenshot.screenshotMimeType).setHeader("Content-Disposition", `inline; filename="${screenshot.screenshotFileName.replaceAll('"', '')}"`).send(screenshot.screenshotContent);
+});
+platformRouter.put("/customers/:id/notifications", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const parsed = ownerNotificationSettingsSchema.safeParse(req.body);
+  if (!parsed.success)
+    throw new AppError(400, "NOTIFICATION_SETTINGS_INVALID", "Review the WhatsApp alert settings.", parsed.error.flatten());
+  const customer = await prisma.organization.findUnique({ where: { id: req.params.id! }, select: { id: true } });
+  if (!customer) throw new AppError(404, "CUSTOMER_NOT_FOUND", "This customer account was not found.");
+  res.json({ settings: await updateSettings(customer.id, parsed.data) });
 });
 platformRouter.put("/customers/:id/subscription", async (req, res) => {
   requirePlatformAdmin(req.user!.email);

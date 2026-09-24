@@ -6,10 +6,11 @@ import { useStation } from "../components/StationProvider";
 import { createEditableInvoiceDraft, EditableInvoiceReviewDialog, type EditableInvoiceDraft } from "../components/EditableInvoiceReviewDialog";
 import { InvoiceChangePreviewDialog } from "../components/InvoiceChangePreviewDialog";
 import { ConfirmedPurchaseDialog } from "../components/ConfirmedPurchaseDialog";
-import { api, ApiRequestError, type AskFuelNerveResponse, type CatalogProduct, type InvestigationFollowUpPrompt, type InvestigationFollowUpResponse, type InvestigationResponse, type NerveAgentPresentation, type NerveAgentsResponse, type NerveFinding, type SubscriptionStatus } from "../lib/api";
+import { api, ApiRequestError, type AskFuelNerveResponse, type CatalogProduct, type InvestigationFollowUpPrompt, type InvestigationFollowUpResponse, type InvestigationResponse, type NerveAgentPresentation, type NerveAgentsResponse, type NerveFinding, type PurchaseInvoice, type SubscriptionStatus, type Supplier } from "../lib/api";
 import type { ParsedIndianInvoice } from "../lib/indian-invoice-parser";
 import { assessInvoiceStation, assessSingleProductInvoicePrice } from "../lib/invoice-local-safety";
 import { flushInvoiceImportPerformance, rememberInvoiceImportPerformance } from "../lib/invoice-import-performance";
+import { findDuplicateInvoiceForDraft } from "../lib/confirmed-purchase-submission";
 
 type FindingGroup = { key: string; title: string; severity: NerveFinding["severity"]; agent: NerveAgentPresentation; findings: NerveFinding[] };
 type TeamAgent = NerveAgentPresentation & {
@@ -191,6 +192,7 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [importEnabled, setImportEnabled] = useState(false);
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
+  const [purchaseRecords, setPurchaseRecords] = useState<{ suppliers: Supplier[]; invoices: PurchaseInvoice[] }>({ suppliers: [], invoices: [] });
   const fileInput = useRef<HTMLInputElement | null>(null);
   const attachmentMenu = useRef<HTMLDivElement | null>(null);
   const invoiceChecks = useRef(new Map<string, AbortController>());
@@ -218,8 +220,10 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
   useEffect(() => {
     let active = true;
     setCatalogProducts([]);
+    setPurchaseRecords({ suppliers: [], invoices: [] });
     if (!stationId) return () => { active = false; };
-    void api.catalog().then(catalog => { if (active) setCatalogProducts(catalog.products.filter(product => product.active)); }).catch(() => undefined);
+    const purchases = typeof api.purchasesBootstrap === "function" ? api.purchasesBootstrap().catch(() => null) : Promise.resolve(null);
+    void Promise.all([api.catalog(), purchases]).then(([catalog, records]) => { if (active) { setCatalogProducts(catalog.products.filter(product => product.active)); if (records) setPurchaseRecords({ suppliers: records.suppliers.filter(supplier => supplier.active), invoices: records.invoices }); } }).catch(() => undefined);
     return () => { active = false; };
   }, [stationId]);
   useEffect(() => {
@@ -351,7 +355,7 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
   return <section className="nerve-ask-bar" aria-label="Ask Nerve Intelligence">
     <div className="nerve-ask-heading"><div><Sparkles/><span><strong>Ask Nerve Intelligence</strong><small>Ask about {stationName ?? "this station"}, or select invoices to check next.</small></span></div><span><ShieldCheck/> Documents stay on this device</span></div>
     {invoices.length > 0 && <div className="nerve-local-invoices" aria-label="Invoices selected on this device" aria-live="polite">
-      {invoices.map(invoice => <div key={invoice.id} className={invoice.status}><InvoiceStatusIcon status={invoice.status}/><span><strong>{invoice.file.name}</strong><small>{invoiceStatusText(invoice)}</small></span><button type="button" aria-label={`Remove ${invoice.file.name}`} onClick={() => { invoiceChecks.current.get(invoice.id)?.abort(); invoiceChecks.current.delete(invoice.id); setInvoices(current => current.filter(item => item.id !== invoice.id)); }}><X/></button>{invoice.parsed && invoice.draft && <InvoiceDetails invoice={invoice.parsed} draft={invoice.draft} stationName={stationName} catalogProducts={catalogProducts} reviewed={Boolean(invoice.reviewed)} submitted={invoice.submitted} onReview={() => setReviewingId(invoice.id)} onPreview={() => setPreviewingId(invoice.id)}/>} {invoice.extractedText && <details className="nerve-text-preview"><summary>View the text read from this document</summary><p>{invoice.extractedText.slice(0, 1_200)}{invoice.extractedText.length > 1_200 ? "…" : ""}</p></details>}</div>)}
+      {invoices.map(invoice => { const duplicate = invoice.draft ? findDuplicateInvoiceForDraft(invoice.draft, purchaseRecords.suppliers, purchaseRecords.invoices) : undefined; return <div key={invoice.id} className={invoice.status}><InvoiceStatusIcon status={invoice.status}/><span><strong>{invoice.file.name}</strong><small>{invoiceStatusText(invoice)}</small></span><button type="button" aria-label={`Remove ${invoice.file.name}`} onClick={() => { invoiceChecks.current.get(invoice.id)?.abort(); invoiceChecks.current.delete(invoice.id); setInvoices(current => current.filter(item => item.id !== invoice.id)); }}><X/></button>{invoice.parsed && invoice.draft && <InvoiceDetails invoice={invoice.parsed} draft={invoice.draft} stationName={stationName} catalogProducts={catalogProducts} duplicate={duplicate} reviewed={Boolean(invoice.reviewed)} submitted={invoice.submitted} onReview={() => setReviewingId(invoice.id)} onPreview={() => setPreviewingId(invoice.id)}/>} {invoice.extractedText && <details className="nerve-text-preview"><summary>View the text read from this document</summary><p>{invoice.extractedText.slice(0, 1_200)}{invoice.extractedText.length > 1_200 ? "…" : ""}</p></details>}</div>; })}
     </div>}
     <form onSubmit={ask}>
       <div className="nerve-attach" ref={attachmentMenu}>
@@ -363,7 +367,7 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
       <button type="submit" className="nerve-send-button" disabled={!stationId || question.trim().length < 3 || asking}>{asking ? <RefreshCw className="spinning"/> : <Send/>}<span>{asking ? "Checking" : "Ask"}</span></button>
     </form>
     {error && <p className="ask-error" role="alert">{error}</p>}
-    {answer && <div className="ask-answer"><header><Sparkles/><div><small>{answer.answerMode === "AI_EXPLAINED" ? "Nerve Intelligence" : "Verified answer"}</small><h3>{answer.answer.title}</h3></div></header><p>{answer.answer.explanation}</p>{answer.answer.facts.length > 0 && <div className="ask-facts">{answer.answer.facts.slice(0, 3).map(fact => <Link key={fact.id} to={fact.evidencePath}><span><small>{fact.label}</small><strong>{fact.value}</strong><em>{fact.context}</em></span><ArrowRight/></Link>)}</div>}<footer>{answer.answer.action}</footer></div>}
+    {answer && <div className="ask-answer"><header><Sparkles/><div><small>{answer.answerMode === "AI_EXPLAINED" ? "Nerve Intelligence" : "Verified answer"}</small><h3>{answer.answer.title}</h3></div></header><p>{answer.answer.explanation}</p>{answer.answer.facts.length > 0 && <div className="ask-facts">{answer.answer.facts.slice(0, 3).map(fact => <div key={fact.id}><span><small>{fact.label}</small><strong>{fact.value}</strong><em>{fact.context}</em></span></div>)}</div>}<footer>{answer.answer.action}</footer></div>}
     {reviewingInvoice?.draft && <EditableInvoiceReviewDialog
       fileName={reviewingInvoice.file.name}
       initialDraft={reviewingInvoice.draft}
@@ -392,6 +396,7 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
       onClose={() => setSubmittingId(null)}
       onSubmitted={(created, priceApprovals) => {
         setInvoices(current => current.map(invoice => invoice.id === submittingInvoice.id ? { ...invoice, submitted: { id: created.id, invoiceNumber: created.invoiceNumber } } : invoice));
+        setPurchaseRecords(current => ({ ...current, invoices: current.invoices.some(invoice => invoice.id === created.id) ? current.invoices : [created, ...current.invoices] }));
         if (priceApprovals.length > 0) onRecordsChanged();
       }}
     />}
@@ -426,17 +431,19 @@ function invoiceStatusText(invoice: LocalInvoice) {
   return `This ${isPdfFile(invoice.file) ? "PDF" : "image"} could not be read on this device.`;
 }
 
-function InvoiceDetails({ invoice, draft, stationName, catalogProducts, reviewed, submitted, onReview, onPreview }: { invoice: ParsedIndianInvoice; draft: EditableInvoiceDraft; stationName?: string | undefined; catalogProducts: CatalogProduct[]; reviewed: boolean; submitted?: LocalInvoice["submitted"]; onReview: () => void; onPreview: () => void }) {
+function InvoiceDetails({ invoice, draft, stationName, catalogProducts, duplicate, reviewed, submitted, onReview, onPreview }: { invoice: ParsedIndianInvoice; draft: EditableInvoiceDraft; stationName?: string | undefined; catalogProducts: CatalogProduct[]; duplicate?: PurchaseInvoice | undefined; reviewed: boolean; submitted?: LocalInvoice["submitted"]; onReview: () => void; onPreview: () => void }) {
   const stationAssessment = assessInvoiceStation(draft.consigneeName, stationName);
   const priceAssessment = assessSingleProductInvoicePrice(draft, catalogProducts);
-  const productSummary = draft.lines.length
-    ? draft.lines.slice(0, 2).map((line, index) => {
-      const base = (Number(line.quantity) || 0) * (Number(line.unitRate) || 0);
-      const gross = !reviewed ? invoice.lines[index]?.grossAmount : null;
-      const amount = gross ?? base * (1 + (Number(line.taxRate) || 0) / 100);
-      return `${line.description || "Unnamed product"} · ${formatInvoiceNumber(Number(line.quantity) || 0)}${line.unit ? ` ${line.unit}` : ""} · ${formatInvoiceMoney(amount)}${gross || Number(line.taxRate) > 0 ? " incl. product taxes" : " base"}`;
-    }).join("; ")
-    : "Not clearly found";
+  const productRows = draft.lines.map((line, index) => {
+    const quantity = Number(line.quantity) || 0;
+    const unitRate = Number(line.unitRate) || 0;
+    const base = quantity * unitRate;
+    const taxRate = Number(line.taxRate) || 0;
+    const gross = !reviewed ? invoice.lines[index]?.grossAmount : null;
+    const amount = gross ?? base * (1 + taxRate / 100);
+    const match = findMatchingCatalogProduct(line.description, line.product, line.hsnCode, catalogProducts);
+    return { line, quantity, unitRate, base, taxRate, amount, match };
+  });
   return <section className={`nerve-invoice-details ${invoice.status === "NEEDS_REVIEW" ? "needs-review" : ""}`} aria-label="Invoice details found">
     <header><div><strong>{submitted ? "This invoice is now in Purchases" : reviewed ? "You reviewed this invoice" : invoice.status === "READY_FOR_REVIEW" ? "I found a new invoice" : "I found an invoice, but some details need checking"}</strong><small>{submitted ? `Invoice ${submitted.invoiceNumber} was created as unpaid. Stock and payment were not changed.` : reviewed ? "Your edits are kept only in this browser tab." : "No FuelNerve record has been changed."}</small></div><span>{submitted ? "Created" : reviewed ? "Reviewed" : invoice.status === "READY_FOR_REVIEW" ? "Ready to review" : "Check details"}</span></header>
     <dl>
@@ -446,13 +453,37 @@ function InvoiceDetails({ invoice, draft, stationName, catalogProducts, reviewed
       <div><dt>Invoice date</dt><dd>{draft.invoiceDate ? formatInvoiceDate(draft.invoiceDate) : "Not clearly found"}</dd></div>
       <div><dt>Total</dt><dd>{Number(draft.totalAmount) > 0 ? formatInvoiceMoney(Number(draft.totalAmount)) : "Not clearly found"}</dd></div>
       <div><dt>Taxes & charges</dt><dd>{draft.taxAmount !== "" ? formatInvoiceMoney(Number(draft.taxAmount) || 0) : "Not clearly found"}</dd></div>
-      <div><dt>Products</dt><dd>{productSummary}</dd></div>
     </dl>
+    {duplicate && <div className="nerve-invoice-duplicate" role="alert"><AlertTriangle/><div><strong>This invoice is already updated</strong><p>{duplicate.supplier.name} invoice {duplicate.invoiceNumber} is already in Purchases, dated {formatInvoiceDate(duplicate.invoiceDate.slice(0, 10))}, for {formatInvoiceMoney(Number(duplicate.totalAmount))}. It will not be added again.</p></div></div>}
+    <section className="nerve-invoice-products" aria-label="Products recognised on invoice">
+      <header><div><strong>Products</strong><small>{productRows.length ? `${productRows.length} line${productRows.length === 1 ? "" : "s"} recognised` : "No product lines found"}</small></div></header>
+      {productRows.length ? productRows.map(({ line, quantity, unitRate, base, taxRate, amount, match }) => <article key={line.id}>
+        <div className="nerve-invoice-product-name"><strong>{line.description || "Unnamed product"}</strong><small>{line.product || "Unclassified"}{line.hsnCode ? ` · HSN ${line.hsnCode}` : ""}</small></div>
+        <div><span>Quantity</span><strong>{formatInvoiceNumber(quantity)} {line.unit || "units"}</strong></div>
+        <div><span>Price</span><strong>{formatInvoiceMoney(unitRate)}</strong></div>
+        <div><span>Tax</span><strong>{formatInvoiceNumber(taxRate)}%</strong></div>
+        <div><span>Base</span><strong>{formatInvoiceMoney(base)}</strong></div>
+        <div><span>Total</span><strong>{formatInvoiceMoney(amount)}</strong></div>
+        <em className={match ? "matched" : "new"}>{match ? `Matched · ${match.name}` : "New product · confirm before adding"}</em>
+      </article>) : <p className="nerve-invoice-products-empty">Review the document text and add at least one product.</p>}
+    </section>
     <div className={`nerve-invoice-station ${stationAssessment.status.toLowerCase()}`}><ShieldCheck/><p>{stationAssessment.message}</p></div>
     {priceAssessment && priceAssessment.direction !== "UNCHANGED" && <div className={`nerve-invoice-price ${priceAssessment.direction.toLowerCase()}`}><TrendingUp/><div><strong>{priceAssessment.productName} purchase price {priceAssessment.direction === "INCREASE" ? "increased" : "decreased"}</strong><p>{formatInvoiceMoney(priceAssessment.previousPrice)} to {formatInvoiceMoney(priceAssessment.invoicePrice)} per {priceAssessment.unit}. Review and update the retail selling price if required before the next sale.</p></div></div>}
     {!reviewed && invoice.warnings.length > 0 && <div className="nerve-invoice-warnings"><AlertTriangle/>{invoice.warnings.slice(0, 2).map(warning => <p key={warning}>{warning}</p>)}</div>}
-    <div className="nerve-invoice-actions">{submitted ? <Link className="nerve-purchase-link" to="/purchases"><FileCheck2/> View in Purchases</Link> : <><button type="button" className="nerve-review-invoice" onClick={onReview}><FileCheck2/>{reviewed ? "Edit reviewed details" : "Review and edit details"}</button>{reviewed && stationAssessment.status === "MATCH" && <button type="button" className="nerve-preview-invoice" onClick={onPreview}><ShieldCheck/> Preview record changes</button>}</>}</div>
+    <div className="nerve-invoice-actions">{submitted || duplicate ? <Link className="nerve-purchase-link" to="/purchases"><FileCheck2/> View existing invoice</Link> : <><button type="button" className="nerve-review-invoice" onClick={onReview}><FileCheck2/>{reviewed ? "Edit reviewed details" : "Review and edit details"}</button>{reviewed && stationAssessment.status === "MATCH" && <button type="button" className="nerve-preview-invoice" onClick={onPreview}><ShieldCheck/> Preview record changes</button>}</>}</div>
   </section>;
+}
+
+function findMatchingCatalogProduct(description: string, classification: string, hsnCode: string, products: CatalogProduct[]) {
+  const normalize = (value: string | null | undefined) => (value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const hsn = normalize(hsnCode);
+  if (hsn) {
+    const matches = products.filter(product => normalize(product.hsnCode) === hsn);
+    if (matches.length === 1) return matches[0];
+  }
+  const names = new Set([normalize(description), normalize(classification)].filter(Boolean));
+  const matches = products.filter(product => names.has(normalize(product.name)) || names.has(normalize(product.code)));
+  return matches.length === 1 ? matches[0] : undefined;
 }
 
 function formatInvoiceMoney(value: number) {

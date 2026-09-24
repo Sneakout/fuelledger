@@ -3,13 +3,14 @@ import { z } from 'zod';
 import { AppError } from '../lib/errors.js';
 import { assertStationAccess, permittedStationIds, requireOwner } from '../lib/station-access.js';
 import { authenticate } from '../middleware/authenticate.js';
-import { dailyBriefing } from '../modules/intelligence/daily-briefing.js';
+import { dailyBriefing, requireIntelligenceAccess } from '../modules/intelligence/daily-briefing.js';
 import { askFuelNerve } from '../modules/intelligence/ask.js';
 import { env } from '../config/env.js';
 import { briefingFindingSources, nerveFindings } from '../modules/intelligence/nerve-findings.js';
 import { investigateFinding } from '../modules/intelligence/investigation.js';
 import { answerInvestigationFollowUp, investigationFollowUpPrompts } from '../modules/intelligence/investigation-follow-up.js';
 import { demoAgentFindings } from '../modules/intelligence/demo-agent-findings.js';
+import { intelligenceOwnerView } from '../modules/intelligence/owner-view.js';
 
 export const intelligenceRouter = Router();
 intelligenceRouter.use(authenticate);
@@ -39,6 +40,14 @@ intelligenceRouter.get('/agents', async (req, res) => {
   }
   const briefing = await dailyBriefing(req.user!.organization.id, permittedStationIds(req.user!), parsed.data.stationId, { demoAccess: Boolean(req.user!.demoExpiresAt) });
   res.json(demoAgentFindings({ organizationId: req.user!.organization.id, stationId: parsed.data.stationId, generatedAt: briefing.calculatedAt, facts: briefing.facts, sourceMode: req.user!.demoExpiresAt ? 'VERIFIED_DEMO' : 'VERIFIED_BRIEFING' }));
+});
+intelligenceRouter.get('/owner-view', async (req, res) => {
+  requireOwner(req.user!);
+  await requireIntelligenceAccess(req.user!.organization.id);
+  const parsed = z.object({ stationId: z.string().cuid() }).safeParse(req.query);
+  if (!parsed.success) throw new AppError(400, 'STATION_INVALID', 'Choose a valid fuel station.');
+  assertStationAccess(req.user!, parsed.data.stationId);
+  res.json(await intelligenceOwnerView(req.user!.organization.id, parsed.data.stationId));
 });
 intelligenceRouter.post('/investigations', async (req, res) => {
   requireOwner(req.user!);

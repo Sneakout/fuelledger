@@ -1,11 +1,10 @@
 import { Router } from 'express';
-import { ownerNotificationSettingsSchema } from '@fuelledger/shared';
 import { z } from 'zod';
 import { env } from '../config/env.js';
 import { AppError } from '../lib/errors.js';
 import { assertStationAccess, permittedStationIds, requireOwner } from '../lib/station-access.js';
 import { authenticate } from '../middleware/authenticate.js';
-import { getSettings, listAlerts, markAlert, notifyMarketPriceOutlook, recentDeliveries, registerPushDevice, runScheduledNotifications, sendTestNotification, unregisterPushDevice, updateSettings } from '../modules/notifications/service.js';
+import { listAlerts, markAlert, notifyMarketPriceOutlook, registerPushDevice, runScheduledNotifications, unregisterPushDevice } from '../modules/notifications/service.js';
 
 export const notificationsRouter = Router();
 
@@ -58,17 +57,11 @@ notificationsRouter.delete('/devices', async (req, res) => {
   res.status(204).send();
 });
 notificationsRouter.get('/', async (req, res) => {
-  requireOwner(req.user!);
-  const [settings, deliveries] = await Promise.all([getSettings(req.user!.organization.id), recentDeliveries(req.user!.organization.id)]);
-  res.json({ settings, deliveries });
+  throw new AppError(403, 'NOTIFICATION_SETTINGS_ADMIN_MANAGED', 'WhatsApp alerts are managed by FuelNerve customer service.');
 });
 notificationsRouter.put('/', async (req, res) => {
-  requireOwner(req.user!);
-  const parsed = ownerNotificationSettingsSchema.safeParse(req.body);
-  if (!parsed.success) throw new AppError(400, 'NOTIFICATION_SETTINGS_INVALID', 'Please review the WhatsApp alert settings.', parsed.error.flatten());
-  res.json({ settings: await updateSettings(req.user!.organization.id, parsed.data) });
+  throw new AppError(403, 'NOTIFICATION_SETTINGS_ADMIN_MANAGED', 'WhatsApp alerts are managed by FuelNerve customer service.');
 });
 notificationsRouter.post('/test', async (req, res) => {
-  requireOwner(req.user!);
-  res.json({ delivery: await sendTestNotification(req.user!.organization.id) });
+  throw new AppError(403, 'NOTIFICATION_SETTINGS_ADMIN_MANAGED', 'WhatsApp alerts are managed by FuelNerve customer service.');
 });

@@ -53,6 +53,8 @@ const agentForType: Partial<Record<OwnerNotificationType, NonNullable<OwnerNotif
   SHIFT_OPEN: { key: 'reconciliation-review', name: 'Shift Agent', responsibility: 'Shifts, collections and handovers' },
   APPROVAL_REQUIRED: { key: 'inventory-watch', name: 'Stock Agent', responsibility: 'Tanks, readings, receipts and fuel movement' },
   OVERDUE_CUSTOMER: { key: 'receivables-watch', name: 'Credit Agent', responsibility: 'Customer balances, ageing and payment follow-up' },
+  CREDIT_SALE: { key: 'receivables-watch', name: 'Credit Agent', responsibility: 'Customer balances, ageing and payment follow-up' },
+  CATALOG_CHANGE: { key: 'purchase-check', name: 'Purchase Agent', responsibility: 'Supplier invoices, rates, quantities and receipts' },
   DAILY_SUMMARY: { key: 'profit-insight', name: 'Profit Agent', responsibility: 'Margin, costs and financial changes' },
 };
 const purchaseAgent = { key: 'purchase-check', name: 'Purchase Agent', responsibility: 'Supplier invoices, rates, quantities and receipts' } as const;
@@ -62,13 +64,13 @@ function responsibleAgent(type: OwnerNotificationType, recordType: string) {
   if (recordType === 'PURCHASE_INVOICE' || recordType === 'SUPPLIER_PAYABLE' || recordType === 'PURCHASE_RECEIPT' || recordType === 'PRODUCT_PRICE_CHANGE_REQUEST' || recordType === 'MARKET_PRICE_OUTLOOK') return purchaseAgent;
   return agentForType[type] ?? null;
 }
-function presentSettings(settings: (NotificationSettingFields & { id?: string; updatedAt?: Date }) | null) {
+export function presentNotificationSettings(settings: (NotificationSettingFields & { id?: string; updatedAt?: Date }) | null) {
   const value = settings ?? defaults;
   return { ...value, varianceThreshold: Number(value.varianceThreshold), stockVarianceTolerance: Number(value.stockVarianceTolerance), providerReady: whatsappConfigured };
 }
 
 export async function getSettings(organizationId: string) {
-  return presentSettings(await prisma.ownerNotificationSettings.findUnique({ where: { organizationId } }));
+  return presentNotificationSettings(await prisma.ownerNotificationSettings.findUnique({ where: { organizationId } }));
 }
 
 export async function updateSettings(organizationId: string, input: OwnerNotificationSettingsInput) {
@@ -87,7 +89,7 @@ export async function updateSettings(organizationId: string, input: OwnerNotific
     dailySummaryHour: input.dailySummaryHour,
   };
   const settings = await prisma.ownerNotificationSettings.upsert({ where: { organizationId }, create: { organizationId, ...data }, update: data });
-  return presentSettings(settings);
+  return presentNotificationSettings(settings);
 }
 
 export async function recentDeliveries(organizationId: string) {
@@ -115,6 +117,8 @@ function alertPresentation(input: AlertInput, packet: OwnerNotificationPacket, i
     APPROVAL_REQUIRED: ['An owner decision is waiting', '/inventory'],
     MARKET_PRICE_OUTLOOK: ['Plan ahead of a possible price rise', '/inventory'],
     DAILY_SUMMARY: ['Your daily owner briefing', '/reports'], OVERDUE_CUSTOMER: ['Customer balances need follow-up', '/customers'],
+    CREDIT_SALE: ['A new customer credit supply was recorded', '/customers'],
+    CATALOG_CHANGE: ['A manager added a purchase record', '/purchases'],
     SYSTEM_TEST: ['FuelNerve alert test', '/notifications'],
   } as const;
   const [title, path] = byType[input.type];
@@ -177,6 +181,38 @@ export async function sendOwnerNotification(input: AlertInput): Promise<Delivery
     await prisma.ownerNotificationDelivery.update({ where: { id: delivery.id }, data: { status: 'FAILED', errorMessage } });
     return { status: 'FAILED', reason: errorMessage };
   }
+}
+
+export async function notifyCatalogRecordCreated(input: {
+  organizationId: string;
+  stationId?: string;
+  actorName: string;
+  recordType: 'SUPPLIER' | 'PRODUCT';
+  recordId: string;
+  recordName: string;
+  code: string;
+}) {
+  const label = input.recordType === 'SUPPLIER' ? 'supplier' : 'product';
+  const path = input.recordType === 'SUPPLIER' ? '/purchases' : '/products';
+  return sendOwnerNotification({
+    organizationId: input.organizationId,
+    ...(input.stationId ? { stationId: input.stationId } : {}),
+    type: 'CATALOG_CHANGE',
+    dedupeKey: `catalog-change:${input.recordType.toLowerCase()}:${input.recordId}`,
+    severity: 'INFORMATION',
+    title: () => `New ${label} added`,
+    packet: {
+      subjectName: input.recordName,
+      recordType: `NEW_${input.recordType}`,
+      product: input.recordType === 'PRODUCT' ? { name: input.recordName, code: input.code } : null,
+      eventDate: new Date().toISOString(), dueDate: null, amount: null, quantity: null,
+      status: 'CREATED', daysOverdueOrWaiting: null,
+      station: { id: input.stationId ?? null, name: input.stationId ? 'Selected fuel station' : 'All fuel stations' },
+      evidence: [{ label: `Review ${label}`, path, recordType: input.recordType, recordId: input.recordId }],
+      availableActions: ['ACKNOWLEDGE', 'VIEW_RECORD'],
+    },
+    message: () => `FuelNerve purchase update\n\n${input.actorName} added a new ${label}: ${input.recordName} (${input.code}).\n\nReview it in FuelNerve: ${env.APP_URL}${path}`,
+  });
 }
 
 export async function notifyApprovalRequired(input: {
@@ -248,6 +284,87 @@ export async function notifyProductPriceApprovalRequired(input: {
     message: () => scenario.sentence,
     evidenceSourceType: 'APPROVAL_REQUEST',
     evidenceSourceId: input.id,
+  });
+}
+
+export async function notifyCreditSale(input: {
+  saleId: string;
+  organizationId: string;
+  stationId: string;
+  stationName: string;
+  customerId: string;
+  customerName: string;
+  productName: string;
+  productCode: string;
+  quantity: number;
+  unit: string;
+  amount: number;
+  dueDate: Date;
+  occurredAt: Date;
+}) {
+  return sendOwnerNotification({
+    organizationId: input.organizationId,
+    stationId: input.stationId,
+    type: 'CREDIT_SALE',
+    dedupeKey: `credit-sale:${input.saleId}`,
+    severity: 'ATTENTION',
+    title: () => `Credit Agent: ${input.customerName} received fuel on credit`,
+    packet: {
+      subjectName: input.customerName,
+      recordType: 'CUSTOMER_CREDIT_SALE',
+      product: { name: input.productName, code: input.productCode },
+      eventDate: input.occurredAt.toISOString(),
+      dueDate: input.dueDate.toISOString(),
+      amount: { value: input.amount, currency: 'INR' },
+      quantity: { value: input.quantity, unit: input.unit },
+      status: 'OUTSTANDING',
+      daysOverdueOrWaiting: null,
+      station: { id: input.stationId, name: input.stationName },
+      evidence: [{ label: `Open ${input.customerName} ledger`, path: '/customers', recordType: 'CUSTOMER_LEDGER', recordId: input.customerId }],
+      availableActions: ['ACKNOWLEDGE', 'REMIND_LATER', 'VIEW_RECORD', 'GIVE_DETAILS'],
+    },
+    message: () => `FuelNerve Credit Agent\n\n${input.customerName} received ${input.quantity.toLocaleString('en-IN')} ${input.unit.toLowerCase()} of ${input.productCode} on credit at ${input.stationName}. Amount: ${money(input.amount)}. Due: ${input.dueDate.toLocaleDateString('en-IN')}.\n\nReview the customer ledger: ${env.APP_URL}/customers`,
+    evidenceSourceType: 'SALE',
+    evidenceSourceId: input.saleId,
+  });
+}
+
+export async function notifyCreditAllocation(input: {
+  allocationId: string;
+  organizationId: string;
+  stationId: string;
+  stationName: string;
+  customerId: string;
+  customerName: string;
+  shiftNumber: number;
+  amount: number;
+  dueDate: Date;
+  occurredAt: Date;
+}) {
+  return sendOwnerNotification({
+    organizationId: input.organizationId,
+    stationId: input.stationId,
+    type: 'CREDIT_SALE',
+    dedupeKey: `credit-allocation:${input.allocationId}`,
+    severity: 'ATTENTION',
+    title: () => `Credit Agent: ${input.customerName} credit supply recorded`,
+    packet: {
+      subjectName: input.customerName,
+      recordType: 'CUSTOMER_CREDIT_SALE',
+      product: null,
+      eventDate: input.occurredAt.toISOString(),
+      dueDate: input.dueDate.toISOString(),
+      amount: { value: input.amount, currency: 'INR' },
+      quantity: null,
+      status: 'OUTSTANDING',
+      daysOverdueOrWaiting: null,
+      station: { id: input.stationId, name: input.stationName },
+      evidence: [{ label: `Open ${input.customerName} ledger`, path: '/customers', recordType: 'CUSTOMER_LEDGER', recordId: input.customerId }],
+      availableActions: ['ACKNOWLEDGE', 'REMIND_LATER', 'VIEW_RECORD', 'GIVE_DETAILS'],
+    },
+    message: () => `FuelNerve Credit Agent\n\nA credit supply of ${money(input.amount)} was assigned to ${input.customerName} from Shift #${input.shiftNumber} at ${input.stationName}. Due: ${input.dueDate.toLocaleDateString('en-IN')}.\n\nReview the customer ledger: ${env.APP_URL}/customers`,
+    evidenceSourceType: 'SHIFT_CREDIT_ALLOCATION',
+    evidenceSourceId: input.allocationId,
   });
 }
 

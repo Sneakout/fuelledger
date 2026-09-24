@@ -128,16 +128,24 @@ actor APIClient {
     }
 
     private func captureSessionCookies(from response: URLResponse) {
+        var responseCookies: [HTTPCookie] = []
         if let http = response as? HTTPURLResponse, let url = http.url {
             let headers = http.allHeaderFields.reduce(into: [String: String]()) { result, entry in
-                guard let key = entry.key as? String, let value = entry.value as? String else { return }
-                result[key] = value
+                guard let key = entry.key as? String else { return }
+                result[key] = String(describing: entry.value)
             }
-            for cookie in HTTPCookie.cookies(withResponseHeaderFields: headers, for: url) {
+            responseCookies = HTTPCookie.cookies(withResponseHeaderFields: headers, for: url)
+            for cookie in responseCookies {
                 cookieStorage.setCookie(cookie)
             }
         }
-        if persistsSessionCookie { SessionCookieVault.store(cookieStorage.cookies(for: baseURL) ?? [], for: baseURL) }
+        guard persistsSessionCookie else { return }
+        // Most API responses do not set a cookie. Persist a newly issued
+        // session when present, otherwise preserve the previously saved one.
+        // The vault is cleared only by explicit logout or when restoration
+        // proves that the saved cookie has expired.
+        let candidates = responseCookies + (cookieStorage.cookies(for: baseURL) ?? [])
+        SessionCookieVault.storeIfPresent(candidates, for: baseURL)
     }
 
     private func applySessionCookies(to request: inout URLRequest, for url: URL) {
@@ -178,10 +186,9 @@ private enum SessionCookieVault {
         let secure: Bool
     }
 
-    static func store(_ cookies: [HTTPCookie], for baseURL: URL) {
+    static func storeIfPresent(_ cookies: [HTTPCookie], for baseURL: URL) {
         guard let cookie = cookies.first(where: { $0.name == "__Host-fuelledger_session" })
                 ?? cookies.first(where: { $0.name == "fuelledger_session" }) else {
-            clear(for: baseURL)
             return
         }
         let stored = StoredCookie(
@@ -262,7 +269,7 @@ private enum SessionCookieVault {
         }
         storage.setCookie(cookie)
         if sourceAccount == legacyAccount {
-            store([cookie], for: baseURL)
+            storeIfPresent([cookie], for: baseURL)
             remove(account: legacyAccount)
         }
     }

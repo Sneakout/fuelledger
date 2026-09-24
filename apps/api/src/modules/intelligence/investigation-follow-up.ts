@@ -145,6 +145,7 @@ function verifiedAgent(packet: Packet) {
   const factIds = packet.facts.map(fact => fact.factId);
   const expectedKey = factIds.some(id => id.startsWith("profit-")) ? "profit-insight"
     : factIds.some(id => id.startsWith("shift-") || id.startsWith("reconciliation-")) ? "reconciliation-review"
+    : factIds.some(id => id.startsWith("receivable-")) ? "credit-watch"
     : factIds.some(id => id.startsWith("tank-") || id.startsWith("receipt-")) ? "inventory-watch"
     : "nerve-specialist";
   if (packet.result.agent.agentKey !== expectedKey) throw invalidPacket();

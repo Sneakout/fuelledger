@@ -114,9 +114,13 @@ private struct OwnerTabView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             TodayView().tabItem { Label("Today", systemImage: "gauge.with.dots.needle.50percent") }.tag(OwnerTab.today)
-            BriefingView().tabItem { Label("Briefing", systemImage: "sparkles") }.tag(OwnerTab.briefing)
+            if session.hasIntelligence {
+                BriefingView().tabItem { Label("Briefing", systemImage: "sparkles") }.tag(OwnerTab.briefing)
+            }
             AlertsView().tabItem { Label("Alerts", systemImage: "bell.badge") }.tag(OwnerTab.alerts)
-            AskView().tabItem { Label("Ask", systemImage: "bubble.left.and.text.bubble.right") }.tag(OwnerTab.ask)
+            if session.hasIntelligence {
+                AskView().tabItem { Label("Ask", systemImage: "bubble.left.and.text.bubble.right") }.tag(OwnerTab.ask)
+            }
             NavigationStack { SettingsView() }.tabItem { Label("Settings", systemImage: "gearshape") }.tag(OwnerTab.settings)
         }
         .tint(FuelNerveTheme.green)
@@ -142,7 +146,13 @@ private struct OwnerTabView: View {
         }
         .task {
             for await _ in NotificationCenter.default.notifications(named: .fuelNerveOpenBriefing) {
-                selectedTab = .briefing
+                selectedTab = session.hasIntelligence ? .briefing : .alerts
+            }
+        }
+        .task {
+            for await _ in NotificationCenter.default.notifications(named: .fuelNerveOpenAlert) {
+                selectedTab = .alerts
+                await popupCoordinator.refresh(using: session)
             }
         }
     }

@@ -65,6 +65,19 @@ describe("context-bound investigation follow-ups", () => {
     findFirst.mockResolvedValue(null);
     await expect(answerInvestigationFollowUp(request("UNCONFIRMED"))).rejects.toMatchObject({ code: "INVESTIGATION_NOT_FOUND" });
   });
+
+  it("verifies Credit Agent packets built from receivable facts", async () => {
+    const creditEvidence = [{ ...evidence[0], evidenceId: "evidence-receivables", evidenceType: "RECEIVABLES", resourceId: "station-a:receivables", label: "Customer ledgers", resolverPath: "/customers" }];
+    const creditFacts = [{ factId: "receivable-customer-a-0", label: "ABC Transport · Customer balance", value: { outstanding: 3954 }, context: "The recorded customer balance remains outstanding.", evidenceIds: ["evidence-receivables"] }];
+    const creditResult = { ...result, agent: { agentKey: "credit-watch", name: "Credit Agent", purpose: "Customer balances", icon: "specialist" }, evidence: creditEvidence, observations: [{ title: "ABC Transport", detail: "The recorded customer balance remains outstanding.", factIds: [creditFacts[0]!.factId], evidenceIds: ["evidence-receivables"] }], unknowns: [] };
+    const snapshotHash = hash(findingIds, creditFacts, creditEvidence);
+    findFirst.mockResolvedValue({ ...packetRow(), factSnapshot: creditFacts, snapshotHash, result: { ...creditResult, snapshotHash } });
+
+    const response = await answerInvestigationFollowUp(request("RECORDS_COMPARED"));
+
+    expect(response).toMatchObject({ supported: true, agent: { agentKey: "credit-watch" } });
+    expect(response.citations).toEqual([{ evidenceId: "evidence-receivables", label: "Customer ledgers", resolverPath: "/customers" }]);
+  });
 });
 
 function request(prompt: Parameters<typeof answerInvestigationFollowUp>[0]["prompt"]) { return { investigationId: "investigation-1", organizationId: "org-a", stationId: "station-a", userId: "user-a", prompt }; }

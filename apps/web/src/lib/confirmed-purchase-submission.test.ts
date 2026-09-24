@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EditableInvoiceDraft } from "../components/EditableInvoiceReviewDialog";
 import type { PurchaseProduct, Supplier } from "./api";
-import { buildConfirmedPurchaseInput, findDuplicateInvoice, findMatchingProduct, findMatchingSupplier, onlyCompatibleTankId, validateConfirmedPurchase, validateReceiptSelections } from "./confirmed-purchase-submission";
+import { buildConfirmedPurchaseInput, findDuplicateInvoice, findDuplicateInvoiceForDraft, findMatchingProduct, findMatchingSupplier, onlyCompatibleTankId, validateConfirmedPurchase, validateReceiptSelections } from "./confirmed-purchase-submission";
 
 const draft: EditableInvoiceDraft = {
   supplierName: "Indian Oil Corporation Limited",
@@ -50,6 +50,12 @@ describe("confirmed purchase submission", () => {
     const duplicate = findDuplicateInvoice("supplier-1", " iocl / 91 ", [{ supplier: { id: "supplier-1" }, invoiceNumber: "IOCL/91" } as never]);
     expect(duplicate).toBeDefined();
     expect(findDuplicateInvoice("supplier-2", "IOCL/91", [{ supplier: { id: "supplier-1" }, invoiceNumber: "IOCL/91" } as never])).toBeUndefined();
+  });
+
+  it("detects an OCR duplicate from verified supplier identity and invoice number", () => {
+    const invoice = { id: "invoice-1", supplier: { id: "supplier-1" }, invoiceNumber: "IOCL/91" } as never;
+    expect(findDuplicateInvoiceForDraft({ ...draft, invoiceNumber: " iocl / 91 " }, suppliers, [invoice])).toBe(invoice);
+    expect(findDuplicateInvoiceForDraft({ ...draft, supplierGSTIN: "", supplierName: "Different Supplier", invoiceNumber: "IOCL/91" }, suppliers, [invoice])).toBeUndefined();
   });
 
   it("never includes document bytes, receipt or payment instructions", () => {

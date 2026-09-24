@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileCheck2, PackageX, RefreshCw, ShieldCheck, X } from "lucide-react";
-import type { InvoiceImportPolicy, ProductPriceApprovalNotice, PurchaseInvoice, PurchasesBootstrap } from "../lib/api";
+import type { InvoiceImportPolicy, ProductForm, ProductPriceApprovalNotice, PurchaseInvoice, PurchasesBootstrap } from "../lib/api";
 import { api, ApiRequestError } from "../lib/api";
 import { buildConfirmedPurchaseInput, compatibleTanks, findDuplicateInvoice, findMatchingProduct, findMatchingSupplier, onlyCompatibleTankId, validateConfirmedPurchase, validateReceiptSelections } from "../lib/confirmed-purchase-submission";
 import { flushInvoiceImportPerformance, recordInvoiceImportPerformance } from "../lib/invoice-import-performance";
@@ -32,6 +32,7 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
   const [created, setCreated] = useState<PurchaseInvoice | null>(null);
   const [recoveredReceipt, setRecoveredReceipt] = useState(false);
   const [priceApprovals, setPriceApprovals] = useState<ProductPriceApprovalNotice[]>([]);
+  const [creatingCatalog, setCreatingCatalog] = useState<string | null>(null);
   const stationAssessment = useMemo(() => assessInvoiceStation(draft.consigneeName, stationName), [draft.consigneeName, stationName]);
   const dueDate = draft.dueDate || defaultPurchaseDueDate(draft.invoiceDate);
 
@@ -81,6 +82,33 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
   ], [data, draft, productIds, receiveNow, stationAvailable, stationId, stationAssessment, supplierId, tankIds]);
   const duplicate = findDuplicateInvoice(supplierId, draft.invoiceNumber, data?.invoices ?? []);
   const canReceiveExisting = Boolean(duplicate && !duplicate.receipt && receiveNow);
+
+  const createReviewedSupplier = async () => {
+    if (!data || !draft.supplierName.trim() || creatingCatalog) return;
+    setCreatingCatalog("supplier"); setError("");
+    try {
+      const result = await api.createSupplier({ name: draft.supplierName.trim(), code: uniqueCode(draft.supplierName, data.suppliers.map(item => item.code)), taxId: draft.supplierGSTIN.trim() || undefined, paymentTerms: 3, active: true });
+      setData(current => current ? { ...current, suppliers: [...current.suppliers, result.supplier] } : current);
+      setSupplierId(result.supplier.id); setConfirmed(false);
+    } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : "The reviewed supplier could not be added."); }
+    finally { setCreatingCatalog(null); }
+  };
+
+  const createReviewedProduct = async (index: number) => {
+    if (!data || creatingCatalog) return;
+    const line = draft.lines[index];
+    if (!line) return;
+    setCreatingCatalog(`product-${index}`); setError("");
+    try {
+      const form = proposedProduct(line, data.products.map(item => item.code), draft.invoiceDate);
+      const result = await api.createProduct(form);
+      setData(current => current ? { ...current, products: [...current.products, result.product] } : current);
+      const nextProducts = [...productIds]; const nextTanks = [...tankIds];
+      nextProducts[index] = result.product.id; nextTanks[index] = null;
+      setProductIds(nextProducts); setTankIds(nextTanks); setConfirmed(false);
+    } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : "The reviewed product could not be added."); }
+    finally { setCreatingCatalog(null); }
+  };
 
   const submit = async () => {
     if (isDemo || !policy?.enabled || saving || created || !confirmed || validationErrors.length || (duplicate && !canReceiveExisting)) return;
@@ -133,9 +161,9 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
 
         <label className="invoice-submit-stock"><input type="checkbox" checked={receiveNow} onChange={event => { setReceiveNow(event.target.checked); setConfirmed(false); }}/><span><strong>Receive this stock now</strong><small>Creates the receipt and inventory movements at the time you confirm.</small></span></label>
 
-        <label className="invoice-submit-field"><span>Existing supplier</span><select aria-label="Existing supplier" value={supplierId} onChange={event => { setSupplierId(event.target.value); setConfirmed(false); }} disabled={!data || isDemo}><option value="">Choose the supplier</option>{data?.suppliers.map(supplier => <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.taxId ? ` · ${supplier.taxId}` : ""}</option>)}</select><small>{supplierId ? "Please confirm that this is the supplier named on the document." : "FuelNerve will not create a new supplier automatically."}</small></label>
+        <label className="invoice-submit-field"><span>Supplier</span><select aria-label="Existing supplier" value={supplierId} onChange={event => { setSupplierId(event.target.value); setConfirmed(false); }} disabled={!data || isDemo || Boolean(creatingCatalog)}><option value="">No matching supplier found</option>{data?.suppliers.map(supplier => <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.taxId ? ` · ${supplier.taxId}` : ""}</option>)}</select>{supplierId ? <small className="invoice-match-note matched">Matched to an existing supplier. Confirm the selection.</small> : <span className="invoice-new-record"><small className="invoice-match-note new">New supplier recognised · {draft.supplierName}{draft.supplierGSTIN ? ` · GSTIN ${draft.supplierGSTIN}` : ""}</small><button type="button" disabled={isDemo || Boolean(creatingCatalog)} onClick={() => void createReviewedSupplier()}>{creatingCatalog === "supplier" ? "Adding…" : "Add reviewed supplier"}</button></span>}</label>
 
-        <section className="invoice-submit-lines"><header><div><h3>Products and receiving tanks</h3><p>Confirm where each OCR-read quantity will be received. A sole compatible tank is selected automatically.</p></div></header>{draft.lines.map((line, index) => { const productId = productIds[index] ?? ""; const product = data?.products.find(item => item.id === productId); const tanks = compatibleTanks(data?.stations ?? [], stationId, productId); return <article key={line.id}><span><strong>{line.description}</strong><small>{number(Number(line.quantity))} {line.unit || "units"} · {money(Number(line.quantity) * Number(line.unitRate))}</small></span><div className="invoice-submit-line-fields"><select aria-label={`Product for ${line.description}`} value={productId} onChange={event => { const selectedProductId = event.target.value || null; const nextProducts = [...productIds]; const nextTanks = [...tankIds]; nextProducts[index] = selectedProductId; nextTanks[index] = selectedProductId && data ? onlyCompatibleTankId(data.stations, stationId, selectedProductId) : null; setProductIds(nextProducts); setTankIds(nextTanks); setConfirmed(false); }} disabled={!data || isDemo}><option value="">Choose product</option>{data?.products.map(item => <option key={item.id} value={item.id}>{item.name} · {item.code}</option>)}</select>{receiveNow && product?.tankLinked && <select aria-label={`Receiving tank for ${line.description}`} value={tankIds[index] ?? ""} onChange={event => { const next = [...tankIds]; next[index] = event.target.value || null; setTankIds(next); setConfirmed(false); }} disabled={!data || isDemo}><option value="">Choose receiving tank</option>{tanks.map(tank => <option key={tank.id} value={tank.id}>{tank.code}</option>)}</select>}</div></article>; })}</section>
+        <section className="invoice-submit-lines"><header><div><h3>Products and receiving tanks</h3><p>Each OCR line remains separate. Confirm product, quantity, rate, tax and receiving tank before saving.</p></div></header>{draft.lines.map((line, index) => { const productId = productIds[index] ?? ""; const product = data?.products.find(item => item.id === productId); const tanks = compatibleTanks(data?.stations ?? [], stationId, productId); const base=Number(line.quantity)*Number(line.unitRate); return <article key={line.id}><span><strong>{line.description}</strong><small>{line.product || "Unclassified"}{line.hsnCode ? ` · HSN ${line.hsnCode}` : ""}</small><small>{number(Number(line.quantity))} {line.unit || "units"} × {money(Number(line.unitRate))} · Tax {number(Number(line.taxRate)||0)}% · Base {money(base)}</small><em className={productId ? "matched" : "new"}>{productId ? `Matched · ${product?.name}` : "New product recognised · review before adding"}</em></span><div className="invoice-submit-line-fields"><select aria-label={`Product for ${line.description}`} value={productId} onChange={event => { const selectedProductId = event.target.value || null; const nextProducts = [...productIds]; const nextTanks = [...tankIds]; nextProducts[index] = selectedProductId; nextTanks[index] = selectedProductId && data ? onlyCompatibleTankId(data.stations, stationId, selectedProductId) : null; setProductIds(nextProducts); setTankIds(nextTanks); setConfirmed(false); }} disabled={!data || isDemo || Boolean(creatingCatalog)}><option value="">No matching product found</option>{data?.products.map(item => <option key={item.id} value={item.id}>{item.name} · {item.code}</option>)}</select>{!productId && <button type="button" className="invoice-add-record" disabled={isDemo || Boolean(creatingCatalog)} onClick={() => void createReviewedProduct(index)}>{creatingCatalog === `product-${index}` ? "Adding…" : "Add reviewed product"}</button>}{receiveNow && product?.tankLinked && <select aria-label={`Receiving tank for ${line.description}`} value={tankIds[index] ?? ""} onChange={event => { const next = [...tankIds]; next[index] = event.target.value || null; setTankIds(next); setConfirmed(false); }} disabled={!data || isDemo}><option value="">Choose receiving tank</option>{tanks.map(tank => <option key={tank.id} value={tank.id}>{tank.code}</option>)}</select>}</div></article>; })}</section>
 
         <dl className="invoice-submit-facts"><div><dt>Invoice</dt><dd>{draft.invoiceNumber}</dd></div><div><dt>Invoice date</dt><dd>{date(draft.invoiceDate)}</dd></div><div><dt>Due date · T+3</dt><dd>{dueDate ? date(dueDate) : "Check invoice date"}</dd></div><div><dt>Unpaid amount</dt><dd>{money(Number(draft.totalAmount))}</dd></div></dl>
 
@@ -154,6 +182,22 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
 
 function money(value: number) { return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value); }
 function number(value: number) { return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 3 }).format(value); }
+function uniqueCode(value: string, existing: string[]) {
+  const base = value.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 24) || "OCR-RECORD";
+  const used = new Set(existing.map(item => item.toUpperCase()));
+  if (!used.has(base)) return base;
+  for (let suffix = 2; suffix < 1000; suffix += 1) { const code = `${base.slice(0, 20)}-${suffix}`; if (!used.has(code)) return code; }
+  return `${base.slice(0, 16)}-${Date.now().toString().slice(-6)}`;
+}
+function proposedProduct(line: EditableInvoiceDraft["lines"][number], existingCodes: string[], invoiceDate: string): ProductForm {
+  const classification = line.product.toUpperCase();
+  const isFuel = ["MS", "HSD", "PETROL", "DIESEL", "EBMS"].some(value => classification.includes(value));
+  const isDef = classification.includes("DEF");
+  const sourceUnit = line.unit.toUpperCase().replace(/[^A-Z]/g, "");
+  const unit = sourceUnit === "KG" || sourceUnit === "KILOGRAM" ? "KILOGRAM" : sourceUnit === "L" || sourceUnit === "LTR" || sourceUnit === "LITRE" || sourceUnit === "KL" ? "LITRE" : "UNIT";
+  const purchasePrice = Math.max(0, Number(line.unitRate) / (sourceUnit === "KL" && unit === "LITRE" ? 1000 : 1));
+  return { name: line.description.trim(), code: uniqueCode(line.product || line.description, existingCodes), hsnCode: line.hsnCode.trim(), category: isFuel ? "FUEL" : isDef ? "DEF" : "OTHER", unit, purchasePrice, ...(invoiceDate ? { purchasePriceEffectiveFrom: `${invoiceDate}T00:00:00.000Z` } : {}), sellingPrice: purchasePrice, inventoryTracked: true, tankLinked: false, meterLinked: false, isService: false, active: true, taxCategoryId: null, customCategoryId: null };
+}
 function date(value: string) {
   const [year, month, day] = value.split("-").map(Number);
   if (!year || !month || !day) return value;

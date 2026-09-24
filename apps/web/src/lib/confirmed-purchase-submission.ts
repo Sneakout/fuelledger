@@ -62,6 +62,11 @@ export function findDuplicateInvoice(supplierId: string, invoiceNumber: string, 
   return invoices.find(invoice => invoice.supplier.id === supplierId && normalize(invoice.invoiceNumber) === number);
 }
 
+export function findDuplicateInvoiceForDraft(draft: EditableInvoiceDraft, suppliers: Supplier[], invoices: PurchaseInvoice[]) {
+  const supplierId = findMatchingSupplier(draft, suppliers);
+  return supplierId ? findDuplicateInvoice(supplierId, draft.invoiceNumber, invoices) : undefined;
+}
+
 export function validateConfirmedPurchase(draft: EditableInvoiceDraft, stationId: string, supplierId: string) {
   const dueDate = draft.dueDate || defaultPurchaseDueDate(draft.invoiceDate);
   const errors = validateEditableInvoiceDraft({ ...draft, dueDate });

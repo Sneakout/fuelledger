@@ -242,7 +242,12 @@ struct InvoiceReviewView: View {
                             }
                         }
                     }
-                    InvoiceLineEditor(line: $lines[index], products: references?.products ?? [], station: station)
+                    InvoiceLineEditor(
+                        line: $lines[index],
+                        products: references?.products ?? [],
+                        station: station,
+                        onAddTankSplit: { addTankSplit(after: index) }
+                    )
                 }
                 .padding(12)
                 .background(FuelNerveTheme.canvas, in: RoundedRectangle(cornerRadius: 16))
@@ -612,6 +617,28 @@ struct InvoiceReviewView: View {
         return !product.tankLinked || !line.tankId.isEmpty
     }
 
+    private func addTankSplit(after index: Int) {
+        guard lines.indices.contains(index), let station else { return }
+        let source = lines[index]
+        let compatibleTanks = station.tanks.filter { $0.productId == source.productId }
+        guard compatibleTanks.count > 1 else { return }
+        let nextTank = compatibleTanks.first { $0.id != source.tankId } ?? compatibleTanks[0]
+        lines[index].isExpanded = true
+        let split = DraftLine(
+            productId: source.productId,
+            tankId: nextTank.id,
+            description: source.description,
+            quantity: 0,
+            sourceUnit: source.sourceUnit,
+            unitCost: source.unitCost,
+            taxRate: source.taxRate,
+            hsnCode: source.hsnCode,
+            detectedProduct: source.detectedProduct,
+            isExpanded: true
+        )
+        lines.insert(split, at: index + 1)
+    }
+
     @MainActor private func readDocument() async {
         guard phase == .checking, errorMessage == nil else { return }
         do {
@@ -788,6 +815,7 @@ private struct InvoiceLineEditor: View {
     @Binding var line: DraftLine
     let products: [InvoiceImportBootstrap.Product]
     let station: InvoiceImportBootstrap.Station?
+    let onAddTankSplit: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
@@ -804,6 +832,31 @@ private struct InvoiceLineEditor: View {
                     if line.taxRate > 0 { Text("incl. product taxes").font(.caption2).foregroundStyle(.secondary) }
                 }
                 .multilineTextAlignment(.trailing)
+            }
+
+            if let product = selectedProduct, product.tankLinked {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("RECEIVING TANK").brandFieldLabel()
+                    Picker("Receiving tank", selection: $line.tankId) {
+                        Text("Choose tank").tag("")
+                        ForEach(compatibleTanks) { Text($0.code).tag($0.id) }
+                    }
+                    .fuelNervePickerField()
+                    if compatibleTanks.count > 1 {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Choose where this quantity will be received.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Spacer()
+                            Button(action: onAddTankSplit) {
+                                Label("Split across tanks", systemImage: "arrow.triangle.branch")
+                                    .font(.caption.weight(.bold))
+                            }
+                            .foregroundStyle(FuelNerveTheme.green)
+                        }
+                    }
+                }
+                .padding(10)
+                .background(FuelNerveTheme.green.opacity(0.06), in: RoundedRectangle(cornerRadius: 13))
             }
 
             DisclosureGroup(isExpanded: $line.isExpanded) {
@@ -836,13 +889,6 @@ private struct InvoiceLineEditor: View {
                         Text("Detected as \(line.detectedProduct). Choose the matching FuelNerve product before receiving stock.")
                             .font(.caption2).foregroundStyle(FuelNerveTheme.gold)
                     }
-                    if let product = products.first(where: { $0.id == line.productId }), product.tankLinked {
-                        Picker("Receiving tank", selection: $line.tankId) {
-                            Text("Choose tank").tag("")
-                            ForEach(station?.tanks.filter { $0.productId == product.id } ?? []) { Text($0.code).tag($0.id) }
-                        }
-                        .fuelNervePickerField()
-                    }
                 }
                 .padding(.top, 9)
             } label: {
@@ -859,6 +905,15 @@ private struct InvoiceLineEditor: View {
                 line.tankId = station?.tanks.first(where: { $0.productId == productId })?.id ?? ""
             }
         }
+    }
+
+    private var selectedProduct: InvoiceImportBootstrap.Product? {
+        products.first(where: { $0.id == line.productId })
+    }
+
+    private var compatibleTanks: [InvoiceImportBootstrap.Station.Configuration.Tank] {
+        guard let selectedProduct else { return [] }
+        return station?.tanks.filter { $0.productId == selectedProduct.id } ?? []
     }
 
     private var productSummary: String {
