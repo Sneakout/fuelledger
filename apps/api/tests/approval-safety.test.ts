@@ -147,6 +147,7 @@ describe('approval safety boundary', async () => {
     ]);
     tx.station.findFirst.mockResolvedValue({ id: 'station-1', name: 'Saleema Petroleum', code: 'SALEEMA' });
     tx.user.findFirst.mockResolvedValue({ id: 'manager-1', name: 'Manager', role: 'MANAGER' });
+    tx.approvalRequest.findFirst.mockResolvedValue(null);
     tx.approvalRequest.findUnique.mockResolvedValue(null);
     tx.approvalRequest.create.mockImplementation(async ({ data }: any) => ({
       ...data, id: `approval-${data.payload.productId}`, status: 'PENDING', requestedAt: new Date(),
@@ -171,5 +172,27 @@ describe('approval safety boundary', async () => {
     expect(created.find(row => row.payload.productId === 'hsd')?.payload.proposedPurchasePrice).toBe(87.28);
     expect(created.find(row => row.payload.productId === 'ms')?.payload.proposedPurchasePrice).toBe(82.5);
     expect(notifyProductPriceApprovalRequired).toHaveBeenCalledTimes(2);
+  });
+
+  it('reuses a confirmed dealer margin without requesting another decision', async () => {
+    tx.product.findMany.mockResolvedValue([
+      { id: 'hsd', name: 'High Speed Diesel', code: 'HSD', unit: 'LITRE', purchasePrice: 88, sellingPrice: 94 },
+    ]);
+    tx.station.findFirst.mockResolvedValue({ id: 'station-1', name: 'Saleema Petroleum', code: 'SALEEMA' });
+    tx.user.findFirst.mockResolvedValue({ id: 'owner-1', name: 'Owner', role: 'OWNER' });
+    tx.approvalRequest.findFirst.mockResolvedValueOnce({ id: 'approved-margin' });
+
+    const approvals = await requestProductPriceChangeFromInvoice('org-1', 'owner-1', {
+      id: 'invoice-2', invoiceNumber: 'INV-2', invoiceDate: new Date('2026-09-23T00:00:00.000Z'), stationId: 'station-1',
+    }, {
+      stationId: 'station-1', supplierId: 'supplier-1', invoiceNumber: 'INV-2', invoiceDate: '2026-09-23T00:00:00.000Z', dueDate: '2026-09-26T00:00:00.000Z',
+      invoiceTotal: 100_100, taxAmount: 0, receiveNow: true, paidNow: false,
+      lines: [{ productId: 'hsd', description: 'HSD', quantity: 1_000, sourceUnit: 'LITRE', unitCost: 100.1, taxRate: 0 }],
+    });
+
+    expect(approvals).toEqual([]);
+    expect(tx.approvalRequest.create).not.toHaveBeenCalled();
+    expect(Number(tx.product.update.mock.calls[0]![0].data.purchasePrice)).toBe(100.1);
+    expect(Number(tx.product.update.mock.calls[0]![0].data.sellingPrice)).toBe(106.1);
   });
 });

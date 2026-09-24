@@ -1035,7 +1035,10 @@ export const expenseCategoryInputSchema = z.object({
 });
 export const expenseInputSchema = z.object({
   stationId: z.string().cuid(),
-  categoryId: z.string().cuid(),
+  // Built-in categories use stable `default_*` identifiers so they can be
+  // installed idempotently for every organization. The API still verifies
+  // that the submitted category belongs to the caller's organization.
+  categoryId: z.string().trim().min(1).max(64),
   description: z.string().trim().min(3).max(160),
   amount: z.coerce.number().positive(),
   paymentMethod: z.enum(settlementMethods),

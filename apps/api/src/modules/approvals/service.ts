@@ -92,7 +92,8 @@ export async function requestProductPriceChangeFromInvoice(
     const currentPurchasePrice = Number(product.purchasePrice);
     const currentSellingPrice = Number(product.sellingPrice);
     if (Math.abs(proposedPurchasePrice - currentPurchasePrice) < 0.01) continue;
-    const proposedSellingPrice = roundPrice(Math.max(0, currentSellingPrice + proposedPurchasePrice - currentPurchasePrice));
+    const dealerMargin = roundPrice(currentSellingPrice - currentPurchasePrice);
+    const proposedSellingPrice = roundPrice(Math.max(0, proposedPurchasePrice + dealerMargin));
     const payload = {
       stationId: station.id,
       productId: product.id,
@@ -114,6 +115,41 @@ export async function requestProductPriceChangeFromInvoice(
       evidencePath: `/purchases?invoiceId=${encodeURIComponent(invoice.id)}`,
     };
     const requestKey = `invoice-price:${invoice.id}:${product.id}`;
+    const marginWasConfirmed = await prisma.approvalRequest.findFirst({
+      where: { organizationId, actionType: 'PRODUCT_PRICE_CHANGE', status: 'APPROVED', executionId: product.id },
+      select: { id: true },
+    });
+    if (marginWasConfirmed) {
+      const now = new Date();
+      const purchaseEffectiveFrom = invoice.invoiceDate;
+      const purchaseActivationFrom = purchaseEffectiveFrom <= now ? now : purchaseEffectiveFrom;
+      await prisma.$transaction(async tx => {
+        await tx.productPurchasePrice.upsert({
+          where: { productId_effectiveFrom: { productId: product.id, effectiveFrom: purchaseEffectiveFrom } },
+          update: { price: new Prisma.Decimal(proposedPurchasePrice) },
+          create: { productId: product.id, effectiveFrom: purchaseEffectiveFrom, price: new Prisma.Decimal(proposedPurchasePrice) },
+        });
+        if (purchaseActivationFrom.getTime() !== purchaseEffectiveFrom.getTime()) {
+          await tx.productPurchasePrice.upsert({
+            where: { productId_effectiveFrom: { productId: product.id, effectiveFrom: purchaseActivationFrom } },
+            update: { price: new Prisma.Decimal(proposedPurchasePrice) },
+            create: { productId: product.id, effectiveFrom: purchaseActivationFrom, price: new Prisma.Decimal(proposedPurchasePrice) },
+          });
+        }
+        await tx.productSellingPrice.upsert({
+          where: { productId_effectiveFrom: { productId: product.id, effectiveFrom: purchaseActivationFrom } },
+          update: { price: new Prisma.Decimal(proposedSellingPrice) },
+          create: { productId: product.id, effectiveFrom: purchaseActivationFrom, price: new Prisma.Decimal(proposedSellingPrice) },
+        });
+        if (purchaseActivationFrom <= now) {
+          await tx.product.update({
+            where: { id: product.id },
+            data: { purchasePrice: new Prisma.Decimal(proposedPurchasePrice), sellingPrice: new Prisma.Decimal(proposedSellingPrice) },
+          });
+        }
+      });
+      continue;
+    }
     const previous = await prisma.approvalRequest.findUnique({ where: { organizationId_requestKey: { organizationId, requestKey } }, include });
     if (previous) { approvals.push(present(previous)); continue; }
     try {
