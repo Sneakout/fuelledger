@@ -99,5 +99,15 @@ export async function renderLocalPdfForOcr(file: File): Promise<LocalPdfImagesRe
 }
 
 function canvasToBlob(canvas: HTMLCanvasElement) {
-  return new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("PDF page rendering failed.")), "image/png"));
+  return new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => {
+    if (blob) return resolve(blob);
+    try {
+      const encoded = canvas.toDataURL("image/png").split(",")[1];
+      if (!encoded) throw new Error("PDF page rendering failed.");
+      const bytes = atob(encoded);
+      const output = new Uint8Array(bytes.length);
+      for (let index = 0; index < bytes.length; index += 1) output[index] = bytes.charCodeAt(index);
+      resolve(new Blob([output], { type: "image/png" }));
+    } catch (error) { reject(error); }
+  }, "image/png"));
 }

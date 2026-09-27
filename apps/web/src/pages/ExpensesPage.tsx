@@ -140,13 +140,17 @@ export function ExpensesPage() {
       }));
       await load();
     } catch (item) {
-      setError(
-        item instanceof ApiRequestError
-          ? item.message
-          : item instanceof Error
+      if (item instanceof ApiRequestError && item.code === "OFFLINE_QUEUED") {
+        setMode(null);
+        setFile(null);
+        setForm((value) => ({ ...value, description: "", amount: 0, referenceNo: "", notes: "" }));
+      } else setError(
+          item instanceof ApiRequestError
             ? item.message
-            : "Unable to record expense.",
-      );
+            : item instanceof Error
+              ? item.message
+              : "Unable to record expense.",
+        );
     } finally {
       setSaving(false);
     }

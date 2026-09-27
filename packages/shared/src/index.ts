@@ -634,6 +634,7 @@ export const densityReadingInputSchema = z.object({
     .number()
     .min(600, "Enter a realistic density.")
     .max(1200, "Enter a realistic density."),
+  recordedAt: z.string().datetime().optional(),
 });
 export type DensityReadingInput = z.infer<typeof densityReadingInputSchema>;
 
@@ -696,6 +697,7 @@ export const saleInputSchema = z
     customerName: z.string().trim().min(2).max(120).nullable().optional(),
     vehicleNumber: z.string().trim().min(2).max(32).nullable().optional(),
     notes: z.string().trim().max(500).optional(),
+    occurredAt: z.string().datetime().optional(),
   })
   .superRefine((sale, context) => {
     const metered =
@@ -766,6 +768,7 @@ export const tankReadingInputSchema = z.object({
   physicalStock: z.coerce.number().min(0),
   dipReading: z.coerce.number().min(0).nullable().optional(),
   notes: z.string().trim().max(500).optional(),
+  recordedAt: z.string().datetime().optional(),
 });
 export type ReceiptInput = z.infer<typeof receiptInputSchema>;
 export type InventoryAdjustmentInput = z.infer<

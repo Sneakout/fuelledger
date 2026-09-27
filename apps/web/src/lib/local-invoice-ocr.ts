@@ -252,7 +252,7 @@ export function needsInvoiceTotalPass(text: string) {
 }
 
 async function cropImageForOcr(source: File | Blob, region: { top: number; height: number; left?: number; width?: number; scale?: number }): Promise<Blob> {
-  const image = await createImageBitmap(source);
+  const image = await decodeImageForCanvas(source);
   const sourceLeft = Math.max(0, Math.round(image.width * (region.left ?? 0)));
   const sourceWidth = Math.max(1, Math.min(image.width - sourceLeft, Math.round(image.width * (region.width ?? 1))));
   const sourceTop = Math.max(0, Math.round(image.height * region.top));
@@ -263,14 +263,14 @@ async function cropImageForOcr(source: File | Blob, region: { top: number; heigh
   canvas.height = Math.round(sourceHeight * scale);
   const context = canvas.getContext("2d", { alpha: false });
   if (!context) {
-    image.close();
+    image.dispose();
     throw new Error("The invoice image could not be checked.");
   }
   context.fillStyle = "#fff";
   context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(image, sourceLeft, sourceTop, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
-  image.close();
-  const cropped = await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("The invoice image could not be checked.")), "image/png"));
+  context.drawImage(image.source, sourceLeft, sourceTop, sourceWidth, sourceHeight, 0, 0, canvas.width, canvas.height);
+  image.dispose();
+  const cropped = await canvasBlob(canvas, "image/png");
   canvas.width = 1;
   canvas.height = 1;
   return cropped;
@@ -286,10 +286,10 @@ async function prepareImages(file: File): Promise<{ images: Array<File | Blob>; 
 const MAX_IMAGE_PIXELS = 4_000_000;
 
 async function resizeImageForOcr(file: File): Promise<Blob> {
-  const image = await createImageBitmap(file);
+  const image = await decodeImageForCanvas(file);
   const scale = Math.min(1, Math.sqrt(MAX_IMAGE_PIXELS / (image.width * image.height)));
   if (scale === 1) {
-    image.close();
+    image.dispose();
     return file;
   }
 
@@ -298,17 +298,58 @@ async function resizeImageForOcr(file: File): Promise<Blob> {
   canvas.height = Math.max(1, Math.round(image.height * scale));
   const context = canvas.getContext("2d", { alpha: false });
   if (!context) {
-    image.close();
+    image.dispose();
     throw new Error("The invoice image could not be prepared.");
   }
   context.fillStyle = "#fff";
   context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
-  image.close();
-  const resized = await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("The invoice image could not be prepared.")), "image/jpeg", 0.9));
+  context.drawImage(image.source, 0, 0, canvas.width, canvas.height);
+  image.dispose();
+  const resized = await canvasBlob(canvas, "image/jpeg", 0.9);
   canvas.width = 1;
   canvas.height = 1;
   return resized;
+}
+
+type CanvasImage = { source: CanvasImageSource; width: number; height: number; dispose: () => void };
+
+export async function decodeImageForCanvas(source: Blob): Promise<CanvasImage> {
+  if (typeof globalThis.createImageBitmap === "function") {
+    try {
+      const bitmap = await globalThis.createImageBitmap(source);
+      return { source: bitmap, width: bitmap.width, height: bitmap.height, dispose: () => bitmap.close() };
+    } catch {
+      // Older Safari releases and some memory-constrained WebKit contexts can
+      // reject createImageBitmap for otherwise valid PNG/JPEG blobs.
+    }
+  }
+  const url = URL.createObjectURL(source);
+  try {
+    const image = new Image();
+    image.decoding = "async";
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("The invoice image could not be decoded by this browser."));
+      image.src = url;
+    });
+    return { source: image, width: image.naturalWidth || image.width, height: image.naturalHeight || image.height, dispose: () => { image.src = ""; URL.revokeObjectURL(url); } };
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
+}
+
+async function canvasBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
+  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, type, quality));
+  if (blob) return blob;
+  // A small number of Safari versions return null from canvas.toBlob after a
+  // large draw. The data URL route is slower but keeps local OCR functional.
+  const [header, encoded] = canvas.toDataURL(type, quality).split(",");
+  if (!header || !encoded) throw new Error("The invoice image could not be prepared.");
+  const bytes = atob(encoded);
+  const output = new Uint8Array(bytes.length);
+  for (let index = 0; index < bytes.length; index += 1) output[index] = bytes.charCodeAt(index);
+  return new Blob([output], { type: header.match(/^data:([^;]+)/)?.[1] ?? type });
 }
 
 function isPdf(file: File) {

@@ -30,7 +30,11 @@ export function FuelTankBank({ tanks, asOf }: { tanks: Tank[]; asOf: string }) {
       setEditing(null);
       setDensity('');
     } catch (item) {
-      setError(item instanceof ApiRequestError ? item.message : 'Unable to save density.');
+      if (item instanceof ApiRequestError && item.code === 'OFFLINE_QUEUED') {
+        setSaved(current => ({ ...current, [tank.id]: value }));
+        setEditing(null);
+        setDensity('');
+      } else setError(item instanceof ApiRequestError ? item.message : 'Unable to save density.');
     } finally {
       setSaving(false);
     }
@@ -39,7 +43,7 @@ export function FuelTankBank({ tanks, asOf }: { tanks: Tank[]; asOf: string }) {
   const counters: Record<string, number> = {};
   return <section className="fuel-bank">
     <header>
-      <div><span className="eyebrow">Fuel tank stock</span><h2>Estimated tank levels</h2><p>Last closing dip plus recorded movements since then. Book balances are shown separately.</p></div>
+      <div><span className="eyebrow">Fuel tank stock</span><h2>Estimated tank levels</h2><p>Last closing dip plus recorded movements since then.</p></div>
       <Link to="/inventory">Update inventory <ArrowRight /></Link>
     </header>
     {tanks.length ? <div className="fuel-bank-grid">{tanks.map(tank => {
@@ -51,7 +55,7 @@ export function FuelTankBank({ tanks, asOf }: { tanks: Tank[]; asOf: string }) {
       const estimatedFill = tank.workingCapacity > 0 ? Math.max(0, estimatedStock / tank.workingCapacity * 100) : 0;
       const overflow = estimatedStock > tank.workingCapacity || tank.status === 'OVER_CAPACITY';
       const difference = tank.bookDifferenceFromLastDip;
-      const mismatch = difference !== null && difference !== undefined && Math.abs(difference) > 0.001;
+      const mismatch = difference !== null && difference !== undefined && Math.abs(difference) > 50;
       return <article className={`fuel-orb-card ${colour}${overflow ? ' over-capacity' : ''}`} key={tank.id}>
         <div className="fuel-orb" aria-label={`${tank.productCode} Tank ${sequence}: ${amount(estimatedFill)} percent estimated stock`}>
           <span className="fuel-liquid" style={{ height: `${Math.min(100, estimatedFill)}%` }} />
@@ -67,11 +71,9 @@ export function FuelTankBank({ tanks, asOf }: { tanks: Tank[]; asOf: string }) {
             <div><dt>Selling price</dt><dd>₹{amount(tank.sellingPrice)}/L</dd></div>
             <div className="density-cell"><dt>Morning density</dt><dd>{todayDone && shownDensity !== null ? <span className="density-saved"><Check /> {amount(shownDensity)} kg/m³</span> : editing === tank.id ? <span className="density-entry"><input autoFocus type="number" min="600" max="1200" step=".001" value={density} onChange={event => setDensity(event.target.value)} placeholder="e.g. 745" /><button disabled={saving} onClick={() => void save(tank)}>{saving ? 'Saving…' : 'Save'}</button><button onClick={() => { setEditing(null); setError(''); }}>Cancel</button>{error && <small>{error}</small>}</span> : <button className="density-due" onClick={() => { setEditing(tank.id); setDensity(''); setError(''); }}>Enter morning density</button>}</dd></div>
           </dl>
-          {tank.expectedFromLastDip !== null && tank.expectedFromLastDip !== undefined && <div className={`tank-stock-comparison${mismatch ? ' has-difference' : ''}`}>
-            <span>Book inventory</span>
-            <strong>{amount(tank.bookStock)} L</strong>
-            {mismatch && <p>Books are {amount(Math.abs(difference))} L {difference > 0 ? 'higher' : 'lower'} than the tank estimate. Review the earlier stock records in <Link to="/inventory">Inventory</Link>.</p>}
-          </div>}
+          {mismatch && tank.expectedFromLastDip !== null && tank.expectedFromLastDip !== undefined && <Link className="tank-stock-variance" to="/inventory" aria-label={`Review ${tank.productCode} Tank ${sequence} stock variance`}>
+            <span>Book {amount(tank.bookStock)} L</span><i>·</i><span>Estimate {amount(tank.expectedFromLastDip)} L</span><strong>Variance {difference > 0 ? '+' : '−'}{amount(Math.abs(difference))} L</strong>
+          </Link>}
         </div>
       </article>;
     })}</div> : <div className="owner-all-clear compact"><Droplets /><h3>No MS or HSD tanks configured</h3><p>Add fuel tanks in Petrol Pump setup to see them here.</p></div>}

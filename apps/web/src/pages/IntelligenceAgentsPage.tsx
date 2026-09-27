@@ -260,9 +260,11 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
               rememberInvoiceImportPerformance("PDF_TEXT", startedAt, "WITHHELD");
             }
           } catch {
-            setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "error" } : invoice));
-            invoiceChecks.current.delete(item.id);
-            rememberInvoiceImportPerformance("PDF_TEXT", startedAt, "FAILED");
+            // Safari can reject PDF.js text-layer work even when the same PDF can
+            // still be rendered page-by-page. Keep the file alive and use OCR.
+            ocrItems.push(item);
+            setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "ocr", progress: 0, progressLabel: "Text layer unavailable · preparing OCR" } : invoice));
+            rememberInvoiceImportPerformance("PDF_TEXT", startedAt, "WITHHELD");
           }
         }
       } catch {
@@ -298,7 +300,7 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
           if (!controller.signal.aborted) {
             const message = caught instanceof Error && /too long/i.test(caught.message)
               ? "This invoice is taking too long. Try again with a clearer image."
-              : "Local OCR could not finish";
+              : "This browser could not finish reading the invoice. Try a clearer image or retry the PDF.";
             setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "error", progressLabel: message } : invoice));
           }
         } finally {

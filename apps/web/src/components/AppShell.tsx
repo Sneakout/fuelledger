@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { BadgeCheck, BarChart3, BookOpenCheck, Boxes, Building2, ChevronDown, CircleHelp, ClipboardList, CreditCard, Fuel, IndianRupee, LayoutDashboard, Lightbulb, Menu, Package, ReceiptIndianRupee, ShoppingCart, Users, X } from 'lucide-react';
 import { useAuth } from './AuthProvider';
 import { useStation } from './StationProvider';
+import { OfflineSyncStatus } from './OfflineSyncStatus';
 
 const nav = [
   ['Dashboard', '/', LayoutDashboard], ['Nerve Intelligence', '/insights', Lightbulb], ['Petrol Pumps', '/stations', Building2], ['Products', '/products', Package], ['Operations', '/operations', ClipboardList], ['Reconciliation', '/reconciliation', BadgeCheck], ['Inventory', '/inventory', Boxes], ['Sales', '/sales', IndianRupee], ['Purchases', '/purchases', ShoppingCart], ['Expenses', '/expenses', ReceiptIndianRupee], ['Customers', '/customers', Users], ['Accounting', '/accounting', BookOpenCheck], ['Reports', '/reports', BarChart3], ['Staff & access', '/staff', Users], ['Help / Customer Service', '/help', CircleHelp], ['Subscription', '/subscription', CreditCard], ['Growth desk', '/demo-leads', Users],
@@ -17,6 +18,6 @@ export function AppShell() {
       <div className="sidebar-foot"><span className="avatar">{user?.name.slice(0, 2).toUpperCase()}</span><div><strong>{user?.name}</strong><small>{user?.role.toLowerCase()}</small></div><button className="signout" onClick={() => void logout()}>Sign out</button></div>
     </aside>
     {open && <button className="backdrop" aria-label="Close menu" onClick={() => setOpen(false)}/>} 
-    <div className="workspace"><header className="topbar"><button className="icon-button menu" aria-label="Open menu" onClick={() => setOpen(true)}><Menu/></button><div><small>{user?.demoExpiresAt?'Interactive product tour':'Welcome back'}</small><strong>{user?.name}</strong></div><span className="status"><i/> {user?.demoExpiresAt?'Demo mode':'System ready'}</span></header>{user?.demoExpiresAt&&<div className="demo-banner"><span><strong>48-hour demo</strong> · Read-only product tour</span><span>Access ends {new Date(user.demoExpiresAt).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'})}</span></div>}<Outlet/></div>
+    <div className="workspace"><header className="topbar"><button className="icon-button menu" aria-label="Open menu" onClick={() => setOpen(true)}><Menu/></button><div><small>{user?.demoExpiresAt?'Interactive product tour':'Welcome back'}</small><strong>{user?.name}</strong></div><OfflineSyncStatus demo={Boolean(user?.demoExpiresAt)}/></header>{user?.demoExpiresAt&&<div className="demo-banner"><span><strong>48-hour demo</strong> · Read-only product tour</span><span>Access ends {new Date(user.demoExpiresAt).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'})}</span></div>}<Outlet/></div>
   </div>;
 }

@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [react()],
   server: { port: 5173 },
   build: {
+    manifest: 'asset-manifest.json',
     rollupOptions: {
       output: {
         // Tesseract appends `eng.traineddata.gz` to langPath at runtime.

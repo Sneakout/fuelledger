@@ -29,6 +29,20 @@ import type {
   User,
   VehicleInput,
 } from "@fuelledger/shared";
+import {
+  cacheOfflineResponse,
+  configureOfflineSync,
+  currentOfflineScope,
+  enqueueOfflineRequest,
+  isOfflineCacheable,
+  isOfflineQueueable,
+  markOffline,
+  markOnline,
+  readOfflineResponse,
+  startOfflineSync,
+  syncOfflineRequests,
+  type OfflineRequest,
+} from "./offline-sync";
 const API_URL = import.meta.env.VITE_API_URL ?? "/api";
 export class ApiRequestError extends Error {
   constructor(
@@ -36,11 +50,30 @@ export class ApiRequestError extends Error {
     public readonly code: string,
     public readonly requestId?: string,
     public readonly details?: unknown,
+    public readonly status?: number,
   ) {
     super(message);
   }
 }
+export class OfflineQueuedError extends ApiRequestError {
+  constructor(public readonly queueId: string) {
+    super(
+      "Saved securely on this device. FuelNerve will update the server automatically when the connection returns.",
+      "OFFLINE_QUEUED",
+    );
+  }
+}
 const inFlightSaves = new Map<string, Promise<unknown>>();
+async function queueOffline(method: "POST" | "PUT" | "PATCH", path: string, body: string, idempotencyKey: string) {
+  try {
+    return await enqueueOfflineRequest({ method, path, body, idempotencyKey });
+  } catch {
+    throw new ApiRequestError(
+      "This device could not store the record offline. Free some browser storage or reconnect before trying again.",
+      "OFFLINE_STORAGE_UNAVAILABLE",
+    );
+  }
+}
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!init?.method || !['POST', 'PUT', 'PATCH'].includes(init.method)) return rawRequest<T>(path, init);
   const signature = `${init.method}:${path}:${String(init.body ?? '')}`;
@@ -49,20 +82,40 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const pending = (async () => {
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(signature));
     const storageKey = 'fuelledger-save:' + Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
-    let key: string;
+    let key: string = crypto.randomUUID();
     try {
-      key = sessionStorage.getItem(storageKey) ?? crypto.randomUUID();
+      key = sessionStorage.getItem(storageKey) ?? key;
       sessionStorage.setItem(storageKey, key);
     } catch {
-      throw new ApiRequestError('Enable browser session storage before saving so interrupted saves can be retried safely.', 'SAVE_STORAGE_UNAVAILABLE');
+      // IndexedDB still preserves the key for queueable offline records. For
+      // online-only saves, the server receipt remains the source of truth.
+    }
+    const method = init.method as "POST" | "PUT" | "PATCH";
+    const body = String(init.body ?? "");
+    if (isOfflineQueueable(method, path) && currentOfflineScope() && typeof navigator !== "undefined" && !navigator.onLine) {
+      const item = await queueOffline(method, path, body, key);
+      try { sessionStorage.removeItem(storageKey); } catch { /* unavailable */ }
+      throw new OfflineQueuedError(item.id);
     }
     try {
       const result = await rawRequest<T>(path, { ...init, headers: { ...init.headers, 'Idempotency-Key': key } });
-      sessionStorage.removeItem(storageKey);
+      try { sessionStorage.removeItem(storageKey); } catch { /* unavailable */ }
       return result;
     } catch (error) {
+      if (
+        error instanceof ApiRequestError &&
+        (error.code === "NETWORK_UNAVAILABLE" || (error.status ?? 0) >= 500 || ["SERVER_UNAVAILABLE", "DATABASE_UNAVAILABLE", "INTERNAL_ERROR"].includes(error.code)) &&
+        isOfflineQueueable(method, path) &&
+        currentOfflineScope()
+      ) {
+        const item = await queueOffline(method, path, body, key);
+        try { sessionStorage.removeItem(storageKey); } catch { /* unavailable */ }
+        throw new OfflineQueuedError(item.id);
+      }
       // Keep the key for an uncertain result; retrying must not create a second payment.
-      if (error instanceof ApiRequestError && !['SAVE_RETRY_REQUIRED', 'INTERNAL_ERROR', 'DATABASE_UNAVAILABLE', 'SERVER_UNAVAILABLE', 'INVALID_SERVER_RESPONSE'].includes(error.code)) sessionStorage.removeItem(storageKey);
+      if (error instanceof ApiRequestError && !['SAVE_RETRY_REQUIRED', 'INTERNAL_ERROR', 'DATABASE_UNAVAILABLE', 'SERVER_UNAVAILABLE', 'INVALID_SERVER_RESPONSE', 'NETWORK_UNAVAILABLE'].includes(error.code)) {
+        try { sessionStorage.removeItem(storageKey); } catch { /* unavailable */ }
+      }
       throw error;
     }
   })();
@@ -70,11 +123,32 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try { return await pending; } finally { inFlightSaves.delete(signature); }
 }
 async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      credentials: "include",
+      headers: { "Content-Type": "application/json", ...init?.headers },
+    });
+    markOnline();
+  } catch {
+    markOffline();
+    if (!init?.method || init.method === "GET") {
+      const cached = await readOfflineResponse<T>(path);
+      if (cached !== undefined) return cached;
+    }
+    throw new ApiRequestError(
+      "No connection. Reconnect and try again.",
+      "NETWORK_UNAVAILABLE",
+    );
+  }
+  if ((!init?.method || init.method === "GET") && response.status >= 500) {
+    const cached = await readOfflineResponse<T>(path);
+    if (cached !== undefined) {
+      markOffline();
+      return cached;
+    }
+  }
   if (response.status === 204) return undefined as T;
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
@@ -83,6 +157,9 @@ async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
         ? "The server returned an invalid response."
         : "FuelNerve could not connect to its server. Please try again shortly.",
       response.ok ? "INVALID_SERVER_RESPONSE" : "SERVER_UNAVAILABLE",
+      undefined,
+      undefined,
+      response.status,
     );
   }
   const body = (await response.json()) as T | ApiError;
@@ -93,9 +170,37 @@ async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
       apiError.error?.code ?? "REQUEST_FAILED",
       apiError.error?.requestId,
       apiError.error?.details,
+      response.status,
     );
   }
-  return body as T;
+  const result = body as T;
+  if ((!init?.method || init.method === "GET") && isOfflineCacheable(path))
+    await cacheOfflineResponse(path, result);
+  return result;
+}
+
+async function replayOfflineRequest(item: OfflineRequest) {
+  try {
+    await rawRequest(item.path, {
+      method: item.method,
+      body: item.body,
+      headers: { "Idempotency-Key": item.idempotencyKey },
+    });
+    return { ok: true } as const;
+  } catch (error) {
+    const problem = error instanceof ApiRequestError ? error : null;
+    return {
+      ok: false,
+      retryable: !problem || problem.code === "NETWORK_UNAVAILABLE" || problem.code === "SERVER_UNAVAILABLE" || (problem.status ?? 500) >= 500,
+      message: problem?.message ?? "This record could not be synchronized.",
+    } as const;
+  }
+}
+
+export function setOfflineUserScope(scope: string | null) {
+  configureOfflineSync(scope, replayOfflineRequest);
+  startOfflineSync();
+  if (scope) void syncOfflineRequests();
 }
 export const api = {
   login: (input: LoginInput) =>
@@ -188,7 +293,7 @@ export const api = {
   createSale: (input: SaleForm) =>
     request<{ sale: Sale }>("/sales", {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, occurredAt: input.occurredAt ?? new Date().toISOString() }),
     }),
   inventoryBootstrap: () => request<InventoryBootstrap>("/inventory/bootstrap"),
   createAdjustment: (input: AdjustmentForm) =>
@@ -199,12 +304,12 @@ export const api = {
   recordTankReading: (input: TankReadingForm) =>
     request<{ reading: unknown }>("/inventory/tank-readings", {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, recordedAt: input.recordedAt ?? new Date().toISOString() }),
     }),
   recordDensity: (input: DensityReadingInput) =>
     request<{ reading: unknown }>("/inventory/density-readings", {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, recordedAt: input.recordedAt ?? new Date().toISOString() }),
     }),
   reconciliationBootstrap: () =>
     request<ReconciliationBootstrap>("/reconciliation/bootstrap"),
@@ -234,7 +339,7 @@ export const api = {
   receiveCustomerPayment: (id: string, input: CustomerReceiptInput) =>
     request<{ receipt: unknown }>(`/customers/${id}/receipts`, {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify({ ...input, receivedAt: input.receivedAt ?? new Date().toISOString() }),
     }),
   purchasesBootstrap: () => request<PurchasesBootstrap>("/purchases/bootstrap"),
   purchaseReceiptTimingAudit: () => request<ReceiptTimingAudit>("/purchases/receipt-timing-audit"),

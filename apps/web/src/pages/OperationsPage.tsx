@@ -598,7 +598,7 @@ export function OperationsPage() {
             <div className="opening-nozzle-head" aria-hidden="true">
               <span>Nozzle & product</span>
               <span>Attendant (optional)</span>
-              <span>Opening meter (L)</span>
+              <span>Meter reading</span>
             </div>
             {config?.dispensers.flatMap((dispenser) =>
               dispenser.nozzles.map((nozzle) => {
@@ -629,9 +629,9 @@ export function OperationsPage() {
                       </select>
                     </label>
                     <span className="opening-nozzle-value">
-                      <small>Opening meter (L)</small>
+                      <small>Meter reading</small>
                       <output>
-                        {(reading?.value ?? 0).toLocaleString("en-IN")} L
+                        {(reading?.value ?? 0).toLocaleString("en-IN")}
                       </output>
                     </span>
                   </div>

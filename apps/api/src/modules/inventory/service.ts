@@ -128,5 +128,17 @@ export async function adjustInTransaction(tx: Prisma.TransactionClient, organiza
 export async function adjust(organizationId: string, userId: string, input: InventoryAdjustmentInput) {
   return safeTransaction(prisma, tx => adjustInTransaction(tx, organizationId, userId, input), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
-export async function recordTankReading(organizationId: string, userId: string, input: TankReadingInput) { const tank = await prisma.tank.findFirst({ where: { id: input.tankId, configuration: { stationId: input.stationId, station: { organizationId } }, status: 'ACTIVE' } }); if (!tank) throw new AppError(400, 'TANK_NOT_FOUND', 'Choose an active tank at this fuel station.'); return prisma.tankReading.create({ data: { organizationId, stationId: input.stationId, tankId: tank.id, physicalStock: new Prisma.Decimal(input.physicalStock), dipReading: input.dipReading === null || input.dipReading === undefined ? null : new Prisma.Decimal(input.dipReading), notes: input.notes || null, recordedById: userId } }); }
-export async function recordDensity(organizationId: string, userId: string, input: DensityReadingInput) { const tank = await prisma.tank.findFirst({ where: { id: input.tankId, configuration: { stationId: input.stationId, station: { organizationId } }, status: 'ACTIVE', product: { category: 'FUEL' } } }); if (!tank) throw new AppError(400, 'FUEL_TANK_NOT_FOUND', 'Choose an active petrol or diesel tank at this fuel station.'); return prisma.tankDensityReading.create({ data: { organizationId, stationId: input.stationId, tankId: tank.id, density: new Prisma.Decimal(input.density), recordedById: userId } }); }
+export async function recordTankReading(organizationId: string, userId: string, input: TankReadingInput) {
+  return safeTransaction(prisma, async tx => {
+    const tank = await tx.tank.findFirst({ where: { id: input.tankId, configuration: { stationId: input.stationId, station: { organizationId } }, status: 'ACTIVE' } });
+    if (!tank) throw new AppError(400, 'TANK_NOT_FOUND', 'Choose an active tank at this fuel station.');
+    return tx.tankReading.create({ data: { organizationId, stationId: input.stationId, tankId: tank.id, physicalStock: new Prisma.Decimal(input.physicalStock), dipReading: input.dipReading === null || input.dipReading === undefined ? null : new Prisma.Decimal(input.dipReading), notes: input.notes || null, recordedById: userId, ...(input.recordedAt ? { recordedAt: new Date(input.recordedAt) } : {}) } });
+  });
+}
+export async function recordDensity(organizationId: string, userId: string, input: DensityReadingInput) {
+  return safeTransaction(prisma, async tx => {
+    const tank = await tx.tank.findFirst({ where: { id: input.tankId, configuration: { stationId: input.stationId, station: { organizationId } }, status: 'ACTIVE', product: { category: 'FUEL' } } });
+    if (!tank) throw new AppError(400, 'FUEL_TANK_NOT_FOUND', 'Choose an active petrol or diesel tank at this fuel station.');
+    return tx.tankDensityReading.create({ data: { organizationId, stationId: input.stationId, tankId: tank.id, density: new Prisma.Decimal(input.density), recordedById: userId, ...(input.recordedAt ? { recordedAt: new Date(input.recordedAt) } : {}) } });
+  });
+}
