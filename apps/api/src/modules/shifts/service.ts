@@ -464,7 +464,7 @@ export async function closeShift(
     tx.ownerNotificationSettings.findUnique({ where: { organizationId }, select: { stockVarianceTolerance: true } }),
   ]);
   const tolerance = Number(varianceSettings?.stockVarianceTolerance ?? 50);
-  const unexplained = input.tankReadings.flatMap((tankReading) => {
+  const tankChecks = input.tankReadings.map((tankReading) => {
     const saved = shift.tankReadings.find((reading) => reading.tankId === tankReading.id)!;
     const bridge = bridgeByTank.get(tankReading.id);
     const nozzleIds = new Set(bridge?.nozzles.map((nozzle) => nozzle.id) ?? []);
@@ -476,10 +476,20 @@ export async function closeShift(
     const testingLoss = related.reduce((sum, reading) => sum + (reading.testingReturned ? 0 : reading.testingQuantity), 0);
     const expected = Number(saved.openingDip) + Number(bridge?.received ?? 0) + Number(bridge?.adjustments ?? 0) - sales - testingLoss;
     const difference = tankReading.value - expected;
-    return Math.abs(difference) - tolerance > 0.001
-      ? [{ tank: saved.tank.code, difference }]
-      : [];
+    return { tank: saved.tank.code, opening: Number(saved.openingDip), actual: tankReading.value, expected, difference, sales, testingLoss };
   });
+  const unchanged = tankChecks.filter((item) =>
+    item.sales + item.testingLoss > 0.001 &&
+    Math.abs(item.actual - item.opening) <= 0.001 &&
+    Math.abs(item.actual - item.expected) > 0.001,
+  );
+  if (unchanged.length)
+    throw new AppError(
+      400,
+      'TANK_READING_UNCHANGED',
+      `Enter the measured closing dip for ${unchanged.map((item) => `${item.tank} (expected about ${item.expected.toLocaleString('en-IN', { maximumFractionDigits: 3 })} L after ${(item.sales + item.testingLoss).toLocaleString('en-IN', { maximumFractionDigits: 3 })} L of nozzle stock movement)`).join(' and ')}. The opening reading cannot be reused when fuel moved. Remeasure the tank before closing the shift.`,
+    );
+  const unexplained = tankChecks.filter((item) => Math.abs(item.difference) - tolerance > 0.001);
   if (unexplained.length && !input.notes?.trim())
     throw new AppError(
       400,

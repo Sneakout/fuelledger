@@ -279,6 +279,15 @@ export function OperationsPage() {
   }
   async function close() {
     if (!active) return;
+    const unchangedTank = active.tankReadings.find((reading) => {
+      const actual = closeTanks.find((item) => item.id === reading.tankId)?.value ?? Number(reading.openingDip);
+      const bridge = bridgeValues(active, reading.tankId, actual, closeNozzles, testingReadings);
+      return bridge.sales + bridge.testingLoss > 0.001 && Math.abs(actual - Number(reading.openingDip)) <= 0.001 && Math.abs(bridge.difference) > 0.001;
+    });
+    if (unchangedTank) {
+      setError(`${unchangedTank.tank.code} still has its opening dip even though fuel moved through its nozzles. Remeasure the tank and enter the actual closing dip.`);
+      return;
+    }
     const needsStockNote = active.tankReadings.some((reading) => {
       const actual = closeTanks.find((item) => item.id === reading.tankId)?.value ?? Number(reading.openingDip);
       return Math.abs(bridgeValues(active, reading.tankId, actual, closeNozzles, testingReadings).difference) > (data?.stockVarianceTolerance ?? 50) + 0.001;

@@ -50,6 +50,8 @@ describe('closing shift', () => {
     const input = { closingCash: 7500, tankReadings:[{id:'t',value:895}], nozzleReadings:[{id:'n',value:1100,testingQuantity:5,testingReturned:false}], nozzleCollections:[{nozzleId:'n',amount:7500}] };
     await expect(closeShift('org','s',input)).rejects.toMatchObject({code:'STOCK_VARIANCE_NOTE_REQUIRED'});
     expect(tx.shift.updateMany).not.toHaveBeenCalled();
+    await expect(closeShift('org','s',{...input,tankReadings:[{id:'t',value:1000}],notes:'Opening dip copied at close'})).rejects.toMatchObject({code:'TANK_READING_UNCHANGED'});
+    expect(tx.shift.updateMany).not.toHaveBeenCalled();
     await closeShift('org','s',input);
     expect(tx.sale.create).toHaveBeenCalledTimes(1);
     expect(tx.sale.create.mock.calls[0][0].data.quantity.toNumber()).toBe(75);
