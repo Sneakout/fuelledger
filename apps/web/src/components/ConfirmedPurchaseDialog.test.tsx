@@ -45,6 +45,13 @@ describe("confirmed purchase dialog", () => {
     expect(onSubmitted).toHaveBeenCalledOnce();
   });
 
+  it("shows when a captured HSN will fill a missing product master value", async () => {
+    mocks.invoiceImportPolicy.mockResolvedValue({ enabled: true, monitored: false });
+    mocks.purchasesBootstrap.mockResolvedValue({ ...bootstrap, products: [{ ...bootstrap.products[0], hsnCode: null }] });
+    render(<ConfirmedPurchaseDialog draft={draft} stationId="station-1" stationName="FuelNerve Petroleum" isDemo={false} onBack={vi.fn()} onClose={vi.fn()} onSubmitted={vi.fn()}/>);
+    expect(await screen.findByText("HSN 27101944 will be added to High Speed Diesel.")).toBeInTheDocument();
+  });
+
   it("never offers submission in a demo", async () => {
     render(<ConfirmedPurchaseDialog draft={draft} stationId="station-1" stationName="FuelNerve Petroleum" isDemo onBack={vi.fn()} onClose={vi.fn()} onSubmitted={vi.fn()}/>);
     expect(await screen.findByText("Demo stays read-only")).toBeInTheDocument();

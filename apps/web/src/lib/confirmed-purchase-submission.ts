@@ -25,6 +25,15 @@ export function findMatchingProduct(description: string, product: string, hsnCod
   return exact.length === 1 ? exact[0]!.id : null;
 }
 
+export function assessProductHsn(capturedHsn: string, product?: Pick<PurchaseProduct, "name" | "hsnCode">) {
+  const captured = normalizeHsn(capturedHsn);
+  if (!captured || !product) return { status: "NONE" as const, message: "" };
+  const existing = normalizeHsn(product.hsnCode);
+  if (!existing) return { status: "WILL_ADD" as const, message: `HSN ${captured} will be added to ${product.name}.` };
+  if (existing === captured) return { status: "MATCH" as const, message: `HSN ${captured} matches the product master.` };
+  return { status: "CONFLICT" as const, message: `Invoice HSN ${captured} differs from product HSN ${existing}. The product master will not be changed.` };
+}
+
 export function compatibleTanks(stations: PurchaseStation[], stationId: string, productId: string) {
   return stations.find(station => station.id === stationId)?.configurations.flatMap(configuration => configuration.tanks).filter(tank => tank.productId === productId) ?? [];
 }
@@ -119,4 +128,9 @@ function isoDate(value: string) {
 
 function normalize(value: string | null | undefined) {
   return (value ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeHsn(value: string | null | undefined) {
+  const normalized = (value ?? "").replace(/\s+/g, "");
+  return /^\d{4,8}$/.test(normalized) ? normalized : "";
 }

@@ -8,6 +8,7 @@ import { effectivePriceAt } from '../../lib/effective-price.js';
 import { assertStockAvailable, bookStockAt } from '../../lib/stock.js';
 import { affectsClosedShift, shiftAtInstant } from '../../lib/shift-interval.js';
 import { collectionAccount, postJournal } from '../accounting/service.js';
+import { planProductHsnUpdates } from './hsn-sync.js';
 
 const invoiceInclude = {
   supplier: {
@@ -318,10 +319,19 @@ export async function createInvoice(organizationId: string, userId: string, inpu
   });
   const subtotal = lines.reduce((sum, line) => sum + line.quantity * line.unitCost, 0);
   const total = subtotal + input.taxAmount;
+  const productHsnUpdates = planProductHsnUpdates(lines, products);
   if (input.invoiceTotal !== undefined && Math.abs(input.invoiceTotal - total) >= 0.02)
     throw new AppError(400, 'INVOICE_TOTAL_MISMATCH', 'The confirmed invoice total does not match the line items and tax. Review the invoice before posting.');
   try {
     return await safeTransaction(prisma, async (tx) => {
+      await Promise.all(productHsnUpdates.map(({ productId, hsnCode }) => tx.product.updateMany({
+        where: {
+          id: productId,
+          organizationId,
+          OR: [{ hsnCode: null }, { hsnCode: '' }],
+        },
+        data: { hsnCode },
+      })));
       const invoice = await tx.purchaseInvoice.create({
         data: {
           organizationId,
@@ -501,7 +511,7 @@ export async function createInvoice(organizationId: string, userId: string, inpu
 export async function receiveInvoiceStock(organizationId: string, userId: string, invoiceId: string, input: PurchaseInvoiceReceiptInput, stationIds?: string[]) {
   const invoice = await prisma.purchaseInvoice.findFirst({
     where: { id: invoiceId, organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}) },
-    include: { receipt: { select: { id: true } }, supplier: { select: { id: true, name: true } }, lines: { select: { id: true, productId: true, description: true, quantity: true, unitCost: true } } },
+    include: { receipt: { select: { id: true } }, supplier: { select: { id: true, name: true } }, lines: { select: { id: true, productId: true, description: true, quantity: true, unitCost: true, hsnCode: true } } },
   });
   if (!invoice) throw new AppError(404, 'INVOICE_NOT_FOUND', 'This supplier invoice was not found.');
   if (invoice.receipt) throw new AppError(409, 'INVOICE_ALREADY_RECEIVED', 'Stock has already been received for this invoice.');
@@ -517,8 +527,13 @@ export async function receiveInvoiceStock(organizationId: string, userId: string
       throw new AppError(409, 'INVOICE_PRODUCT_CHANGED', `${line.description} is not linked to the same inventory product saved on the invoice. Review it in Purchases before receiving stock.`);
   }
   const timing = resolveReceiptTiming(input.receivedAt, input.receiptTimingReason);
+  const productHsnUpdates = planProductHsnUpdates(invoice.lines, products);
   try {
     await safeTransaction(prisma, async tx => {
+      await Promise.all(productHsnUpdates.map(({ productId, hsnCode }) => tx.product.updateMany({
+        where: { id: productId, organizationId, OR: [{ hsnCode: null }, { hsnCode: '' }] },
+        data: { hsnCode },
+      })));
       const receipt = await tx.purchaseReceipt.create({ data: { organizationId, stationId: invoice.stationId, supplierId: invoice.supplier.id, invoiceId: invoice.id, supplierName: invoice.supplier.name, referenceNo: invoice.invoiceNumber, receivedAt: timing.receivedAt, receivedAtReason: timing.receivedAtReason, notes: 'Received after OCR invoice confirmation', createdById: userId } });
       for (const line of invoice.lines) {
         const allocation = allocations.get(line.id)!;

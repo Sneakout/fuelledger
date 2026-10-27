@@ -79,7 +79,8 @@ export function parseIndianInvoice(text: string): ParsedIndianInvoice {
   const supplierName = findSupplierName(lines);
   const consignee = findConsignee(lines);
   const itemLines = parseItemLines(lines);
-  const totalAmount = findInvoiceTotal(lines, itemLines, warnings);
+  const extractedTotal = findInvoiceTotal(lines, itemLines, warnings);
+  const totalAmount = reconcileInvoiceTotal(extractedTotal, itemLines, warnings);
   const subtotal = findAmount(lines, /\b(?:taxable\s+(?:amount|value)|sub\s*total|basic\s+amount)\b/i);
   const cgst = findAmount(lines, /\bCGST\b/i);
   const sgst = findAmount(lines, /\bSGST\b/i);
@@ -137,6 +138,44 @@ export function parseIndianInvoice(text: string): ParsedIndianInvoice {
     missingFields,
     warnings: unique(warnings),
   };
+}
+
+/**
+ * OCR commonly drops a decimal point or misreads Indian digit grouping, turning
+ * ₹12,45,469 into ₹12,45,46,900. Only repair that value when every recognised
+ * product has an independent tax-inclusive material total and a power-of-ten
+ * rescale agrees with their sum. Otherwise an extreme total is withheld.
+ */
+function reconcileInvoiceTotal(total: InvoiceCandidate<number> | null, itemLines: IndianInvoiceLine[], warnings: string[]) {
+  if (!total || itemLines.length === 0) return total;
+  const productBase = itemLines.reduce((sum, line) => sum + reconciledLineAmount(line), 0);
+  if (!itemLines.every(line => line.grossAmount !== null && line.grossAmount !== undefined)) {
+    if (productBase > 0 && (total.value / productBase > 3 || total.value / productBase < 0.5)) {
+      warnings.push("The OCR invoice total is not credible when compared with the recognised product amounts. FuelNerve withheld it instead of using an abnormal value.");
+      return null;
+    }
+    return total;
+  }
+  const materialSum = Number(itemLines.reduce((sum, line) => sum + line.grossAmount!, 0).toFixed(2));
+  if (!(materialSum > 0)) return total;
+  const roundedMaterialSum = Math.round(materialSum);
+  const normalTolerance = Math.max(1, materialSum * 0.005);
+  if (Math.abs(total.value - materialSum) <= normalTolerance) return total;
+
+  for (const scale of [10, 100, 1000, 10_000]) {
+    const corrected = Number((total.value / scale).toFixed(2));
+    if (Math.abs(corrected - materialSum) <= normalTolerance || Math.abs(corrected - roundedMaterialSum) <= 1) {
+      warnings.push(`The OCR invoice total was ${scale} times higher than the recognised product totals, so FuelNerve corrected the misplaced digits. Check the corrected total against the document before continuing.`);
+      return { ...total, value: Math.abs(corrected - roundedMaterialSum) <= 1 ? roundedMaterialSum : corrected, needsReview: true };
+    }
+  }
+
+  const ratio = total.value / materialSum;
+  if (ratio > 3 || ratio < 0.5) {
+    warnings.push("The OCR invoice total is not credible when compared with the recognised product totals. FuelNerve withheld it instead of using an abnormal value.");
+    return null;
+  }
+  return total;
 }
 
 function findConsignee(lines: SourceLine[]): { name: InvoiceCandidate<string> | null; code: InvoiceCandidate<string> | null } {

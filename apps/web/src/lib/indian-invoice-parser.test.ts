@@ -53,6 +53,51 @@ fins Total 1245469.00`);
     expect(result.totalAmount?.value).toBe(1245469);
     expect(result.tax.total).toBe(281925.56);
   });
+  it("corrects an invoice total that OCR inflated by two decimal places using complete product totals", () => {
+    const result = parseIndianInvoice(`Indian Oil Corporation Limited
+TAX INVOICE 202742478031947
+Date 7-Oct-26
+PAYER - 187714 SALEEMA PETROLEUM
+10 16730 EBMS 4.000 KL 27101242
+BASIC DESTINATION PRICE 4.000 KL 82203.320 KL 328813.28
+Total for material 440749.38
+20 50700 HSD-BSVI 8.000 KL 27101944
+BASIC DESTINATION PRICE 8.000 KL 79341.270 KL 634730.16
+Total for material 804719.39
+Grand Total 124546900`);
+
+    expect(result.totalAmount).toMatchObject({ value: 1245469, needsReview: true });
+    expect(result.tax.total).toBe(281925.56);
+    expect(result.warnings).toContain("The OCR invoice total was 100 times higher than the recognised product totals, so FuelNerve corrected the misplaced digits. Check the corrected total against the document before continuing.");
+  });
+
+  it("withholds an extreme invoice total when product totals cannot support a safe OCR rescale", () => {
+    const result = parseIndianInvoice(`Indian Oil Corporation Limited
+Invoice No: IOCL-EXTREME-1
+Invoice Date: 7-Oct-26
+EBMS 4.000 KL 82203.320 KL 328813.28
+Total for material 440749.38
+HSD-BSVI 8.000 KL 79341.270 KL 634730.16
+Total for material 804719.39
+Grand Total 987654321`);
+
+    expect(result.totalAmount).toBeNull();
+    expect(result.tax.total).toBeNull();
+    expect(result.missingFields).toContain("invoice total");
+    expect(result.warnings).toContain("The OCR invoice total is not credible when compared with the recognised product totals. FuelNerve withheld it instead of using an abnormal value.");
+  });
+
+  it("withholds an extreme total using product base amounts when tax-inclusive material totals are absent", () => {
+    const result = parseIndianInvoice(`Fuel Supplier Limited
+Invoice No: EXTREME-BASE-1
+Invoice Date: 7-Oct-26
+HSD 8.000 KL 80000.00 640000.00
+Grand Total 64000000`);
+
+    expect(result.totalAmount).toBeNull();
+    expect(result.tax.total).toBeNull();
+    expect(result.warnings).toContain("The OCR invoice total is not credible when compared with the recognised product amounts. FuelNerve withheld it instead of using an abnormal value.");
+  });
   it("reconstructs a missing IOCL grand-total row only from complete material totals and matching rounding", () => {
     const result = parseIndianInvoice(`Indian Oil Corporation Limited
 TAX INVOICE 20274247B022177

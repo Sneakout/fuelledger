@@ -422,6 +422,8 @@
 .invoice-submit-lines>article em{align-self:flex-start;padding:4px 7px;border-radius:999px;font-size:9px;font-style:normal;font-weight:800}
 .invoice-submit-lines>article em.matched,.invoice-match-note.matched{background:#e4f4eb;color:#147753}
 .invoice-submit-lines>article em.new,.invoice-match-note.new{background:#fff0e7;color:#a54c35}
+.invoice-submit-lines>article .invoice-hsn-note{margin-top:3px;color:#39705d;font-weight:700}
+.invoice-submit-lines>article .invoice-hsn-note.conflict{color:#a54c35}
 .invoice-new-record{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:6px}
 .invoice-new-record button,.invoice-add-record{min-height:34px;padding:0 10px;border:1px solid #aad2bf;border-radius:8px;background:#edf8f2;color:#17694e;font:inherit;font-size:10px;font-weight:800;cursor:pointer}
 .invoice-match-note{padding:4px 7px;border-radius:999px;font-size:10px!important}

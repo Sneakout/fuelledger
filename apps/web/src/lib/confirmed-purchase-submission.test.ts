@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EditableInvoiceDraft } from "../components/EditableInvoiceReviewDialog";
 import type { PurchaseProduct, Supplier } from "./api";
-import { buildConfirmedPurchaseInput, findDuplicateInvoice, findDuplicateInvoiceForDraft, findMatchingProduct, findMatchingSupplier, onlyCompatibleTankId, validateConfirmedPurchase, validateReceiptSelections } from "./confirmed-purchase-submission";
+import { assessProductHsn, buildConfirmedPurchaseInput, findDuplicateInvoice, findDuplicateInvoiceForDraft, findMatchingProduct, findMatchingSupplier, onlyCompatibleTankId, validateConfirmedPurchase, validateReceiptSelections } from "./confirmed-purchase-submission";
 
 const draft: EditableInvoiceDraft = {
   supplierName: "Indian Oil Corporation Limited",
@@ -23,6 +23,12 @@ describe("confirmed purchase submission", () => {
     expect(findMatchingSupplier(draft, suppliers)).toBe("supplier-1");
     expect(findMatchingProduct("HSD", "HSD", "27101944", products)).toBe("product-1");
     expect(findMatchingSupplier({ ...draft, supplierGSTIN: "", supplierName: "Unknown Oil" }, suppliers)).toBe("");
+  });
+
+  it("explains whether a captured HSN will enrich or conflict with the product master", () => {
+    expect(assessProductHsn("27101944", { name: "High Speed Diesel", hsnCode: null })).toMatchObject({ status: "WILL_ADD", message: expect.stringContaining("will be added") });
+    expect(assessProductHsn("27101944", { name: "High Speed Diesel", hsnCode: "27101944" })).toMatchObject({ status: "MATCH" });
+    expect(assessProductHsn("27101944", { name: "High Speed Diesel", hsnCode: "27101234" })).toMatchObject({ status: "CONFLICT", message: expect.stringContaining("will not be changed") });
   });
 
   it("creates an unpaid invoice and stock receipt without sending the document", () => {
