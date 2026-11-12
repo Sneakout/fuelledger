@@ -1053,8 +1053,24 @@ export const expenseCategoryInputSchema = z.object({
   code: z
     .string()
     .trim()
-    .toUpperCase()
-    .regex(/^[A-Z0-9-]+$/),
+    .min(1, "Enter a category code.")
+    .max(80)
+    .transform((value) =>
+      value
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .replace(/-{2,}/g, "-"),
+    )
+    .pipe(
+      z
+        .string()
+        .min(1, "Use at least one letter or number in the category code.")
+        .max(40)
+        .regex(/^[A-Z0-9]+(?:-[A-Z0-9]+)*$/),
+    ),
 });
 export const expenseInputSchema = z.object({
   stationId: z.string().cuid(),

@@ -1,12 +1,29 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
-const db = vi.hoisted(() => ({ $transaction: vi.fn() }));
+const db = vi.hoisted(() => ({ $transaction: vi.fn(), shift: { findFirst: vi.fn() } }));
 vi.mock('../src/lib/prisma.js', () => ({ prisma: db }));
 vi.mock('../src/modules/accounting/service.js', () => ({ postJournal: vi.fn(), collectionAccount: () => '1030' }));
-import { closeShift, openShift } from '../src/modules/shifts/service.js';
+import { closeShift, openShift, updateNozzleCustody } from '../src/modules/shifts/service.js';
 const d = (n: number) => new Prisma.Decimal(n);
 
 describe('closing shift', () => {
+  it('locks the opening nozzle custody snapshot for the life of the shift', async () => {
+    db.shift.findFirst.mockResolvedValue({
+      id: 'shift-1',
+      status: 'OPEN',
+      managerId: 'manager-1',
+      users: [{ userId: 'staff-1' }],
+      nozzleReadings: [{ nozzleId: 'nozzle-1' }],
+    });
+
+    await expect(
+      updateNozzleCustody('org', 'shift-1', {
+        assignments: [{ nozzleId: 'nozzle-1', userId: 'staff-1' }],
+      }),
+    ).rejects.toMatchObject({ code: 'NOZZLE_ASSIGNMENTS_LOCKED', status: 409 });
+    expect(db.$transaction).not.toHaveBeenCalled();
+  });
+
   it('opens with prior meters, stock including an intervening delivery, and chosen attendant', async () => {
     const tx: any = {
       station: { findFirst: vi.fn().mockResolvedValue({id:'station', configurations:[{id:'cfg',tanks:[{id:'t',code:'T1',productId:'fuel',openingStock:d(1000)}],dispensers:[{nozzles:[{id:'n',code:'N1',openingMeter:d(1000)}]}]}]}) },

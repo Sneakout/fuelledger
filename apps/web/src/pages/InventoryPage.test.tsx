@@ -52,7 +52,7 @@ describe('InventoryPage', () => {
 
     const attentionTabs = screen.getAllByRole('button', { name: /Needs attention/ });
     fireEvent.click(attentionTabs.at(-1)!);
-    expect(screen.getByRole('heading', { name: 'Check these tanks first' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Tanks to check' })).toBeInTheDocument();
     expect(screen.queryByText('Engine Oil')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'HSD Tank 1' })).not.toBeInTheDocument();
   });

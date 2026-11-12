@@ -1,0 +1,119 @@
+.expense-filters {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(210px, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+  margin: 15px 0 3px;
+  padding: 13px;
+  border: 1px solid #dce7e1;
+  border-radius: 13px;
+  background: #f6faf8;
+}
+
+.expense-filters label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.expense-filters label > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #42675b;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.expense-filters label > span svg {
+  width: 13px;
+}
+
+.expense-filters select {
+  width: 100%;
+  height: 39px;
+  padding: 0 11px;
+  border: 1px solid #cadbd2;
+  border-radius: 10px;
+  outline: 0;
+  background: #fff;
+  color: #173f35;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.expense-filters select:focus {
+  border-color: #2a7a61;
+  box-shadow: 0 0 0 3px #24775e14;
+}
+
+.expense-filters button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 39px;
+  padding: 8px 11px;
+  border: 1px solid #d3e0da;
+  border-radius: 10px;
+  background: #fff;
+  color: #42675b;
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.expense-filters button svg {
+  width: 14px;
+}
+
+.expense-filter-empty {
+  display: flex;
+  min-height: 210px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.expense-filter-empty > svg {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 10px;
+  padding: 8px;
+  border-radius: 10px;
+  background: var(--mint);
+  color: var(--green);
+}
+
+.expense-filter-empty strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.expense-filter-empty small {
+  margin-top: 4px;
+  font-size: 9px;
+}
+
+.expense-filter-empty button {
+  margin-top: 13px;
+  padding: 8px 11px;
+  border: 1px solid #c8ddd2;
+  border-radius: 9px;
+  background: #fff;
+  color: var(--green);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+@media (max-width: 650px) {
+  .expense-filters {
+    grid-template-columns: 1fr;
+  }
+}

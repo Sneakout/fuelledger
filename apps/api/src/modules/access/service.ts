@@ -122,6 +122,13 @@ export async function saveNozzleAssignments(
       "STATION_NOT_FOUND",
       "This petrol pump was not found.",
     );
+  const openShift = station.shifts[0];
+  if (openShift)
+    throw new AppError(
+      409,
+      "NOZZLE_ASSIGNMENTS_LOCKED",
+      "Nozzle assignments are locked for the open shift. Close the shift before changing defaults.",
+    );
   const nozzles =
     station.configurations[0]?.dispensers.flatMap(
       (dispenser) => dispenser.nozzles,
@@ -152,7 +159,6 @@ export async function saveNozzleAssignments(
       "ATTENDANT_INVALID",
       "Choose active attendants assigned to this petrol pump.",
     );
-  const openShift = station.shifts[0];
   await prisma.$transaction(async (tx) => {
     await tx.nozzleAttendantAssignment.deleteMany({
       where: { nozzleId: { in: nozzles.map((nozzle) => nozzle.id) } },
@@ -163,33 +169,11 @@ export async function saveNozzleAssignments(
         userId: row.userId,
       })),
     });
-    if (openShift) {
-      const existingTeam = new Set([
-        openShift.managerId,
-        ...openShift.users.map((row) => row.userId),
-      ]);
-      const missing = attendantIds.filter((id) => !existingTeam.has(id));
-      if (missing.length)
-        await tx.shiftUser.createMany({
-          data: missing.map((userId) => ({ shiftId: openShift.id, userId })),
-          skipDuplicates: true,
-        });
-      await tx.shiftNozzleAssignment.deleteMany({
-        where: { shiftId: openShift.id },
-      });
-      if (input.assignments.length) await tx.shiftNozzleAssignment.createMany({
-        data: input.assignments.map((row) => ({
-          shiftId: openShift.id,
-          nozzleId: row.nozzleId,
-          userId: row.userId,
-        })),
-      });
-    }
   });
   return {
     stationId,
     assignments: input.assignments,
-    openShiftUpdated: Boolean(openShift),
+    openShiftUpdated: false,
   };
 }
 export async function assign(
@@ -313,9 +297,13 @@ export async function createManager(
     stationIds: user.stationAccess.map((x) => x.stationId),
   };
 }
-export async function deactivateStaff(organizationId: string, userId: string) {
+export async function staffDeactivationCheck(
+  organizationId: string,
+  userId: string,
+) {
   const user = await prisma.user.findFirst({
     where: { id: userId, organizationId, active: true },
+    select: { id: true, name: true, role: true },
   });
   if (!user)
     throw new AppError(
@@ -329,18 +317,145 @@ export async function deactivateStaff(organizationId: string, userId: string) {
       "OWNER_REQUIRED",
       "The petrol pump owner cannot be removed.",
     );
-  const [active, defaults] = await Promise.all([
-    prisma.shiftNozzleAssignment.count({
-      where: { userId, shift: { status: "OPEN" } },
-    }),
-    prisma.nozzleAttendantAssignment.count({ where: { userId } }),
-  ]);
-  if (active || defaults)
+  const shiftInvolvement = {
+    OR: [
+      { managerId: userId },
+      { users: { some: { userId } } },
+      { nozzleAssignments: { some: { userId } } },
+    ],
+  };
+  const [activeShifts, historicalShiftCount, historicalSalesCount, defaults, pendingAssignments] =
+    await Promise.all([
+      prisma.shift.findMany({
+        where: {
+          station: { organizationId },
+          status: "OPEN",
+          ...shiftInvolvement,
+        },
+        orderBy: { openedAt: "asc" },
+        select: {
+          id: true,
+          shiftNumber: true,
+          station: { select: { id: true, name: true } },
+        },
+      }),
+      prisma.shift.count({
+        where: { station: { organizationId }, ...shiftInvolvement },
+      }),
+      prisma.sale.count({ where: { organizationId, employeeId: userId } }),
+      prisma.nozzleAttendantAssignment.count({ where: { userId } }),
+      prisma.shiftNozzleAssignment.findMany({
+        where: {
+          userId,
+          shift: {
+            status: "RECONCILIATION_REQUIRED",
+            station: { organizationId },
+          },
+        },
+        select: {
+          shiftId: true,
+          nozzleId: true,
+          collectionAmount: true,
+          shift: {
+            select: {
+              shiftNumber: true,
+              station: { select: { id: true, name: true } },
+            },
+          },
+        },
+      }),
+    ]);
+  const pendingShiftIds = [...new Set(pendingAssignments.map((row) => row.shiftId))];
+  const expectedRows = pendingShiftIds.length
+    ? await prisma.sale.groupBy({
+        by: ["shiftId", "nozzleId"],
+        where: {
+          organizationId,
+          employeeId: userId,
+          shiftId: { in: pendingShiftIds },
+          nozzleId: { not: null },
+          paymentMethod: { notIn: ["CREDIT", "FLEET"] },
+        },
+        _sum: { totalAmount: true },
+      })
+    : [];
+  const pendingHandoverCount = pendingAssignments.filter(
+    (row) => row.collectionAmount === null,
+  ).length;
+  const possibleAmountDue = pendingAssignments.reduce((total, assignment) => {
+    if (assignment.collectionAmount === null) return total;
+    const expected = Number(
+      expectedRows.find(
+        (row) =>
+          row.shiftId === assignment.shiftId &&
+          row.nozzleId === assignment.nozzleId,
+      )?._sum.totalAmount ?? 0,
+    );
+    return total + Math.max(0, expected - Number(assignment.collectionAmount));
+  }, 0);
+  const blockers = [
+    ...(activeShifts.length
+      ? [
+          `${user.name} is part of ${activeShifts.length} open shift${activeShifts.length === 1 ? "" : "s"}. Close the shift before deactivation.`,
+        ]
+      : []),
+    ...(pendingHandoverCount
+      ? [
+          `${pendingHandoverCount} nozzle handover${pendingHandoverCount === 1 ? " is" : "s are"} still missing collection details.`,
+        ]
+      : []),
+    ...(possibleAmountDue > 0.005
+      ? [
+          `₹${possibleAmountDue.toLocaleString("en-IN", { maximumFractionDigits: 2 })} remains unresolved in closed-shift handovers. Reconcile those shifts first.`,
+        ]
+      : []),
+  ];
+  return {
+    user,
+    canDeactivate: blockers.length === 0,
+    blockers,
+    activeShifts,
+    historicalShiftCount,
+    historicalSalesCount,
+    defaultNozzleCount: defaults,
+    pendingHandoverCount,
+    possibleAmountDue: Number(possibleAmountDue.toFixed(2)),
+    historyPreserved: true,
+  };
+}
+
+export async function deactivateStaff(
+  organizationId: string,
+  userId: string,
+  confirmed: boolean,
+) {
+  const check = await staffDeactivationCheck(organizationId, userId);
+  if (!confirmed)
+    throw new AppError(
+      400,
+      "STAFF_DEACTIVATION_CONFIRMATION_REQUIRED",
+      "Review the attendant’s shifts and handovers before confirming deactivation.",
+      check,
+    );
+  if (!check.canDeactivate)
     throw new AppError(
       409,
-      "STAFF_ASSIGNED_TO_NOZZLE",
-      "Reassign this attendant’s nozzles before removing them.",
+      "STAFF_DEACTIVATION_BLOCKED",
+      check.blockers[0] ?? "Resolve this attendant’s open work first.",
+      check,
     );
-  await prisma.user.update({ where: { id: userId }, data: { active: false } });
-  return { id: userId, active: false };
+  await prisma.$transaction(async (tx) => {
+    await tx.nozzleAttendantAssignment.deleteMany({ where: { userId } });
+    await tx.userSession.deleteMany({ where: { userId } });
+    await tx.user.update({
+      where: { id: userId },
+      data: { active: false, loginEnabled: false },
+    });
+  });
+  return {
+    id: userId,
+    active: false,
+    historyPreserved: true,
+    clearedDefaultNozzles: check.defaultNozzleCount,
+  };
 }

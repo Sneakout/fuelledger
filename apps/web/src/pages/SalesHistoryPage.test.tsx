@@ -36,7 +36,10 @@ describe('SalesHistoryPage', () => {
     fireEvent(volumeChart,new MouseEvent('pointermove',{bubbles:true,clientX:804}));
     expect(screen.getByText('Friday, 6 November 2026')).toBeInTheDocument();
     expect(screen.getAllByText('900 L').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('₹99,000').length).toBeGreaterThan(0);
+    expect(screen.getByText('RSP ₹110/L · 1 sale')).toBeInTheDocument();
     fireEvent.keyDown(volumeChart,{key:'ArrowRight'});
     expect(screen.getByText('Saturday, 7 November 2026')).toBeInTheDocument();
+    expect(screen.getByText('Litres sold × recorded RSP')).toBeInTheDocument();
   });
 });

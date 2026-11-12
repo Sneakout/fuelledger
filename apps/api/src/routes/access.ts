@@ -72,7 +72,20 @@ accessRouter.put("/users/:id", async (req, res) => {
 accessRouter.delete("/users/:id", async (req, res) => {
   requireOwner(req.user!);
   res.json(
-    await service.deactivateStaff(req.user!.organization.id, req.params.id!),
+    await service.deactivateStaff(
+      req.user!.organization.id,
+      req.params.id!,
+      req.body?.confirmed === true,
+    ),
+  );
+});
+accessRouter.get("/users/:id/deactivation-check", async (req, res) => {
+  requireOwner(req.user!);
+  res.json(
+    await service.staffDeactivationCheck(
+      req.user!.organization.id,
+      req.params.id!,
+    ),
   );
 });
 accessRouter.put(

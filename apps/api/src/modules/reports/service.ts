@@ -29,7 +29,7 @@ export async function buildSalesHistory(organizationId: string, filter: ReportFi
     prisma.station.findMany({ where: { organizationId, active: true, ...(stationIds ? { id: { in: stationIds } } : {}) }, select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } }),
     prisma.sale.findMany({
       where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), occurredAt: { gte: start, lt: endExclusive }, product: { category: 'FUEL' } },
-      select: { occurredAt: true, quantity: true, totalAmount: true, product: { select: { id: true, name: true, code: true, unit: true } } },
+      select: { occurredAt: true, quantity: true, unitPrice: true, product: { select: { id: true, name: true, code: true, unit: true } } },
       orderBy: { occurredAt: 'asc' },
     }),
   ]);
@@ -37,7 +37,10 @@ export async function buildSalesHistory(organizationId: string, filter: ReportFi
   for (const sale of sales) {
     const date = indiaDate(sale.occurredAt), key = `${date}:${sale.product.id}`;
     add(daily, key, () => ({ key, date, productId: sale.product.id, product: sale.product.name, code: sale.product.code, unit: sale.product.unit, quantity: 0, revenue: 0, transactions: 0 }), row => {
-      row.quantity += number(sale.quantity); row.revenue += number(sale.totalAmount); row.transactions += 1;
+      const quantity = number(sale.quantity);
+      row.quantity += quantity;
+      row.revenue += quantity * number(sale.unitPrice);
+      row.transactions += 1;
     });
   }
   const rows = [...daily.values()].sort((left, right) => left.date.localeCompare(right.date) || left.code.localeCompare(right.code));

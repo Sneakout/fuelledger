@@ -803,43 +803,12 @@ export async function updateNozzleCustody(
   });
   if (!shift)
     throw new AppError(404, "SHIFT_NOT_FOUND", "This shift was not found.");
-  if (shift.status !== "OPEN")
-    throw new AppError(
-      409,
-      "SHIFT_NOT_OPEN",
-      "Nozzle assignments can only change during an open shift.",
-    );
-  const assignedNozzleIds = input.assignments.map((row) => row.nozzleId);
-  const shiftNozzleIds = new Set(shift.nozzleReadings.map((row) => row.nozzleId));
-  if (
-    new Set(assignedNozzleIds).size !== assignedNozzleIds.length ||
-    assignedNozzleIds.some((id) => !shiftNozzleIds.has(id))
-  )
-    throw new AppError(
-      400,
-      "NOZZLE_ASSIGNMENTS_INVALID",
-      "Choose each assigned nozzle only once from this shift.",
-    );
-  const team = new Set([
-    shift.managerId,
-    ...shift.users.map((row) => row.userId),
-  ]);
-  if (input.assignments.some((row) => !team.has(row.userId)))
-    throw new AppError(
-      400,
-      "ATTENDANT_NOT_ON_SHIFT",
-      "Every nozzle attendant must be on this shift.",
-    );
-  await safeTransaction(prisma, async (tx) => {
-    await tx.shiftNozzleAssignment.deleteMany({ where: { shiftId: id } });
-    if (input.assignments.length) await tx.shiftNozzleAssignment.createMany({
-      data: input.assignments.map((row) => ({
-        shiftId: id,
-        nozzleId: row.nozzleId,
-        userId: row.userId,
-      })),
-    });
-  });
-  const updated = await prisma.shift.findUnique({ where: { id }, include });
-  return summary(updated);
+  void input;
+  throw new AppError(
+    409,
+    "NOZZLE_ASSIGNMENTS_LOCKED",
+    shift.status === "OPEN"
+      ? "Nozzle assignments were confirmed when this shift opened and are locked until it closes."
+      : "Closed shift assignments are permanent custody records and cannot be changed.",
+  );
 }

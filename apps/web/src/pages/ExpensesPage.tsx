@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import {
+  CalendarDays,
   FileText,
+  FilterX,
   IndianRupee,
   Plus,
   ReceiptIndianRupee,
@@ -19,6 +21,15 @@ const money = (value: number | string) =>
   }).format(Number(value));
 const today = () => indiaDate();
 const iso = indiaCalendarDateIso;
+const categoryCode = (value: string) =>
+  value
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-")
+    .slice(0, 40);
 async function attachment(file: File | null) {
   if (!file) return null;
   if (file.size > 500000)
@@ -43,6 +54,8 @@ export function ExpensesPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [file, setFile] = useState<File | null>(null);
+  const [filterMonth, setFilterMonth] = useState("ALL");
+  const [filterCategoryId, setFilterCategoryId] = useState("ALL");
   const [category, setCategory] = useState({ name: "", code: "" });
   const [form, setForm] = useState({
     stationId: "",
@@ -68,9 +81,20 @@ export function ExpensesPage() {
     void load().catch(() => setError("Unable to load expenses."));
   }, []);
   async function addCategory() {
+    const name = category.name.trim();
+    const code = categoryCode(category.code || name);
+    setError("");
+    if (name.length < 2) {
+      setError("Enter a category name with at least two characters.");
+      return;
+    }
+    if (!code) {
+      setError("Enter a category code using letters or numbers.");
+      return;
+    }
     setSaving(true);
     try {
-      await api.createExpenseCategory(category);
+      await api.createExpenseCategory({ name, code });
       setCategory({ name: "", code: "" });
       setMode(null);
       await load();
@@ -166,6 +190,33 @@ export function ExpensesPage() {
       </main>
     );
 
+  const expenseMonths = [
+    ...new Set(
+      data.expenses.map((expense) => indiaDate(expense.incurredAt).slice(0, 7)),
+    ),
+  ].sort((left, right) => right.localeCompare(left));
+  const filteredExpenses = data.expenses.filter(
+    (expense) =>
+      (filterMonth === "ALL" ||
+        indiaDate(expense.incurredAt).slice(0, 7) === filterMonth) &&
+      (filterCategoryId === "ALL" ||
+        expense.category.id === filterCategoryId),
+  );
+  const filteredTotal = filteredExpenses.reduce(
+    (sum, expense) => sum + Number(expense.amount),
+    0,
+  );
+  const monthName = (value: string) =>
+    new Date(`${value}-01T00:00:00+05:30`).toLocaleDateString("en-IN", {
+      month: "long",
+      year: "numeric",
+      timeZone: "Asia/Kolkata",
+    });
+  const filterLabel =
+    filterMonth === "ALL" ? "All expenses" : monthName(filterMonth);
+  const filtersActive =
+    filterMonth !== "ALL" || filterCategoryId !== "ALL";
+
   return (
     <main className="page expenses-page">
       <div className="page-heading">
@@ -185,7 +236,7 @@ export function ExpensesPage() {
           >
             <UsersRound size={16} /> Staff salary
           </button>
-          <button className="secondary" onClick={() => setMode("category")}>
+          <button className="secondary" onClick={() => { setError(""); setMode("category"); }}>
             <Tags size={16} /> Category
           </button>
           <button
@@ -203,11 +254,14 @@ export function ExpensesPage() {
           <ReceiptIndianRupee />
         </span>
         <div>
-          <small>This month</small>
-          <b>{money(data.summary.expensesThisMonth)}</b>
+          <small>{filterLabel}</small>
+          <b>{money(filteredTotal)}</b>
           <p>
-            {data.expenses.length} recorded expenses across{" "}
-            {data.categories.length} categories
+            {filteredExpenses.length} matching expense
+            {filteredExpenses.length === 1 ? "" : "s"}
+            {filterCategoryId === "ALL"
+              ? ` across ${new Set(filteredExpenses.map((expense) => expense.category.id)).size} categories`
+              : ` in ${data.categories.find((item) => item.id === filterCategoryId)?.name ?? "the selected category"}`}
           </p>
         </div>
       </section>
@@ -218,7 +272,7 @@ export function ExpensesPage() {
           </span>
           <h2>Create an expense category</h2>
           <p>Start with Staff Salary, Utilities, Repairs, or Office.</p>
-          <button className="primary small" onClick={() => setMode("category")}>
+          <button className="primary small" onClick={() => { setError(""); setMode("category"); }}>
             <Plus size={16} /> Add category
           </button>
         </section>
@@ -228,11 +282,50 @@ export function ExpensesPage() {
             <div className="history-head">
               <div>
                 <span className="eyebrow">Expense register</span>
-                <h2>Recent expenses</h2>
+                <h2>Expenses</h2>
               </div>
-              <span>{data.expenses.length} entries</span>
+              <span>{filteredExpenses.length} entries</span>
             </div>
-            {data.expenses.map((expense) => (
+            <div className="expense-filters" aria-label="Expense filters">
+              <label>
+                <span><CalendarDays /> Month</span>
+                <select
+                  aria-label="Filter expenses by month"
+                  value={filterMonth}
+                  onChange={(event) => setFilterMonth(event.target.value)}
+                >
+                  <option value="ALL">All months</option>
+                  {expenseMonths.map((month) => (
+                    <option key={month} value={month}>{monthName(month)}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span><Tags /> Category</span>
+                <select
+                  aria-label="Filter expenses by category"
+                  value={filterCategoryId}
+                  onChange={(event) => setFilterCategoryId(event.target.value)}
+                >
+                  <option value="ALL">All categories</option>
+                  {data.categories.map((item) => (
+                    <option key={item.id} value={item.id}>{item.name}</option>
+                  ))}
+                </select>
+              </label>
+              {filtersActive && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterMonth("ALL");
+                    setFilterCategoryId("ALL");
+                  }}
+                >
+                  <FilterX /> Clear filters
+                </button>
+              )}
+            </div>
+            {filteredExpenses.map((expense) => (
               <article key={expense.id}>
                 <span className="expense-icon">
                   <IndianRupee />
@@ -261,8 +354,13 @@ export function ExpensesPage() {
                 <b>{money(expense.amount)}</b>
               </article>
             ))}
-            {!data.expenses.length && (
-              <p className="history-empty">No expenses recorded yet.</p>
+            {!filteredExpenses.length && (
+              <div className="expense-filter-empty">
+                <ReceiptIndianRupee />
+                <strong>{data.expenses.length ? "No expenses match these filters" : "No expenses recorded yet"}</strong>
+                <small>{data.expenses.length ? "Try another month or category." : "Recorded expenses will appear here."}</small>
+                {filtersActive && <button type="button" onClick={() => { setFilterMonth("ALL"); setFilterCategoryId("ALL"); }}>Show all expenses</button>}
+              </div>
             )}
           </div>
           <aside className="expense-categories">
@@ -295,9 +393,17 @@ export function ExpensesPage() {
                     <span>Name</span>
                     <input
                       value={category.name}
-                      onChange={(event) =>
-                        setCategory({ ...category, name: event.target.value })
-                      }
+                      onChange={(event) => {
+                        const name = event.target.value;
+                        setCategory((current) => ({
+                          name,
+                          code:
+                            !current.code || current.code === categoryCode(current.name)
+                              ? categoryCode(name)
+                              : current.code,
+                        }));
+                      }}
+                      placeholder="e.g. Generator fuel"
                     />
                   </label>
                   <label className="field">
@@ -305,14 +411,13 @@ export function ExpensesPage() {
                     <input
                       value={category.code}
                       onChange={(event) =>
-                        setCategory({
-                          ...category,
-                          code: event.target.value.toUpperCase(),
-                        })
+                        setCategory({ ...category, code: categoryCode(event.target.value) })
                       }
+                      placeholder="GENERATOR-FUEL"
                     />
                   </label>
                 </div>
+                {error && <div className="form-error" role="alert">{error}</div>}
                 <div className="editor-footer">
                   <button className="secondary" onClick={() => setMode(null)}>
                     Cancel

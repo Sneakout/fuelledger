@@ -601,6 +601,9 @@ export function OperationsPage() {
           />
           <section className="opening-nozzle-table">
             <h3>Opening nozzle meter readings</h3>
+            <p className="opening-nozzle-help">
+              Confirm custody now. These assignments are locked when the shift opens and remain unchanged until it closes.
+            </p>
             <div className="opening-nozzle-head" aria-hidden="true">
               <span>Nozzle & product</span>
               <span>Attendant (optional)</span>

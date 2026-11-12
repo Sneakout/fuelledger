@@ -63,6 +63,22 @@ export class OfflineQueuedError extends ApiRequestError {
     );
   }
 }
+export type StaffDeactivationCheck = {
+  user: { id: string; name: string; role: string };
+  canDeactivate: boolean;
+  blockers: string[];
+  activeShifts: Array<{
+    id: string;
+    shiftNumber: number;
+    station: { id: string; name: string };
+  }>;
+  historicalShiftCount: number;
+  historicalSalesCount: number;
+  defaultNozzleCount: number;
+  pendingHandoverCount: number;
+  possibleAmountDue: number;
+  historyPreserved: true;
+};
 const inFlightSaves = new Map<string, Promise<unknown>>();
 async function queueOffline(method: "POST" | "PUT" | "PATCH", path: string, body: string, idempotencyKey: string) {
   try {
@@ -432,9 +448,20 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  staffDeactivationCheck: (userId: string) =>
+    request<StaffDeactivationCheck>(
+      `/access/users/${userId}/deactivation-check`,
+    ),
   deactivateStaff: (userId: string) =>
-    request<{ id: string; active: boolean }>(`/access/users/${userId}`, {
+    request<{
+      id: string;
+      active: boolean;
+      historyPreserved: true;
+      clearedDefaultNozzles: number;
+    }>(`/access/users/${userId}`, {
       method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmed: true }),
     }),
   updateStationAccess: (userId: string, input: StationAccessInput) =>
     request<{ userId: string; stationIds: string[] }>(
