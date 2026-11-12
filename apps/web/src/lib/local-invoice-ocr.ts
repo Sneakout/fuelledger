@@ -135,9 +135,16 @@ export async function recognizeLocalInvoices(
 
 export function needsFullPagePass(text: string) {
   const hasInvoiceIdentity = /\b(?:tax\s+)?invoice\b/i.test(text) && /\b[A-Z0-9][A-Z0-9/.-]{7,}\b/.test(text);
-  const hasFuelProduct = /\b(?:HSD|MS|PETROL|DIESEL|XP\s*95|XP\s*100|POWER|SPEED)\b/i.test(text);
-  const hasQuantityOrAmount = /\b\d+(?:[.,]\d+)?\s*(?:KL|LTR|LITRE|LITER|L)\b/i.test(text) || /\b\d[\d,]{4,}(?:\.\d{1,3})?\b/.test(text);
-  return text.replace(/\s/g, "").length < 240 || !hasInvoiceIdentity || !hasFuelProduct || !hasQuantityOrAmount;
+  const hasInvoiceTotal = !needsInvoiceTotalPass(text);
+  const credibleProductRows = text.split(/\r?\n/).filter(line => {
+    const hasProduct = /\b(?:HSD|MS|PETROL|DIESEL|SERVO|LUBRICANT|ENGINE\s+OIL|COOLANT|GREASE|ATF|DEF|ADBLUE)\b/i.test(line);
+    const amounts = line.match(/\d[\d,]*(?:\.\d{1,3})?/g) ?? [];
+    return hasProduct && amounts.length >= 3;
+  }).length;
+  // Keywords alone are not proof that a table was read. Dense ruled invoices
+  // often leak a product word and a large number from different columns while
+  // losing every usable row. In that case the full-page layout is still needed.
+  return text.replace(/\s/g, "").length < 240 || !hasInvoiceIdentity || !hasInvoiceTotal || credibleProductRows === 0;
 }
 
 async function getWorker(signal?: AbortSignal) {

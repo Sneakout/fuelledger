@@ -96,7 +96,13 @@ export function parseIndianInvoice(text: string): ParsedIndianInvoice {
   const productSubtotal = itemLines.reduce((sum, line) => sum + reconciledLineAmount(line), 0);
   const derivedCharges = totalAmount && productSubtotal > 0 ? totalAmount.value - productSubtotal : null;
   let taxTotal = explicitTax?.value ?? (componentTax > 0 ? componentTax : null);
-  if (derivedCharges !== null && derivedCharges >= 0 && (taxTotal === null || Math.abs(taxTotal - derivedCharges) > 1)) {
+  const accountingSummaryBalances = subtotal && taxTotal !== null && totalAmount
+    ? Math.abs(subtotal.value + taxTotal - totalAmount.value) <= 1
+    : false;
+  const explicitComponentsNearlyBalance = componentTax > 0 && totalAmount && productSubtotal > 0
+    ? Math.abs(productSubtotal + componentTax - totalAmount.value) / totalAmount.value <= 0.01
+    : false;
+  if (!accountingSummaryBalances && !explicitComponentsNearlyBalance && derivedCharges !== null && derivedCharges >= 0 && (taxTotal === null || Math.abs(taxTotal - derivedCharges) > 1)) {
     taxTotal = Number(derivedCharges.toFixed(2));
     warnings.push("Taxes and charges were recovered from the invoice total. Check their classification before continuing.");
   }
@@ -113,6 +119,12 @@ export function parseIndianInvoice(text: string): ParsedIndianInvoice {
   if (subtotal && taxTotal !== null && totalAmount) {
     const difference = Math.abs(subtotal.value + taxTotal - totalAmount.value);
     if (difference > 1) warnings.push("The taxable amount and tax do not add up to the invoice total. Check the figures against the document.");
+  }
+  if (subtotal && productSubtotal > 0 && Math.abs(subtotal.value - productSubtotal) > 1) {
+    warnings.push("The recognised product amounts do not add up to the printed subtotal. Check the affected product row against the document.");
+  }
+  if (!subtotal && explicitComponentsNearlyBalance && totalAmount && Math.abs(productSubtotal + componentTax - totalAmount.value) > 1) {
+    warnings.push("The recognised product amounts and printed taxes differ slightly from the invoice total. Check the product rows before continuing.");
   }
   for (const line of itemLines) {
     if (line.amount !== null && Math.abs(line.quantity * line.unitRate - line.amount) > 1) {
@@ -191,12 +203,17 @@ function findConsignee(lines: SourceLine[]): { name: InvoiceCandidate<string> | 
   if (headingIndex < 0) return { name: null, code: null };
   const nearby = lines.slice(headingIndex, headingIndex + 10);
   const nameLine = nearby.find(line => looksLikePartyName(line.text) && !/\b(?:SUPPLIER|CONSIGNEE|SHIP\s+TO|NAME\s*&\s*ADDRESS|INDIAN\s+OIL\s+DEALER)\b/i.test(line.text));
-  const codeLine = nearby.find(line => /\b\d{4,}\b/.test(line.text));
+  const codeLine = nearby.find(line => /\b(?:dealer|customer|consignee|payer)\s*(?:code|no\.?|number)?\b/i.test(line.text) && /\b\d{4,}\b/.test(line.text));
   const code = codeLine?.text.match(/\b(\d{4,})\b/)?.[1];
   return {
-    name: nameLine ? candidate(cleanPartyName(nameLine.text), nameLine, true) : null,
+    name: nameLine ? candidate(extractFirstPartyName(nameLine.text), nameLine, true) : null,
     code: code && codeLine ? candidate(code, codeLine, true) : null,
   };
+}
+
+function extractFirstPartyName(value: string) {
+  const match = value.match(/([A-Z][A-Z0-9&.'() /-]{1,80}?\b(?:PETROLEUM|PETROL(?:\s+PUMP)?|FUELS?|SERVICE\s+STATION|FILLING\s+STATION|ENERGY|ENTERPRISES?|TRADERS?|AGENC(?:Y|IES)))\b/i);
+  return cleanPartyName(match?.[1] ?? value);
 }
 
 function cleanPartyName(value: string) {
@@ -221,11 +238,12 @@ function candidate<T>(value: T, line: SourceLine, needsReview = false): InvoiceC
 
 function findInvoiceNumber(lines: SourceLine[]): InvoiceCandidate<string> | null {
   const labelled = [
-    /\b(?:tax\s+)?invoice\s*(?:no\.?|number|#)\s*[:\-]?\s*([A-Z0-9][A-Z0-9/\-]{2,})\b/i,
+    /\b(?:tax\s+)?invoice\s*(?:no\.?|number|#)\s*[^A-Z0-9/\-]{0,4}\s*([A-Z0-9][A-Z0-9/\-]{2,})\b/i,
     /\b(?:bill|document|doc)\s*(?:no\.?|number|#)\s*[:\-]?\s*([A-Z0-9][A-Z0-9/\-]{2,})\b/i,
     /\binv(?:\.|\s+(?:no\.?|number|#))\s*[:\-]?\s*([A-Z0-9][A-Z0-9/\-]{2,})\b/i,
   ];
   for (const line of lines) {
+    if (/\b(?:E[-\s]?WAY|LR|VEHICLE)\s+(?:BILL\s+)?(?:NO\.?|NUMBER)\b/i.test(line.text)) continue;
     for (const pattern of labelled) {
       const match = line.text.match(pattern);
       if (match?.[1] && !/^\d{1,2}$/.test(match[1])) return candidate(match[1], line);
@@ -311,6 +329,17 @@ function findSupplierName(lines: SourceLine[]): InvoiceCandidate<string> | null 
     return match?.[1] ? [{ line, value: match[1].replace(/\s+/g, " ") }] : [];
   })[0];
   if (knownOilCompany) return candidate(knownOilCompany.value, knownOilCompany.line);
+  const invoiceHeading = lines.slice(0, 12).flatMap(line => {
+    const value = line.text
+      .replace(/^[^A-Z0-9]+/i, "")
+      .replace(/\s+(?:TAX\s+)?INVOICE\b.*$/i, "")
+      .trim();
+    return /\b(?:LIMITED|LTD\.?|PRIVATE|PVT\.?|CORPORATION|ENTERPRISES?|TRADERS?|AGENC(?:Y|IES)|LUBRICANTS?)\b/i.test(value)
+      && value.length >= 4 && value.length <= 100
+      ? [{ line, value }]
+      : [];
+  })[0];
+  if (invoiceHeading) return candidate(invoiceHeading.value, invoiceHeading.line, true);
   const labelled = lines.find(line => /\b(?:supplier|seller|vendor)\s*(?:name)?\s*[:\-]/i.test(line.text));
   if (labelled) {
     const value = labelled.text.replace(/^.*?\b(?:supplier|seller|vendor)\s*(?:name)?\s*[:\-]\s*/i, "").trim();
@@ -413,7 +442,13 @@ function parseItemLines(lines: SourceLine[]): IndianInvoiceLine[] {
       return value ? [{ row, value }] : [];
     });
     const measured = measuredRows.find(item => /\b(?:BASIC|DESTINATION\s+PRICE|PRODUCT\s+VALUE)\b/i.test(item.row.text)) ?? measuredRows[0];
-    if (!measured) continue;
+    if (!measured) {
+      const tableMeasurement = parseTabularMeasurement(line.text);
+      if (tableMeasurement) {
+        parsed.push(buildTabularItemLine(line, recognised, tableMeasurement));
+      }
+      continue;
+    }
     const nextProduct = lines.findIndex((item, candidateIndex) => candidateIndex > index && findProduct(item.text) && /^\s*(?:\d{1,3}\s+\d{4,6}\s+)?(?:EBMS|HSD|MS|PETROL|DIESEL)\b/i.test(item.text));
     const end = nextProduct > index ? nextProduct : Math.min(lines.length, index + 28);
     const materialLines = lines.slice(index, end);
@@ -431,6 +466,79 @@ function parseItemLines(lines: SourceLine[]): IndianInvoiceLine[] {
     parsed.push({ ...buildItemLine(line, recognised, measured.row, measured.value), grossAmount });
   }
   return deduplicateItemLines(parsed);
+}
+
+function parseTabularMeasurement(value: string): { quantity: number; unit: string; unitRate: number; amount: number; hsnCode: string | null } | null {
+  const tokens = numericTokens(value);
+  if (tokens.length < 2) return null;
+  const amountToken = [...tokens].reverse().find(token => token.raw.includes(",") || token.raw.includes("."));
+  if (!amountToken || amountToken.value <= 0) return null;
+  const amountIndex = tokens.lastIndexOf(amountToken);
+  const rateToken = [...tokens.slice(0, amountIndex)].reverse().find(token => token.value > 0 && token.value < 10_000_000);
+  if (!rateToken) return null;
+
+  const rawRate = rateToken.value;
+  const hsnCode = findHsnCode(value);
+  const beforeRate = value.slice(0, Math.max(0, value.lastIndexOf(rateToken.raw)));
+  const quantityHint = findOcrQuantityHint(beforeRate, hsnCode);
+  const candidates = [0, 1, 2, 3].flatMap(scale => {
+    const unitRate = rawRate / (10 ** scale);
+    const quantity = amountToken.value / unitRate;
+    if (!(unitRate > 0) || !(quantity > 0) || quantity > 1_000_000) return [];
+    const integerDistance = Math.abs(quantity - Math.round(quantity));
+    const hintDistance = quantityHint === null ? 0 : Math.abs(quantity - quantityHint) / Math.max(1, quantityHint);
+    const decimalPenalty = rateToken.raw.includes(".") && scale > 0 ? 10 : 0;
+    const scalePenalty = scale * 0.03;
+    return [{ quantity, unitRate, score: integerDistance + hintDistance * 4 + decimalPenalty + scalePenalty }];
+  });
+  const best = candidates.sort((left, right) => left.score - right.score)[0];
+  if (!best || best.score > 0.2) return null;
+  return { quantity: Number(best.quantity.toFixed(3)), unit: "UNIT", unitRate: Number(best.unitRate.toFixed(3)), amount: amountToken.value, hsnCode };
+}
+
+function findOcrQuantityHint(value: string, hsnCode: string | null) {
+  let tail = value;
+  if (hsnCode) {
+    const compactHsn = hsnCode.replace(/(\d{4})(\d{2})(\d{2})/, "$1\\s*$2\\s*$3");
+    const match = value.match(new RegExp(compactHsn));
+    if (match?.index !== undefined) tail = value.slice(match.index + match[0].length);
+  }
+  const candidates = tail.match(/[\[|]?[0-9aAeEoOlI]{2,5}/g) ?? [];
+  for (const raw of [...candidates].reverse()) {
+    const normalized = raw.replace(/^[\[|]+/, "").replace(/[oO]/g, "0").replace(/[aA]/g, "4").replace(/[eE]/g, "6").replace(/[lI|]/g, "1");
+    const value = Number(normalized);
+    if (Number.isInteger(value) && value > 0 && value <= 200_000) return value;
+  }
+  return null;
+}
+
+function buildTabularItemLine(productLine: SourceLine, recognised: { description: string; product: IndianInvoiceLine["product"] }, measured: { quantity: number; unit: string; unitRate: number; amount: number; hsnCode: string | null }): IndianInvoiceLine {
+  const description = extractTableDescription(productLine.text, measured.hsnCode) || recognised.description;
+  return {
+    description,
+    product: recognised.product,
+    hsnCode: measured.hsnCode,
+    quantity: measured.quantity,
+    unit: measured.unit,
+    unitRate: measured.unitRate,
+    amount: measured.amount,
+    sourceLine: productLine.text,
+    lineNumber: productLine.number,
+  };
+}
+
+function extractTableDescription(value: string, hsnCode: string | null) {
+  const productStart = value.search(PRODUCT_PATTERN);
+  if (productStart < 0) return "";
+  let end = value.length;
+  const monetaryTokens = Array.from(value.matchAll(/(?:₹|RS\.?\s*)?\d[\d,]*\.\d{2}/gi));
+  if (monetaryTokens.length >= 2) end = monetaryTokens[monetaryTokens.length - 2]!.index ?? end;
+  if (hsnCode) {
+    const compactHsn = hsnCode.replace(/(\d{4})(\d{2})(\d{2})/, "$1\\s*$2\\s*$3");
+    const match = value.slice(productStart).match(new RegExp(compactHsn));
+    if (match?.index !== undefined) end = Math.min(end, productStart + match.index);
+  }
+  return value.slice(productStart, end).replace(/\s+/g, " ").trim();
 }
 
 function deduplicateItemLines(lines: IndianInvoiceLine[]) {
@@ -471,11 +579,15 @@ function buildItemLine(productLine: SourceLine, recognised: { description: strin
 }
 
 function findProduct(value: string) {
+  if (/\b(?:SERVO|MAK\s+LUBRICANTS?)\b/i.test(value)) {
+    const match = value.match(/\b(?:SERVO|MAK\s+LUBRICANTS?)\b/i)!;
+    return { description: match[0], product: "LUBRICANT" as const };
+  }
   for (const rule of PRODUCT_RULES) {
     const match = value.match(rule.pattern);
     if (match) return { description: match[0].replace(/\s+/g, " ").trim(), product: rule.product };
   }
-  if (findHsnCode(value)) {
+  if (findHsnCode(value) && !/\b(?:BASIC|DESTINATION\s+PRICE|PRODUCT\s+VALUE|TAX|CESS|TOTAL)\b/i.test(value)) {
     const description = value
       .replace(/\b2710\s*\d{2}\s*\d{2}\b|\b2710\d{4}\b/g, " ")
       .replace(/\b\d+(?:[.,]\d+)?\b/g, " ")
@@ -527,9 +639,9 @@ function normalizeQuantityRateAndAmount(quantityRaw: string, rateRaw: string, am
 }
 
 function findHsnCode(value: string) {
-  const compact = value.match(/\b(2710)\s*(\d{2})\s*(\d{2})\b/);
+  const compact = value.match(/\b(\d{4})\s*(\d{2})\s*(\d{2})\b/);
   if (compact) return `${compact[1]}${compact[2]}${compact[3]}`;
-  return value.match(/\b(2710\d{4})\b/)?.[1] ?? null;
+  return value.match(/\b(\d{8})\b/)?.[1] ?? null;
 }
 
 function numericValues(value: string) {

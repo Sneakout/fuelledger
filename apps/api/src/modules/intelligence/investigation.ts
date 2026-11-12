@@ -4,6 +4,7 @@ import { z } from "zod";
 import { env } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
 import { logger } from "../../lib/logger.js";
+import { indiaMonthStart } from "../../lib/india-time.js";
 import { prisma } from "../../lib/prisma.js";
 import { readForNerve, type NerveReadCapability } from "../nerve/read-service.js";
 import { requireIntelligenceAccess } from "./daily-briefing.js";
@@ -33,7 +34,7 @@ export async function investigateFinding(input: { organizationId: string; statio
   await requireIntelligenceAccess(input.organizationId);
   const existing = await prisma.intelligenceInvestigation.findUnique({ where: { organizationId_requestKey: { organizationId: input.organizationId, requestKey: input.requestId } } });
   if (existing) { assertIdempotentMatch(existing, input); return stored(existing); }
-  const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+  const monthStart = indiaMonthStart();
   const used = await prisma.intelligenceInvestigation.count({ where: { organizationId: input.organizationId, createdAt: { gte: monthStart } } });
   if (used >= env.INTELLIGENCE_INVESTIGATION_MONTHLY_LIMIT) throw new AppError(429, "INVESTIGATION_LIMIT_REACHED", "This month’s investigation allowance has been used. It resets at the start of next month.");
 

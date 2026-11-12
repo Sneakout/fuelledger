@@ -6,9 +6,10 @@ import { api, ApiRequestError, type ReportsBootstrap } from '../lib/api';
 import { ReportLibrary } from './ReportsPage';
 import { useAuth } from '../components/AuthProvider';
 import { buildAccountingJournalCsv, buildTallyLedgerMastersXml, buildTallyVouchersXml, summariseAccountingEntries } from '../lib/accounting-export';
+import { indiaDate, indiaMonthStart } from '../lib/india-time';
 
-const today=()=>new Date().toLocaleDateString('en-CA');
-const monthStart=()=>{const value=new Date();value.setDate(1);return value.toLocaleDateString('en-CA');};
+const today=()=>indiaDate();
+const monthStart=()=>indiaMonthStart();
 
 export function DownloadReportsPage(){
   const {user}=useAuth();

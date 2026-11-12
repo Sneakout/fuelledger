@@ -34,6 +34,21 @@ async function main() {
     where: { email: "owner@fuelledger.local" },
   });
   if (!owner) throw new Error("Run the regular seed first.");
+  const activatedAt = new Date();
+  await prisma.organization.update({
+    where: { id: owner.organizationId },
+    data: {
+      subscriptionPlan: "CORE_INTELLIGENCE",
+      subscriptionBillingPeriod: "YEARLY",
+      subscriptionPricePaise: 1_499_900,
+      subscriptionActivatedAt: activatedAt,
+      subscriptionExpiresAt: null,
+      subscriptionUpdatedAt: activatedAt,
+      subscriptionUpdatedBy: "local-demo-seed",
+      intelligenceEnabledAt: activatedAt,
+      intelligenceExpiresAt: null,
+    },
+  });
   const stationInclude = {
     configurations: {
       where: { active: true },
@@ -52,13 +67,13 @@ async function main() {
     where: { organizationId: owner.organizationId, active: true },
     include: stationInclude,
   });
-  // Demo data is persistent in production. Reconcile existing records on every
-  // deployment so accounts created under an earlier brand never retain it.
-  await prisma.organization.update({
-    where: { id: owner.organizationId },
+  // Preserve an intentionally configured training outlet name (for example,
+  // Saleema Petroleum), while replacing only original placeholder names.
+  await prisma.organization.updateMany({
+    where: { id: owner.organizationId, name: { in: ["ABC Fuels", "ABC Petroleum"] } },
     data: { name: demoOrganizationName },
   });
-  if (station && station.name !== demoStationName) {
+  if (station && ["ABC Fuels", "ABC Petroleum"].includes(station.name)) {
     station = await prisma.station.update({
       where: { id: station.id },
       data: { name: demoStationName },
@@ -588,6 +603,7 @@ async function main() {
       update: {
         invoiceDate,
         dueDate,
+        createdAt: invoiceDate,
         subtotal: total,
         totalAmount: total,
         status: spec.paid ? "PAID" : "OPEN",
@@ -600,6 +616,7 @@ async function main() {
         invoiceNumber: spec.invoiceNumber,
         invoiceDate,
         dueDate,
+        createdAt: invoiceDate,
         subtotal: total,
         taxAmount: 0,
         totalAmount: total,
@@ -789,9 +806,9 @@ async function main() {
   await prisma.inventoryLedger.deleteMany({
     where: { id: { startsWith: "demo-real-stock-" } },
   });
-  const desired: Record<string, number> = { MS: 12450, HSD: 14750 };
+  const desired: Record<string, number> = { MS: 12450, HSD: 14750, DEF: 6500 };
   for (const [index, tank] of configuration.tanks
-    .filter((tank) => ["MS", "HSD"].includes(tank.product.code))
+    .filter((tank) => Object.hasOwn(desired, tank.product.code))
     .entries()) {
     const other = await prisma.inventoryLedger.aggregate({
       where: { tankId: tank.id },
@@ -838,7 +855,7 @@ async function main() {
     await prisma.tankDensityReading.upsert({
       where: { id: `demo-density-reading-${tank.id}` },
       update: {
-        density: tank.product.code === "MS" ? 742.6 : 832.4,
+        density: tank.product.code === "MS" ? 742.6 : tank.product.code === "HSD" ? 832.4 : 1089,
         recordedAt: at(0, 7),
       },
       create: {
@@ -846,7 +863,7 @@ async function main() {
         organizationId: owner.organizationId,
         stationId: station.id,
         tankId: tank.id,
-        density: tank.product.code === "MS" ? 742.6 : 832.4,
+        density: tank.product.code === "MS" ? 742.6 : tank.product.code === "HSD" ? 832.4 : 1089,
         recordedById: owner.id,
       },
     });

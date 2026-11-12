@@ -86,6 +86,9 @@ const DownloadReportsPage = lazy(() =>
 const SalesPage = lazy(() =>
   import("./pages/SalesPage").then((module) => ({ default: module.SalesPage })),
 );
+const SalesHistoryPage = lazy(() =>
+  import("./pages/SalesHistoryPage").then((module) => ({ default: module.SalesHistoryPage })),
+);
 const StaffPage = lazy(() =>
   import("./pages/StaffPage").then((module) => ({ default: module.StaffPage })),
 );
@@ -123,6 +126,7 @@ export default function App() {
           <Route path="products" element={<ProductsPage />} />
           <Route path="operations" element={<OperationsPage />} />
           <Route path="sales" element={<SalesPage />} />
+          <Route path="sales/history" element={<SalesHistoryPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="reconciliation" element={<ReconciliationPage />} />
           <Route path="customers" element={<CustomersPage />} />

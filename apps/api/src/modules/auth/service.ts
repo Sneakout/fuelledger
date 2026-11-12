@@ -14,6 +14,10 @@ import { env, isPlatformAdminEmail } from "../../config/env.js";
 import { AppError } from "../../lib/errors.js";
 import { prisma } from "../../lib/prisma.js";
 import { defaultExpenseCategories } from "../../lib/default-expense-categories.js";
+import { indiaDate } from "../../lib/india-time.js";
+
+const showcaseOwnerEmail = "owner@fuelledger.local";
+let showcaseRefreshDate: string | null = null;
 
 export async function login(
   input: LoginInput,
@@ -37,6 +41,7 @@ export async function login(
       "INVALID_CREDENTIALS",
       "Email, mobile number or password is incorrect.",
     );
+  if (record.email === showcaseOwnerEmail) await refreshDemoShowcaseDatesOnce();
   await prisma.user.update({
     where: { id: record.id },
     data: { lastLoginAt: new Date() },
@@ -153,7 +158,7 @@ export async function googleAuth(input: GoogleAuthInput, userAgent?: string) {
 
 export async function startDemo(input: DemoAccessInput) {
   const owner = await prisma.user.findUnique({
-    where: { email: "owner@fuelledger.local" },
+    where: { email: showcaseOwnerEmail },
     include: userInclude,
   });
   if (!owner || !owner.active)
@@ -162,7 +167,7 @@ export async function startDemo(input: DemoAccessInput) {
       "DEMO_UNAVAILABLE",
       "The product demo is temporarily unavailable.",
     );
-  await refreshDemoShowcaseDates();
+  await refreshDemoShowcaseDatesOnce();
   const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
   const contact = input.contact.includes("@")
     ? input.contact.trim().toLowerCase()
@@ -260,7 +265,7 @@ async function refreshDemoShowcaseDates() {
       dueDate.setDate(dueDate.getDate() + 3);
       await tx.purchaseInvoice.updateMany({
         where: { id: purchase.id },
-        data: { invoiceDate, dueDate },
+        data: { invoiceDate, dueDate, createdAt: invoiceDate },
       });
       await tx.purchaseReceipt.updateMany({
         where: { invoiceId: purchase.id },
@@ -276,6 +281,13 @@ async function refreshDemoShowcaseDates() {
       });
     }
   }, { maxWait: 10_000, timeout: 30_000 });
+}
+
+async function refreshDemoShowcaseDatesOnce() {
+  const today = indiaDate();
+  if (showcaseRefreshDate === today) return;
+  await refreshDemoShowcaseDates();
+  showcaseRefreshDate = today;
 }
 
 export async function currentUser(token: string): Promise<User> {
@@ -325,6 +337,7 @@ export async function currentUser(token: string): Promise<User> {
   });
   if (!record || !record.active || !record.loginEnabled)
     throw new AppError(401, "UNAUTHENTICATED", "User is unavailable.");
+  if (record.email === showcaseOwnerEmail) await refreshDemoShowcaseDatesOnce();
   return present(record, demoExpiresAt);
 }
 

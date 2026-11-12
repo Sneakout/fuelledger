@@ -9,17 +9,14 @@ import {
   type ShiftBootstrap,
   type ShiftStation,
 } from "../lib/api";
+import { formatIndiaDateTime } from "../lib/india-time";
 const money = (value: string | number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(Number(value));
-const captured = (value: string) =>
-  new Date(value).toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+const captured = (value: string) => `${formatIndiaDateTime(value)} IST`;
 const meterLabel = (
   dispenser: { code: string; location: string | null },
   nozzle: { code: string; product: { code: string } },

@@ -29,6 +29,7 @@ export type EditableInvoiceDraft = {
 };
 
 export function createEditableInvoiceDraft(invoice: ParsedIndianInvoice): EditableInvoiceDraft {
+  const invoiceTaxRate = invoiceWideTaxRate(invoice);
   return {
     supplierName: invoice.supplierName?.value ?? "",
     supplierGSTIN: invoice.supplierGSTIN?.value ?? "",
@@ -40,7 +41,7 @@ export function createEditableInvoiceDraft(invoice: ParsedIndianInvoice): Editab
     taxAmount: invoice.tax.total === null ? "" : decimal(invoice.tax.total),
     purchasePriceExcludedAmount: "",
     totalAmount: invoice.totalAmount ? decimal(invoice.totalAmount.value) : "",
-    lines: invoice.lines.length ? invoice.lines.map(toEditableLine) : [emptyInvoiceLine()],
+    lines: invoice.lines.length ? invoice.lines.map(line => toEditableLine(line, invoiceTaxRate)) : [emptyInvoiceLine()],
   };
 }
 
@@ -148,12 +149,28 @@ export function EditableInvoiceReviewDialog({ fileName, initialDraft, onCancel, 
   </div>;
 }
 
-function toEditableLine(line: IndianInvoiceLine): EditableInvoiceLine {
+function toEditableLine(line: IndianInvoiceLine, invoiceTaxRate: string | null): EditableInvoiceLine {
   const baseAmount = line.quantity * line.unitRate;
   const taxRate = line.grossAmount && baseAmount > 0 && line.grossAmount >= baseAmount
     ? roundedDecimal(String(((line.grossAmount - baseAmount) / baseAmount) * 100), 2)
-    : "0";
+    : invoiceTaxRate ?? "0";
   return { id: crypto.randomUUID(), product: line.product, description: line.description, hsnCode: line.hsnCode ?? "", quantity: decimal(line.quantity), unit: line.unit ?? "", unitRate: roundedDecimal(String(line.unitRate), 2), taxRate };
+}
+
+function invoiceWideTaxRate(invoice: ParsedIndianInvoice) {
+  const cgstRate = percentageFromCandidate(invoice.tax.cgst);
+  const sgstRate = percentageFromCandidate(invoice.tax.sgst);
+  const igstRate = percentageFromCandidate(invoice.tax.igst);
+  if (cgstRate !== null && sgstRate !== null) return roundedDecimal(String(cgstRate + sgstRate), 2);
+  if (igstRate !== null) return roundedDecimal(String(igstRate), 2);
+  return null;
+}
+
+function percentageFromCandidate(candidate: { sourceLine: string } | null) {
+  const match = candidate?.sourceLine.match(/(\d+(?:\.\d+)?)\s*%/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : null;
 }
 
 function emptyInvoiceLine(): EditableInvoiceLine {

@@ -8,6 +8,7 @@ import { buildReport } from "../reports/service.js";
 import { AppError } from "../../lib/errors.js";
 import { buildCustomerInvoiceAgeing, rankCustomerInvoiceAgeing } from "./credit-ageing.js";
 import { analyzePurchases, type PurchaseReviewInvoice } from "./purchase-analysis.js";
+import { addIndiaDays, indiaDayRange } from "../../lib/india-time.js";
 
 export const nerveReadCapabilities = ["dashboard", "reconciliation", "inventory", "receivables", "payables", "purchase-price", "purchase-review", "receipt-timing", "profit", "evidence"] as const;
 export type NerveReadCapability = typeof nerveReadCapabilities[number];
@@ -212,11 +213,11 @@ async function resolveEvidence(scope: Scope) {
 }
 
 function previousPeriod(startDate: string, endDate: string, stationId: string) {
-  const start = new Date(`${startDate}T00:00:00`), end = new Date(`${endDate}T00:00:00`);
+  const start = indiaDayRange(startDate).start, end = indiaDayRange(endDate).start;
   const days = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
-  const previousEnd = new Date(start); previousEnd.setDate(previousEnd.getDate() - 1);
-  const previousStart = new Date(previousEnd); previousStart.setDate(previousStart.getDate() - days + 1);
-  return { startDate: localDate(previousStart), endDate: localDate(previousEnd), stationId, permittedStationIds: [stationId] };
+  const previousEnd = addIndiaDays(startDate, -1);
+  const previousStart = addIndiaDays(previousEnd, -days + 1);
+  return { startDate: previousStart, endDate: previousEnd, stationId, permittedStationIds: [stationId] };
 }
 
 function financialMovement(label: string, current: number, previous: number) {
@@ -227,4 +228,3 @@ function financialMovement(label: string, current: number, previous: number) {
 }
 
 function share(value: number, total: number) { return Math.abs(total) > .005 ? value / total * 100 : null; }
-function localDate(value: Date) { return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`; }

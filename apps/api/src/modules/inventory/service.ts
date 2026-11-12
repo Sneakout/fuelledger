@@ -6,13 +6,14 @@ import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 import { assertStockAvailable } from '../../lib/stock.js';
 import { postJournal } from '../accounting/service.js';
+import { addIndiaDays, indiaDate, indiaDayStart } from '../../lib/india-time.js';
 
-const tankInclude = { product: { select: { id: true, name: true, code: true, unit: true, category: true } }, physicalReadings: { take: 1, orderBy: { recordedAt: 'desc' as const } }, densityReadings: { take: 1, orderBy: { recordedAt: 'desc' as const } } } as const;
+const tankInclude = (asOf: Date) => ({ product: { select: { id: true, name: true, code: true, unit: true, category: true, purchasePrice: true, purchasePriceHistory: { where: { effectiveFrom: { lte: asOf } }, orderBy: { effectiveFrom: 'desc' as const }, take: 1 } } }, physicalReadings: { take: 1, orderBy: { recordedAt: 'desc' as const } }, densityReadings: { take: 1, orderBy: { recordedAt: 'desc' as const } } } as const);
 export async function bootstrap(organizationId: string,stationIds?:string[]) {
   const asOf = new Date();
   const [stations, products, ledger, receipts, movements] = await Promise.all([
-    prisma.station.findMany({ where: { organizationId, active: true,...(stationIds?{id:{in:stationIds}}:{}) }, include: { configurations: { where: { active: true }, take: 1, include: { tanks: { where: { status: 'ACTIVE' }, include: tankInclude } } } } }),
-    prisma.product.findMany({ where: { organizationId, active: true, inventoryTracked: true }, select: { id: true, name: true, code: true, unit: true, category: true, tankLinked: true } }),
+    prisma.station.findMany({ where: { organizationId, active: true,...(stationIds?{id:{in:stationIds}}:{}) }, include: { configurations: { where: { active: true }, take: 1, include: { tanks: { where: { status: 'ACTIVE' }, include: tankInclude(asOf) } } } } }),
+    prisma.product.findMany({ where: { organizationId, active: true, inventoryTracked: true }, select: { id: true, name: true, code: true, unit: true, category: true, tankLinked: true, purchasePrice: true, purchasePriceHistory: { where: { effectiveFrom: { lte: asOf } }, orderBy: { effectiveFrom: 'desc' }, take: 1 } } }),
     prisma.inventoryLedger.findMany({ where: { organizationId,...(stationIds?{stationId:{in:stationIds}}:{}) }, orderBy: { occurredAt: 'desc' }, take: 80, include: { product: { select: { name: true, code: true, unit: true } }, station: { select: { name: true, code: true } }, tank: { select: { code: true } } } }),
     prisma.purchaseReceipt.findMany({ where: { organizationId,...(stationIds?{stationId:{in:stationIds}}:{}) }, orderBy: { receivedAt: 'desc' }, take: 20, include: { station: { select: { name: true } }, lines: { include: { product: { select: { name: true, code: true, unit: true } }, tank: { select: { code: true } } } } } }),
     prisma.inventoryLedger.findMany({ where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), occurredAt: { lte: asOf } }, select: { stationId: true, productId: true, tankId: true, type: true, quantityDelta: true, occurredAt: true, product: { select: { tankLinked: true } }, tank: { select: { productId: true, configuration: { select: { stationId: true } } } } } }),
@@ -38,14 +39,14 @@ export function analyzeTankMovements(movements: StockMovementForAnalysis[], book
   const recent = movements.filter(row => row.occurredAt >= windowStart && row.occurredAt <= asOf);
   const invalidDirection = recent.filter(row => (row.type === 'RECEIPT' && Number(row.quantityDelta) < 0) || (row.type === 'SALE' && Number(row.quantityDelta) > 0));
   const materialAdjustments = recent.filter(row => row.type === 'ADJUSTMENT' && Math.abs(Number(row.quantityDelta)) >= Math.max(500, Math.abs(bookStock) * .1));
-  const completedDayEnd = new Date(Date.UTC(asOf.getUTCFullYear(), asOf.getUTCMonth(), asOf.getUTCDate()));
+  const completedDayEnd = indiaDayStart(asOf);
   const salesByDay = new Map<string, number>();
   for (const row of recent.filter(row => row.type === 'SALE' && row.occurredAt < completedDayEnd)) {
-    const day = row.occurredAt.toISOString().slice(0, 10);
+    const day = indiaDate(row.occurredAt);
     salesByDay.set(day, (salesByDay.get(day) ?? 0) + Math.abs(Number(row.quantityDelta)));
   }
   const sellingDays = [...salesByDay.entries()].sort(([left], [right]) => left.localeCompare(right));
-  const latestCompletedDay = new Date(completedDayEnd.getTime() - 86_400_000).toISOString().slice(0, 10);
+  const latestCompletedDay = addIndiaDays(indiaDate(asOf), -1);
   const latestSales = salesByDay.get(latestCompletedDay) ?? 0;
   const priorSales = sellingDays.filter(([day]) => day < latestCompletedDay).map(([, litres]) => litres);
   const baseline = median(priorSales);
@@ -87,8 +88,9 @@ function median(values: number[]) {
   const sorted = [...values].sort((left, right) => left - right), middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2;
 }
-function reconciliation({ station, tank, product, entries }: { station?: { id: string; name: string; code: string }; tank?: { id: string; code: string; openingStock: Prisma.Decimal; product: { id: string; name: string; code: string; unit: string; category: string }; physicalReadings: Array<{ physicalStock: Prisma.Decimal; dipReading: Prisma.Decimal | null; recordedAt: Date }>; densityReadings: Array<{ density: Prisma.Decimal; recordedAt: Date }> }; product?: { id: string; name: string; code: string; unit: string }; entries: Array<{ type: string; quantityDelta: Prisma.Decimal; occurredAt: Date }> }) {
-  const item = tank?.product ?? product!;
+function reconciliation({ station, tank, product, entries }: { station?: { id: string; name: string; code: string }; tank?: { id: string; code: string; openingStock: Prisma.Decimal; nominalCapacity: Prisma.Decimal; workingCapacity: Prisma.Decimal; product: { id: string; name: string; code: string; unit: string; category: string; purchasePrice: Prisma.Decimal; purchasePriceHistory: Array<{ price: Prisma.Decimal; effectiveFrom: Date }> }; physicalReadings: Array<{ physicalStock: Prisma.Decimal; dipReading: Prisma.Decimal | null; recordedAt: Date }>; densityReadings: Array<{ density: Prisma.Decimal; recordedAt: Date }> }; product?: { id: string; name: string; code: string; unit: string; category: string; purchasePrice: Prisma.Decimal; purchasePriceHistory: Array<{ price: Prisma.Decimal; effectiveFrom: Date }> }; entries: Array<{ type: string; quantityDelta: Prisma.Decimal; occurredAt: Date }> }) {
+  const source = tank?.product ?? product!;
+  const item = { id: source.id, name: source.name, code: source.code, unit: source.unit, category: source.category, purchasePrice: Number(effectivePriceAt(source.purchasePrice ?? new Prisma.Decimal(0), source.purchasePriceHistory ?? [])) };
   const opening = Number(tank?.openingStock ?? 0);
   const totals = (movements: typeof entries) => ({
     receipts: sum(movements.filter(entry => entry.type === 'RECEIPT')),
@@ -102,7 +104,7 @@ function reconciliation({ station, tank, product, entries }: { station?: { id: s
   const physicalStock = reading ? Number(reading.physicalStock) : null;
   const readingMovements = reading ? totals(entries.filter(entry => entry.occurredAt <= reading.recordedAt)) : null;
   const bookStockAtReading = readingMovements ? calculateBookStock({ openingBalance: opening, receipts: readingMovements.receipts, sales: readingMovements.sales, approvedAdjustments: readingMovements.adjustments }) : null;
-  return { station, tank: tank ? { id: tank.id, code: tank.code } : null, product: item, opening, receipts: movements.receipts, sales: movements.sales, adjustments: movements.adjustments, bookStock, physicalStock, bookStockAtReading, variance: physicalStock === null || bookStockAtReading === null ? null : physicalStock - bookStockAtReading, dipReading: reading?.dipReading ? Number(reading.dipReading) : null, readAt: reading?.recordedAt ?? null, density: densityReading ? Number(densityReading.density) : null, densityRecordedAt: densityReading?.recordedAt ?? null };
+  return { station, tank: tank ? { id: tank.id, code: tank.code, nominalCapacity: Number(tank.nominalCapacity), workingCapacity: Number(tank.workingCapacity) } : null, product: item, opening, receipts: movements.receipts, sales: movements.sales, adjustments: movements.adjustments, bookStock, physicalStock, bookStockAtReading, variance: physicalStock === null || bookStockAtReading === null ? null : physicalStock - bookStockAtReading, dipReading: reading?.dipReading ? Number(reading.dipReading) : null, readAt: reading?.recordedAt ?? null, density: densityReading ? Number(densityReading.density) : null, densityRecordedAt: densityReading?.recordedAt ?? null };
 }
 const sum = (entries: Array<{ quantityDelta: Prisma.Decimal }>) => entries.reduce((total, entry) => total + Number(entry.quantityDelta), 0);
 const group = <T>(values: T[], key: (value: T) => string) => values.reduce((map, value) => { const id = key(value); map.set(id, [...(map.get(id) ?? []), value]); return map; }, new Map<string, T[]>());

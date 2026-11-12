@@ -19,6 +19,7 @@ import {
   type Supplier,
 } from "../lib/api";
 import { defaultPurchaseDueDate } from "../lib/purchase-due-date";
+import { indiaCalendarDateIso, indiaDate, indiaDateTimeLocal } from "../lib/india-time";
 const money = (v: number | string) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -54,13 +55,9 @@ export const onlyCompatibleTankId = (
   return tanks.length === 1 ? tanks[0]!.id : "";
 };
 export const dueDateFromInvoiceDate = defaultPurchaseDueDate;
-const iso = (date: string) => new Date(`${date}T00:00:00`).toISOString();
-const today = () => new Date().toISOString().slice(0, 10);
-const localDateTimeNow = () => {
-  const value = new Date();
-  value.setMinutes(value.getMinutes() - value.getTimezoneOffset());
-  return value.toISOString().slice(0, 16);
-};
+const iso = indiaCalendarDateIso;
+const today = () => indiaDate();
+const localDateTimeNow = () => indiaDateTimeLocal();
 export const purchasePriceForDate = (
   product: PurchasesBootstrap["products"][number] | undefined,
   invoiceDate: string,

@@ -5,13 +5,13 @@ import { AppError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 import { prisma } from '../../lib/prisma.js';
 import { bookStockAt } from '../../lib/stock.js';
+import { indiaDate, indiaDayStart, indiaParts } from '../../lib/india-time.js';
 import { buildReport } from '../reports/service.js';
 import { dailyBriefing } from '../intelligence/daily-briefing.js';
 import { sendApns } from './apns.js';
 import { buildApprovalScenario, buildMissingRecordScenario, buildProfitScenario, buildShiftScenario, buildStockScenario } from './scenario-builders.js';
 
 type DeliveryResult = { status: 'SENT' | 'FAILED' | 'SKIPPED'; reason?: string };
-const indiaTimeZone = 'Asia/Kolkata';
 const money = (value: number) => `₹${Math.round(value).toLocaleString('en-IN')}`;
 const defaults = {
   whatsappNumber: null as string | null,
@@ -29,13 +29,6 @@ const defaults = {
 };
 type NotificationSettingFields = Omit<typeof defaults, 'varianceThreshold' | 'stockVarianceTolerance'> & { varianceThreshold: unknown; stockVarianceTolerance: unknown };
 
-function indiaParts(date = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: indiaTimeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(date);
-  const get = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find(part => part.type === type)?.value ?? 0);
-  return { year: get('year'), month: get('month'), day: get('day'), hour: get('hour') };
-}
-function indiaDate(date = new Date()) { const value = indiaParts(date); return `${value.year}-${String(value.month).padStart(2, '0')}-${String(value.day).padStart(2, '0')}`; }
-function indiaDayStart(date = new Date()) { return new Date(`${indiaDate(date)}T00:00:00+05:30`); }
 function featureEnabled(settings: typeof defaults, type: OwnerNotificationType) {
   return type === 'DENSITY_MISSING' ? settings.densityMissingEnabled
     : type === 'LOW_STOCK' ? settings.lowStockEnabled

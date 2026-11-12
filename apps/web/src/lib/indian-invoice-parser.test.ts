@@ -2,6 +2,65 @@ import { describe, expect, it } from "vitest";
 import { parseIndianInvoice } from "./indian-invoice-parser";
 
 describe("parseIndianInvoice", () => {
+  it("adapts a ruled lubricant table into separate product rows", () => {
+    const result = parseIndianInvoice(`§ SHREE GANESH LUBRICANTS TAX INVOICE
+Invoice No. © SGL/24-25/0821
+Invoice Date © 20-Aug-2024
+Bill To (Consignee) Ship To (Delivery at) Transport Details
+Saleema Petroleum Saleema Petroleum Transporter © Gupta Roadlines
+E-Way Bill No. : 46109821 3456
+SERVO 4T 20W-40 (4 Stroke Engine Oil) 27101210 310.00 37,200.00
+SERVO PRIDE 15W-40 (Diesel Engine Oil) 27101980 7.5 Ltr 40 2,150.00 86,000.00
+SERVO FUTURA-G+ 75W-90 (Gear Oil) 27101980 420.00 25,200.00
+SERVO SUPER 20W-50 (Multigrade Engine Oil) 27101980 1,050.00 52,500.00
+SERVO HYDRO 68 Hydraulic Oil ISO VG 68 27101980 5200.00 52,000.00
+SERVO GREASE MP3 Multipurpose Grease (Lithium) 27101990 320.00 32,000.00
+SERVO TRANS FLUID ATF - Dexron III 27101980 450.00 22,500.00
+SERVO COOLANT Radiator Coolant (Premix) 3820 00 00 280.00 14,000.00
+Subtotal 3,21,900.00
+CGST @ 9% 28,971.00
+SGST @ 9% 28,971.00
+Total Invoice Value (₹) 3,79,842.00`);
+
+    expect(result.supplierName?.value).toBe("SHREE GANESH LUBRICANTS");
+    expect(result.consigneeName?.value).toBe("Saleema Petroleum");
+    expect(result.invoiceNumber?.value).toBe("SGL/24-25/0821");
+    expect(result.lines).toHaveLength(8);
+    expect(result.lines[0]).toMatchObject({ product: "LUBRICANT", hsnCode: "27101210", quantity: 120, unitRate: 310, amount: 37200 });
+    expect(result.lines[7]).toMatchObject({ hsnCode: "38200000", quantity: 50, unitRate: 280, amount: 14000 });
+    expect(result.totalAmount?.value).toBe(379842);
+    expect(result.tax.total).toBe(57942);
+    expect(result.missingFields).toEqual([]);
+  });
+
+  it("recovers the supplied lubricant invoice from its real OCR output", () => {
+    const result = parseIndianInvoice(`§ SHREE GANESH LUBRICANTS TAX INVOICE
+Invoice No. © SGL/24-25/0821
+Invoice Date © 20-Aug-2024
+Bill To (Consignee) Ship To (Delivery at) Transport Details
+Saleema Petroleum Saleema Petroleum Transporter © Gupta Roadlines
+E-Way Bill No. : 46109821 3456
+Product Description Packing Quantity Unit Price Amount
+SERVO 4T 20W-40 (4 Stroke Engine Oil) 27101210 310.00 37,200.00
+SERVO PRIDE 15W-40 (Diesel Engine Oi) 27701980 | 75 [a0 [215000 86,000.00
+SERVO FUTURA-G+ 75W-90 (Gear Oil) 710198 | wr | e0 | 420.00 25,200.00
+SERVO SUPER 20W-50 (Multigrade Engine Oi) | 27101980 1,050.00 52,500.00
+SERVO HYDRO 68 Hydraulic Oil - 1S0 VG 68 271019 80 5200.00 52,000.00
+| 6 | SERVO GREASE MP3 Multipurpose Grease (Lithium) 271019 90 320.00 32,000.00
+SERVO TRANS FLUID ATF - Dexron Il 27101980 450.00 22,500.00
+[oe] SERVO COOLANT Radiator Coolant (Premix) 3820 00 00 280.00 14,000.00
+CGST @ 9% 28,971.00
+SGST @ 9% 28,971.00
+Total Invoice Value (3) 3,79,842.00`);
+
+    expect(result.invoiceNumber?.value).toBe("SGL/24-25/0821");
+    expect(result.consigneeName?.value).toBe("Saleema Petroleum");
+    expect(result.lines).toHaveLength(8);
+    expect(result.lines.map(line => line.quantity)).toEqual([120, 40, 60, 50, 10, 100, 50, 50]);
+    expect(result.tax.total).toBe(57942);
+    expect(result.totalAmount?.value).toBe(379842);
+    expect(result.missingFields).toEqual([]);
+  });
   it("reconciles two IOCL fuels using each material total and a separately OCR'd invoice total", () => {
     const result = parseIndianInvoice(`Indian Oil Corporation Limited
 TAX INVOICE 20274247B022177

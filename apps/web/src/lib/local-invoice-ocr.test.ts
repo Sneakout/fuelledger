@@ -31,4 +31,11 @@ describe("local invoice OCR targeted passes", () => {
     expect(needsFullPagePass("TAX INVOICE 20274247B025710")).toBe(true);
     expect(needsFullPagePass("TAX INVOICE 20274247B025710\nTotal 1207079.00")).toBe(true);
   });
+
+  it("does not accept table keywords without a credible product row and invoice total", () => {
+    expect(needsFullPagePass(`TAX INVOICE SGL/24-25/0821
+      Product Description Packing Quantity Unit Price Amount
+      SERVO Lubricants 27101980
+      Diesel Engine Oil 86,000.00`)).toBe(true);
+  });
 });

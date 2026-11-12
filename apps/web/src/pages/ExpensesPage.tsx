@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { api, ApiRequestError, type PurchasesBootstrap } from "../lib/api";
+import { indiaCalendarDateIso, indiaDate } from "../lib/india-time";
 
 const money = (value: number | string) =>
   new Intl.NumberFormat("en-IN", {
@@ -16,8 +17,8 @@ const money = (value: number | string) =>
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(Number(value));
-const today = () => new Date().toISOString().slice(0, 10);
-const iso = (value: string) => new Date(`${value}T00:00:00`).toISOString();
+const today = () => indiaDate();
+const iso = indiaCalendarDateIso;
 async function attachment(file: File | null) {
   if (!file) return null;
   if (file.size > 500000)

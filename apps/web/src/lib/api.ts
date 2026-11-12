@@ -412,6 +412,10 @@ export const api = {
     request<ReportsBootstrap>(
       `/reports/bootstrap?${new URLSearchParams(Object.entries(filter).filter(([, value]) => value) as string[][]).toString()}`,
     ),
+  salesHistory: (filter: { startDate: string; endDate: string; stationId?: string }) =>
+    request<SalesHistory>(
+      `/reports/sales-history?${new URLSearchParams(Object.entries(filter).filter(([, value]) => value) as string[][]).toString()}`,
+    ),
   dashboardBootstrap: (stationId?: string) =>
     request<DashboardBootstrap>(
       `/dashboard/bootstrap${stationId ? `?stationId=${encodeURIComponent(stationId)}` : ""}`,
@@ -983,13 +987,14 @@ export type InventoryStation = {
 };
 export type ReconciliationLine = {
   station: { id: string; name: string; code: string } | undefined;
-  tank: { id: string; code: string } | null;
+  tank: { id: string; code: string; nominalCapacity: number; workingCapacity: number } | null;
   product: {
     id: string;
     name: string;
     code: string;
     unit: string;
     category?: string;
+    purchasePrice: number;
   };
   opening: number;
   receipts: number;
@@ -1369,6 +1374,12 @@ export type AccountingBootstrap = {
   trial: { debit: number; credit: number };
 };
 export type ReportStation = { id: string; name: string; code: string };
+export type SalesHistory = {
+  filter: { startDate: string; endDate: string; stationId?: string; station: ReportStation | null };
+  stations: ReportStation[];
+  summary: { quantity: number; revenue: number; transactions: number };
+  daily: Array<{ key: string; date: string; productId: string; product: string; code: string; unit: string; quantity: number; revenue: number; transactions: number }>;
+};
 export type ReportSummary = {
   grossSales: number;
   transactions: number;

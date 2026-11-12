@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
+import { indiaDate, indiaDayRange, indiaMonthStart } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
 import { bootstrap as dashboardBootstrap } from '../dashboard/service.js';
 import { buildReport } from '../reports/service.js';
@@ -17,7 +18,6 @@ type AnswerCopy = { title: string; explanation: string; action: string };
 type StoredAnswer = AnswerCopy & { facts: AnswerFact[] };
 const copySchema = z.object({ title: z.string().min(4).max(90), explanation: z.string().min(8).max(260), action: z.string().min(3).max(140) });
 const money = (value: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
-const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
 export function matchAskIntent(question: string): AskIntent | null {
   const value = question.toLowerCase();
@@ -90,11 +90,11 @@ function factsFor(intent: AskIntent, dashboard: Awaited<ReturnType<typeof dashbo
 export async function askFuelNerve(input: { organizationId: string; userId: string; requestId: string; question: string; permittedStationIds?: string[]; stationId?: string; asOf?: string }) {
   const now = new Date();
   await requireIntelligenceAccess(input.organizationId, now);
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthStart = indiaMonthStart(now);
   const existing = await prisma.intelligenceQuestion.findUnique({ where: { organizationId_requestKey: { organizationId: input.organizationId, requestKey: input.requestId } } });
   if (existing) {
     const used = await prisma.intelligenceQuestion.count({ where: { organizationId: input.organizationId, createdAt: { gte: monthStart } } });
-    return { id: existing.id, intent: existing.intent, scope: { date: isoDate(existing.periodStart), stationId: existing.stationId }, answer: existing.answer as unknown as StoredAnswer, answerMode: existing.answerMode, usage: { used, limit: env.INTELLIGENCE_ASK_MONTHLY_LIMIT, remaining: Math.max(0, env.INTELLIGENCE_ASK_MONTHLY_LIMIT - used) } };
+    return { id: existing.id, intent: existing.intent, scope: { date: indiaDate(existing.periodStart), stationId: existing.stationId }, answer: existing.answer as unknown as StoredAnswer, answerMode: existing.answerMode, usage: { used, limit: env.INTELLIGENCE_ASK_MONTHLY_LIMIT, remaining: Math.max(0, env.INTELLIGENCE_ASK_MONTHLY_LIMIT - used) } };
   }
   const used = await prisma.intelligenceQuestion.count({ where: { organizationId: input.organizationId, createdAt: { gte: monthStart } } });
   if (used >= env.INTELLIGENCE_ASK_MONTHLY_LIMIT) throw new AppError(429, 'INTELLIGENCE_QUESTION_LIMIT', 'This month’s Ask FuelNerve allowance has been used. It resets at the start of next month.');
@@ -118,14 +118,14 @@ export async function askFuelNerve(input: { organizationId: string; userId: stri
       if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
       const duplicate = await prisma.intelligenceQuestion.findUniqueOrThrow({ where: { organizationId_requestKey: { organizationId: input.organizationId, requestKey: input.requestId } } });
       const currentUsed = await prisma.intelligenceQuestion.count({ where: { organizationId: input.organizationId, createdAt: { gte: monthStart } } });
-      return { id: duplicate.id, intent: duplicate.intent, scope: { date: isoDate(duplicate.periodStart), stationId: duplicate.stationId }, answer: duplicate.answer, answerMode: duplicate.answerMode, stationId: duplicate.stationId ?? undefined, snapshotDate: duplicate.periodStart.toISOString(), stale: Date.now() - duplicate.periodStart.getTime() > 86_400_000, inconsistentSnapshot: false, missingInformation: [], supportedFollowUps: ['Give me details', 'Why first?', 'Show the records'], usage: { used: currentUsed, limit: env.INTELLIGENCE_ASK_MONTHLY_LIMIT, remaining: Math.max(0, env.INTELLIGENCE_ASK_MONTHLY_LIMIT - currentUsed) } };
+      return { id: duplicate.id, intent: duplicate.intent, scope: { date: indiaDate(duplicate.periodStart), stationId: duplicate.stationId }, answer: duplicate.answer, answerMode: duplicate.answerMode, stationId: duplicate.stationId ?? undefined, snapshotDate: duplicate.periodStart.toISOString(), stale: Date.now() - duplicate.periodStart.getTime() > 86_400_000, inconsistentSnapshot: false, missingInformation: [], supportedFollowUps: ['Give me details', 'Why first?', 'Show the records'], usage: { used: currentUsed, limit: env.INTELLIGENCE_ASK_MONTHLY_LIMIT, remaining: Math.max(0, env.INTELLIGENCE_ASK_MONTHLY_LIMIT - currentUsed) } };
     }
   }
   logger.info({ organizationId: input.organizationId, releaseStage: env.OWNER_ASSISTANT_RELEASE_STAGE, rollback: env.OWNER_ASSISTANT_ROLLBACK, stationSelected: Boolean(input.stationId) }, 'Owner Assistant legacy route selected');
   const safetyIdentifier = createHash('sha256').update(input.userId).digest('hex').slice(0, 32);
   const intent = await classify(input.question, safetyIdentifier);
   if (!intent) throw new AppError(422, 'QUESTION_NOT_SUPPORTED', 'Ask about today’s sales, stock, collections, profit, shifts, customer balances or supplier balances.');
-  const date = isoDate(now), periodStart = new Date(`${date}T00:00:00`), periodEnd = new Date(`${date}T23:59:59.999`);
+  const date = indiaDate(now), range = indiaDayRange(date), periodStart = range.start, periodEnd = new Date(range.endExclusive.getTime() - 1);
   const [dashboard, report] = await Promise.all([dashboardBootstrap(input.organizationId, input.permittedStationIds, input.stationId), buildReport(input.organizationId, { startDate: date, endDate: date, permittedStationIds: input.permittedStationIds, ...(input.stationId ? { stationId: input.stationId } : {}) })]);
   const facts = factsFor(intent, dashboard, report);
   const explained = await explain(input.question, intent, facts, safetyIdentifier);
@@ -137,6 +137,6 @@ export async function askFuelNerve(input: { organizationId: string; userId: stri
     if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
     const duplicate = await prisma.intelligenceQuestion.findUniqueOrThrow({ where: { organizationId_requestKey: { organizationId: input.organizationId, requestKey: input.requestId } } });
     const currentUsed = await prisma.intelligenceQuestion.count({ where: { organizationId: input.organizationId, createdAt: { gte: monthStart } } });
-    return { id: duplicate.id, intent: duplicate.intent, scope: { date: isoDate(duplicate.periodStart), stationId: duplicate.stationId }, answer: duplicate.answer as unknown as StoredAnswer, answerMode: duplicate.answerMode, usage: { used: currentUsed, limit: env.INTELLIGENCE_ASK_MONTHLY_LIMIT, remaining: Math.max(0, env.INTELLIGENCE_ASK_MONTHLY_LIMIT - currentUsed) } };
+    return { id: duplicate.id, intent: duplicate.intent, scope: { date: indiaDate(duplicate.periodStart), stationId: duplicate.stationId }, answer: duplicate.answer as unknown as StoredAnswer, answerMode: duplicate.answerMode, usage: { used: currentUsed, limit: env.INTELLIGENCE_ASK_MONTHLY_LIMIT, remaining: Math.max(0, env.INTELLIGENCE_ASK_MONTHLY_LIMIT - currentUsed) } };
   }
 }

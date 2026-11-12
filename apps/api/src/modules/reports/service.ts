@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 import { AppError } from '../../lib/errors.js';
+import { indiaDate, indiaDayRange, indiaDayStart } from '../../lib/india-time.js';
 
 type ReportFilter = { startDate: string; endDate: string; stationId?: string | undefined; permittedStationIds?: string[] | undefined; asOf?: Date | undefined };
 
@@ -18,10 +19,40 @@ const optionalReportRows = async <T>(query: PromiseLike<T[]>): Promise<{ rows: T
   }
 };
 
+export async function buildSalesHistory(organizationId: string, filter: ReportFilter) {
+  const start = indiaDayRange(filter.startDate).start;
+  const endExclusive = indiaDayRange(filter.endDate).endExclusive;
+  const stationIds = filter.stationId ? [filter.stationId] : filter.permittedStationIds;
+  const station = filter.stationId ? await prisma.station.findFirst({ where: { id: filter.stationId, organizationId, ...(filter.permittedStationIds ? { id: { in: filter.permittedStationIds } } : {}) }, select: { id: true, name: true, code: true } }) : null;
+  if (filter.stationId && !station) throw new Error('REPORT_STATION_NOT_FOUND');
+  const [stations, sales] = await Promise.all([
+    prisma.station.findMany({ where: { organizationId, active: true, ...(stationIds ? { id: { in: stationIds } } : {}) }, select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } }),
+    prisma.sale.findMany({
+      where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), occurredAt: { gte: start, lt: endExclusive }, product: { category: 'FUEL' } },
+      select: { occurredAt: true, quantity: true, totalAmount: true, product: { select: { id: true, name: true, code: true, unit: true } } },
+      orderBy: { occurredAt: 'asc' },
+    }),
+  ]);
+  const daily = new Map<string, { key: string; date: string; productId: string; product: string; code: string; unit: string; quantity: number; revenue: number; transactions: number }>();
+  for (const sale of sales) {
+    const date = indiaDate(sale.occurredAt), key = `${date}:${sale.product.id}`;
+    add(daily, key, () => ({ key, date, productId: sale.product.id, product: sale.product.name, code: sale.product.code, unit: sale.product.unit, quantity: 0, revenue: 0, transactions: 0 }), row => {
+      row.quantity += number(sale.quantity); row.revenue += number(sale.totalAmount); row.transactions += 1;
+    });
+  }
+  const rows = [...daily.values()].sort((left, right) => left.date.localeCompare(right.date) || left.code.localeCompare(right.code));
+  return {
+    filter: { startDate: filter.startDate, endDate: filter.endDate, ...(filter.stationId ? { stationId: filter.stationId } : {}), station },
+    stations,
+    summary: { quantity: sum(rows, row => row.quantity), revenue: sum(rows, row => row.revenue), transactions: sales.length },
+    daily: rows,
+  };
+}
+
 export async function buildReport(organizationId: string, filter: ReportFilter) {
   const asOf = filter.asOf ?? new Date();
-  const start = new Date(`${filter.startDate}T00:00:00`);
-  const endExclusive = new Date(`${filter.endDate}T00:00:00`); endExclusive.setDate(endExclusive.getDate() + 1);
+  const start = indiaDayRange(filter.startDate).start;
+  const endExclusive = indiaDayRange(filter.endDate).endExclusive;
   const stationIds=filter.stationId?[filter.stationId]:filter.permittedStationIds;
   const stationWhere = stationIds ? { stationId: { in: stationIds } } : {};
   const period = { gte: start, lt: endExclusive };
@@ -95,7 +126,7 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
   for (const sale of sales) {
     add(salesByProduct, sale.productId, () => ({ key: sale.productId, product: sale.product.name, code: sale.product.code, unit: sale.product.unit, category: sale.product.category, quantity: 0, revenue: 0 }), row => { row.quantity += number(sale.quantity); row.revenue += number(sale.totalAmount); });
     add(salesByPayment, sale.paymentMethod, () => ({ key: sale.paymentMethod, method: sale.paymentMethod, transactions: 0, amount: 0 }), row => { row.transactions += 1; row.amount += number(sale.totalAmount); });
-    const day = `${sale.occurredAt.getFullYear()}-${String(sale.occurredAt.getMonth()+1).padStart(2,'0')}-${String(sale.occurredAt.getDate()).padStart(2,'0')}`;
+    const day = indiaDate(sale.occurredAt);
     add(dailySales, day, () => ({ key: day, date: day, transactions: 0, amount: 0 }), row => { row.transactions += 1; row.amount += number(sale.totalAmount); });
     add(stationSales, sale.stationId, () => ({ key: sale.stationId, station: sale.station.name, code: sale.station.code, transactions: 0, amount: 0 }), row => { row.transactions += 1; row.amount += number(sale.totalAmount); });
   }
@@ -119,7 +150,7 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
   }
   const inventory = [...stock.values()].sort((a, b) => b.value - a.value);
 
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const today = indiaDayStart(asOf);
   const customerAgeing = customers.map(customer => {
     const outstanding = sum(customer.ledger, row => number(row.amount));
     const ageing = { current: 0, days1to30: 0, days31to60: 0, days61to90: 0, days90plus: 0 };
@@ -146,7 +177,7 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
   const cogs = accountTotals.get('5000')?.balance ?? 0;
   const operatingExpenses = accountTotals.get('6100')?.balance ?? 0;
   const grossSales = sum(sales, row => number(row.totalAmount));
-  const todayStart = new Date(asOf); todayStart.setHours(0, 0, 0, 0);
+  const todayStart = indiaDayStart(asOf);
   const periodComplete = endExclusive <= todayStart;
   const missingCostOfSales = grossSales > .005 && (!accountTotals.has('5000') || cogs <= .005);
   const netProfitReconciliationDifference = (revenue - cogs - operatingExpenses) - (revenue - cogs - operatingExpenses);
@@ -178,7 +209,7 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
   const sellingDays = new Map<string, Map<string, number>>();
   for (const entry of inventoryEntries.filter(row => row.type === 'SALE' && row.occurredAt >= forecastWindowStart && row.occurredAt <= asOf)) {
     const key = stockKey(entry.stationId, entry.productId);
-    const day = entry.occurredAt.toISOString().slice(0, 10);
+    const day = indiaDate(entry.occurredAt);
     const days = sellingDays.get(key) ?? new Map<string, number>();
     days.set(day, (days.get(day) ?? 0) + Math.abs(number(entry.quantityDelta)));
     sellingDays.set(key, days);

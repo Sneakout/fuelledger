@@ -5,6 +5,7 @@ import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { defaultExpenseCategories } from '../../lib/default-expense-categories.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
+import { indiaDate, indiaDayStart } from '../../lib/india-time.js';
 import { assertStockAvailable, bookStockAt } from '../../lib/stock.js';
 import { affectsClosedShift, shiftAtInstant } from '../../lib/shift-interval.js';
 import { collectionAccount, postJournal } from '../accounting/service.js';
@@ -133,8 +134,7 @@ export async function receiptShiftImpact(organizationId: string, stationId: stri
 }
 export async function bootstrap(organizationId: string, stationIds?: string[]) {
   await prisma.expenseCategory.createMany({ data: defaultExpenseCategories.map(category => ({ organizationId, ...category })), skipDuplicates: true });
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
+  const startOfToday = indiaDayStart();
   const [suppliers, invoices, stations, products, categories, expenses, unmatchedReceipts] = await Promise.all([
     prisma.supplier.findMany({
       where: { organizationId },
@@ -233,7 +233,7 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
       expensesThisMonth: expenses
         .filter((x) => {
           const now = new Date();
-          return x.incurredAt.getMonth() === now.getMonth() && x.incurredAt.getFullYear() === now.getFullYear();
+          return indiaDate(x.incurredAt).slice(0, 7) === indiaDate(now).slice(0, 7);
         })
         .reduce((sum, x) => sum + Number(x.amount), 0),
     },

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
+import { addIndiaDays, databaseDate, indiaDate } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
 import { bootstrap as dashboardBootstrap } from '../dashboard/service.js';
 import { buildReport } from '../reports/service.js';
@@ -10,7 +11,6 @@ import { buildReport } from '../reports/service.js';
 export type BriefingFact = { id: string; category: string; severity: 'URGENT' | 'ATTENTION' | 'POSITIVE' | 'INFORMATION'; label: string; value: string; context: string; evidenceLabel: string; evidencePath: string };
 type Narrative = { headline: string; summary: string; items: Array<{ factId: string; explanation: string; action: string }> };
 const narrativeSchema = z.object({ headline: z.string().min(5).max(90), summary: z.string().min(10).max(240), items: z.array(z.object({ factId: z.string(), explanation: z.string().min(5).max(180), action: z.string().min(3).max(120) })).max(5) });
-const isoDate = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const money = (value: number) => new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(value);
 const severityOrder = { URGENT: 0, ATTENTION: 1, POSITIVE: 2, INFORMATION: 3 } as const;
 
@@ -60,7 +60,7 @@ async function explain(facts: BriefingFact[]): Promise<{ narrative: Narrative; m
 export async function dailyBriefing(organizationId: string, permittedStationIds?: string[], stationId?: string, options: { demoAccess?: boolean } = {}) {
   const now = new Date();
   if (!options.demoAccess) await requireIntelligenceAccess(organizationId, now);
-  const today = isoDate(now), yesterdayDate = new Date(now); yesterdayDate.setDate(yesterdayDate.getDate() - 1); const yesterday = isoDate(yesterdayDate);
+  const today = indiaDate(now), yesterday = addIndiaDays(today, -1);
   const [dashboard, previous] = await Promise.all([
     dashboardBootstrap(organizationId, permittedStationIds, stationId),
     buildReport(organizationId, { startDate: yesterday, endDate: yesterday, permittedStationIds, ...(stationId ? { stationId } : {}) }),
@@ -87,7 +87,7 @@ export async function dailyBriefing(organizationId: string, permittedStationIds?
   });
   facts.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity] || a.id.localeCompare(b.id));
   const stationScope = stationId ?? 'ALL';
-  const dateValue = new Date(`${today}T00:00:00.000Z`);
+  const dateValue = databaseDate(today);
   const existing = await prisma.dailyOwnerBriefing.findUnique({ where: { organizationId_stationScope_briefingDate: { organizationId, stationScope, briefingDate: dateValue } } });
   if (existing && JSON.stringify(existing.facts) === JSON.stringify(facts)) {
     // The records were checked again just now even though the resulting facts

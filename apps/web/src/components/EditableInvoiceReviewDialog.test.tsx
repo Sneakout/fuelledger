@@ -18,7 +18,7 @@ describe("editable invoice review", () => {
   it("creates an editable draft that follows purchase total rules", () => {
     const draft = createEditableInvoiceDraft(parseIndianInvoice(invoiceText));
     expect(draft).toMatchObject({ supplierName: "Kerala Fuel Supplies Pvt Ltd", invoiceNumber: "KFS/2026/1842", invoiceDate: "2026-09-12", dueDate: "2026-09-15", taxAmount: "78750", totalAmount: "516250" });
-    expect(draft.lines[0]).toMatchObject({ product: "HSD", quantity: "5000", unit: "L", unitRate: "87.5", hsnCode: "27101944" });
+    expect(draft.lines[0]).toMatchObject({ product: "HSD", quantity: "5000", unit: "L", unitRate: "87.5", hsnCode: "27101944", taxRate: "18" });
     expect(validateEditableInvoiceDraft(draft)).toEqual([]);
   });
 
@@ -55,6 +55,19 @@ BASIC DESTINATION PRICE 4.000 KL 82203.320 KL 328813.28
 Total for material 440749.38
 Grand Total 440749.38`));
     expect(draft.lines[0]).toMatchObject({ unitRate: "82203.32", taxRate: "34.04" });
+  });
+
+  it("applies invoice-level CGST and SGST percentages to table rows without row-level tax totals", () => {
+    const draft = createEditableInvoiceDraft(parseIndianInvoice(`Shree Ganesh Lubricants
+Invoice No: SGL/24-25/0821
+Invoice Date: 20-Aug-2024
+SERVO 4T 27101210 310.00 37,200.00
+SERVO COOLANT 3820 00 00 280.00 14,000.00
+CGST @ 9% 4,608.00
+SGST @ 9% 4,608.00
+Total Invoice Value 60,416.00`));
+
+    expect(draft.lines.map(line => line.taxRate)).toEqual(["18", "18"]);
   });
 
   it("lets the owner edit and keep a draft without offering a record update", () => {

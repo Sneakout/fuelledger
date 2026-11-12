@@ -9,10 +9,22 @@ async function main() {
     process.env.FUELLEDGER_PROVISION_DEMO !== "CONFIRM"
   )
     throw new Error("Development seed is disabled in production.");
+  const activatedAt = new Date();
+  const demoSubscription = {
+    subscriptionPlan: "CORE_INTELLIGENCE",
+    subscriptionBillingPeriod: "YEARLY",
+    subscriptionPricePaise: 1_499_900,
+    subscriptionActivatedAt: activatedAt,
+    subscriptionExpiresAt: null,
+    subscriptionUpdatedAt: activatedAt,
+    subscriptionUpdatedBy: "local-demo-seed",
+    intelligenceEnabledAt: activatedAt,
+    intelligenceExpiresAt: null,
+  };
   const organization = await prisma.organization.upsert({
     where: { id: "org_demo_fuelledger" },
-    update: {},
-    create: { id: "org_demo_fuelledger", name: "ABC Fuels" },
+    update: demoSubscription,
+    create: { id: "org_demo_fuelledger", name: "ABC Fuels", ...demoSubscription },
   });
   await prisma.user.upsert({
     where: { email: "owner@fuelledger.local" },

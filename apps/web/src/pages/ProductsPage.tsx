@@ -8,6 +8,7 @@ import {
   type ProductForm,
 } from "../lib/api";
 import "../products.css";
+import { indiaCalendarDateIso, indiaDate } from "../lib/india-time";
 const categories = [
   "FUEL",
   "DEF",
@@ -20,9 +21,8 @@ const categories = [
   "OTHER",
 ];
 const units = ["LITRE", "KILOGRAM", "PIECE", "BOX", "UNIT", "KWH"];
-const today = () => new Date().toISOString().slice(0, 10);
-const effectiveIso = (value: string) =>
-  new Date(`${value}T00:00:00`).toISOString();
+const today = () => indiaDate();
+const effectiveIso = indiaCalendarDateIso;
 const blank = (): ProductForm => ({
   name: "",
   code: "",

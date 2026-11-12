@@ -1,11 +1,9 @@
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 import { tankBookStocksAt, tankMovementDeltasBetween } from '../../lib/stock.js';
+import { addIndiaDays, indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { buildReport } from '../reports/service.js';
 
-const isoDate=(date:Date)=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
-const startOfDay=(date:Date)=>{const result=new Date(date);result.setHours(0,0,0,0);return result;};
-const addDays=(date:Date,days:number)=>{const result=new Date(date);result.setDate(result.getDate()+days);return result;};
 const number=(value:unknown)=>Number(value??0);
 const money=(value:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(value);
 
@@ -32,13 +30,13 @@ export function purchaseDashboardActions(recentPurchases:RecentPurchaseForAction
 }
 
 export async function bootstrap(organizationId:string,permittedStationIds?:string[],stationId?:string){
-  const now=new Date(),today=startOfDay(now),tomorrow=addDays(today,1),weekStart=addDays(today,-6),previousStart=addDays(today,-13);
-  const report=await buildReport(organizationId,{startDate:isoDate(today),endDate:isoDate(today),permittedStationIds,...(stationId?{stationId}:{})});
+  const now=new Date(),todayDate=indiaDate(now),todayRange=indiaDayRange(todayDate),weekStartDate=addIndiaDays(todayDate,-6),previousStartDate=addIndiaDays(todayDate,-13),weekStart=indiaDayRange(weekStartDate).start,previousStart=indiaDayRange(previousStartDate).start,tomorrow=todayRange.endExclusive;
+  const report=await buildReport(organizationId,{startDate:todayDate,endDate:todayDate,permittedStationIds,...(stationId?{stationId}:{})});
   const scopeIds=stationId?[stationId]:permittedStationIds;
   const [recentSales,shifts,reconciliations,tanks,recentPurchases,pendingPriceApprovals]=await Promise.all([
     prisma.sale.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),occurredAt:{gte:previousStart,lt:tomorrow}},select:{occurredAt:true,totalAmount:true}}),
     prisma.shift.findMany({where:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})},status:{in:['OPEN','RECONCILIATION_REQUIRED']}},select:{id:true,status:true,shiftNumber:true,openedAt:true,closedAt:true,station:{select:{id:true,name:true,code:true}}},orderBy:{openedAt:'desc'}}),
-    prisma.shiftReconciliation.findMany({where:{shift:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})}},reconciledAt:{gte:today,lt:tomorrow}},include:{collections:{select:{varianceAmount:true}}}}),
+    prisma.shiftReconciliation.findMany({where:{shift:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})}},reconciledAt:{gte:todayRange.start,lt:tomorrow}},include:{collections:{select:{varianceAmount:true}}}}),
     prisma.tank.findMany({
       where:{status:'ACTIVE',product:{active:true,inventoryTracked:true},configuration:{active:true,station:{organizationId,active:true,...(scopeIds?{id:{in:scopeIds}}:{})}}},
       include:{
@@ -49,7 +47,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
       },
       orderBy:[{configuration:{station:{name:'asc'}}},{code:'asc'}],
     }),
-    prisma.purchaseInvoice.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),createdAt:{gte:today,lt:tomorrow}},select:{id:true,invoiceNumber:true,totalAmount:true,supplier:{select:{name:true}}},orderBy:{createdAt:'desc'},take:20}),
+    prisma.purchaseInvoice.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),createdAt:{gte:todayRange.start,lt:tomorrow}},select:{id:true,invoiceNumber:true,totalAmount:true,supplier:{select:{name:true}}},orderBy:{createdAt:'desc'},take:20}),
     prisma.approvalRequest.findMany({where:{organizationId,status:'PENDING',actionType:'PRODUCT_PRICE_CHANGE',...(scopeIds?{stationId:{in:scopeIds}}:{})},select:{id:true,reason:true,evidence:true},orderBy:{requestedAt:'desc'},take:20}),
   ]);
   const bookStockByTank=await tankBookStocksAt(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),now);
@@ -67,7 +65,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
   }));
   const total=(from:Date,to:Date)=>recentSales.filter(row=>row.occurredAt>=from&&row.occurredAt<to).reduce((sum,row)=>sum+number(row.totalAmount),0);
   const thisWeek=total(weekStart,tomorrow),previousWeek=total(previousStart,weekStart),weekChange=previousWeek?((thisWeek-previousWeek)/previousWeek)*100:null;
-  const trend=Array.from({length:7},(_,index)=>{const date=addDays(weekStart,index),next=addDays(date,1);return{date:isoDate(date),amount:total(date,next)};});
+  const trend=Array.from({length:7},(_,index)=>{const date=addIndiaDays(weekStartDate,index),range=indiaDayRange(date);return{date,amount:total(range.start,range.endExclusive)};});
   const pending=shifts.filter(row=>row.status==='RECONCILIATION_REQUIRED'),open=shifts.filter(row=>row.status==='OPEN');
   const cashVariance=reconciliations.reduce((sum,reconciliation)=>sum+reconciliation.collections.reduce((lineTotal,line)=>lineTotal+number(line.varianceAmount),0),0);
   const overdueReceivables=report.customers.reduce((sum,row)=>sum+row.ageing.days31to60+row.ageing.days61to90+row.ageing.days90plus,0);
