@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, ArrowRight, Bot, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Droplets, FileCheck2, FileText, MessageCircleQuestion, Paperclip, Plus, RefreshCw, SearchCheck, Send, ShieldCheck, Sparkles, TrendingUp, X } from "lucide-react";
 import { useAuth } from "../components/AuthProvider";
 import { useStation } from "../components/StationProvider";
@@ -181,6 +181,7 @@ type LocalInvoice = {
 };
 
 function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { stationId: string | null; stationName?: string | undefined; isDemo: boolean; onRecordsChanged: () => void }) {
+  const navigate = useNavigate();
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState<AskFuelNerveResponse | null>(null);
   const [asking, setAsking] = useState(false);
@@ -191,6 +192,7 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   const [submittingId, setSubmittingId] = useState<string | null>(null);
   const [importEnabled, setImportEnabled] = useState(false);
+  const [dsrRecognition, setDsrRecognition] = useState<{ fileName: string; status: "recognised" | "routing" } | null>(null);
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
   const [purchaseRecords, setPurchaseRecords] = useState<{ suppliers: Supplier[]; invoices: PurchaseInvoice[] }>({ suppliers: [], invoices: [] });
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -238,6 +240,30 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
   }, [isDemo, stationId]);
 
   const processInvoices = async (items: LocalInvoice[]) => {
+    const routeDsr = (item: LocalInvoice, text: string, classifiedProduct?: "HSD" | "MS" | "UNKNOWN") => {
+      if (item.file.size > 5 * 1024 * 1024) {
+        setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "error", progressLabel: "This DSR is larger than 5 MB. Compress it and try again." } : invoice));
+        return true;
+      }
+      invoiceChecks.current.get(item.id)?.abort();
+      invoiceChecks.current.delete(item.id);
+      setDsrRecognition({ fileName: item.file.name, status: "recognised" });
+      setInvoices(current => current.filter(invoice => invoice.id !== item.id));
+      window.setTimeout(() => {
+        setDsrRecognition({ fileName: item.file.name, status: "routing" });
+        navigate("/sales/history/import", { state: { intelligenceDocument: { kind: "DSR", file: item.file, stationId, productCode: classifiedProduct && classifiedProduct !== "UNKNOWN" ? classifiedProduct : detectDsrProduct(text) } } });
+      }, 650);
+      return true;
+    };
+    const classifyAmbiguous = async (item: LocalInvoice) => {
+      if (item.file.size > 5 * 1024 * 1024 || !['application/pdf', 'image/jpeg', 'image/png'].includes(item.file.type || mimeFromFileName(item.file.name))) return { kind: 'UNKNOWN' as const, confidence: 0, productCode: 'UNKNOWN' as const };
+      setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "ocr", progress: .9, progressLabel: "Nerve Intelligence is identifying the document…" } : invoice));
+      try {
+        return await api.classifyFuelDocument({ sourceFileName: item.file.name, sourceMimeType: (item.file.type || mimeFromFileName(item.file.name)) as 'application/pdf' | 'image/jpeg' | 'image/png', sourceSize: item.file.size, sourceContentBase64: await fileToBase64(item.file) });
+      } catch {
+        return { kind: 'UNKNOWN' as const, confidence: 0, productCode: 'UNKNOWN' as const };
+      }
+    };
     const pdfItems = items.filter(item => isPdfFile(item.file));
     const ocrItems = items.filter(item => !isPdfFile(item.file));
     if (pdfItems.length) {
@@ -248,6 +274,12 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
           try {
             const result = await extractLocalPdfText(item.file);
             if (result.text.trim()) {
+              if (looksLikeDsr(result.text)) { routeDsr(item, result.text); rememberInvoiceImportPerformance("PDF_TEXT", startedAt, "SUCCESS"); continue; }
+              if (!looksLikeInvoice(result.text)) {
+                const classification = await classifyAmbiguous(item);
+                if (classification.kind === 'DSR' && classification.confidence >= .65) { routeDsr(item, result.text, classification.productCode); rememberInvoiceImportPerformance("PDF_TEXT", startedAt, "SUCCESS"); continue; }
+                if (classification.kind !== 'INVOICE' || classification.confidence < .65) { setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "error", progressLabel: "This document could not be identified confidently. Choose a clearer scan." } : invoice)); invoiceChecks.current.delete(item.id); continue; }
+              }
               const { parseIndianInvoice } = await import("../lib/indian-invoice-parser");
               const parsed = parseIndianInvoice(result.text);
               const draft = createEditableInvoiceDraft(parsed);
@@ -291,6 +323,12 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
             continue;
           }
           readableResult = true;
+          if (looksLikeDsr(result.text)) { routeDsr(item, result.text); continue; }
+          if (!looksLikeInvoice(result.text)) {
+            const classification = await classifyAmbiguous(item);
+            if (classification.kind === 'DSR' && classification.confidence >= .65) { routeDsr(item, result.text, classification.productCode); continue; }
+            if (classification.kind !== 'INVOICE' || classification.confidence < .65) { setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "error", progressLabel: "This document could not be identified confidently. Choose a clearer scan." } : invoice)); continue; }
+          }
           const parsed = (await import("../lib/indian-invoice-parser")).parseIndianInvoice(result.text);
           const draft = createEditableInvoiceDraft(parsed);
           setInvoices(current => current.map(invoice => invoice.id === result.id
@@ -355,14 +393,15 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
   const submittingInvoice = invoices.find(invoice => invoice.id === submittingId && invoice.draft && invoice.reviewed && !invoice.submitted);
 
   return <section className="nerve-ask-bar" aria-label="Ask Nerve Intelligence">
-    <div className="nerve-ask-heading"><div><Sparkles/><span><strong>Ask Nerve Intelligence</strong><small>Ask about {stationName ?? "this station"}, or select invoices to check next.</small></span></div><span><ShieldCheck/> Documents stay on this device</span></div>
+    <div className="nerve-ask-heading"><div><Sparkles/><span><strong>Ask Nerve Intelligence</strong><small>Ask about {stationName ?? "this station"}, or upload a document for automatic routing.</small></span></div><span><ShieldCheck/> No records change without your confirmation</span></div>
+    {dsrRecognition && <div className="nerve-dsr-route" role="status" aria-live="polite"><span className="nerve-dsr-scan"><FileText/><i/><i/><i/></span><div><small>Nerve Intelligence recognised</small><strong>Daily sales register</strong><p>{dsrRecognition.fileName} · {dsrRecognition.status === "recognised" ? "Preparing the historical register workspace…" : "Opening the review grid…"}</p></div><ArrowRight/></div>}
     {invoices.length > 0 && <div className="nerve-local-invoices" aria-label="Invoices selected on this device" aria-live="polite">
       {invoices.map(invoice => { const duplicate = invoice.draft ? findDuplicateInvoiceForDraft(invoice.draft, purchaseRecords.suppliers, purchaseRecords.invoices) : undefined; return <div key={invoice.id} className={invoice.status}><InvoiceStatusIcon status={invoice.status}/><span><strong>{invoice.file.name}</strong><small>{invoiceStatusText(invoice)}</small></span><button type="button" aria-label={`Remove ${invoice.file.name}`} onClick={() => { invoiceChecks.current.get(invoice.id)?.abort(); invoiceChecks.current.delete(invoice.id); setInvoices(current => current.filter(item => item.id !== invoice.id)); }}><X/></button>{invoice.parsed && invoice.draft && <InvoiceDetails invoice={invoice.parsed} draft={invoice.draft} stationName={stationName} catalogProducts={catalogProducts} duplicate={duplicate} reviewed={Boolean(invoice.reviewed)} submitted={invoice.submitted} onReview={() => setReviewingId(invoice.id)} onPreview={() => setPreviewingId(invoice.id)}/>} {invoice.extractedText && <details className="nerve-text-preview"><summary>View the text read from this document</summary><p>{invoice.extractedText.slice(0, 1_200)}{invoice.extractedText.length > 1_200 ? "…" : ""}</p></details>}</div>; })}
     </div>}
     <form onSubmit={ask}>
       <div className="nerve-attach" ref={attachmentMenu}>
         <button type="button" className="nerve-add-button" aria-label="Add invoice" aria-expanded={attachmentMenuOpen} onClick={() => setAttachmentMenuOpen(open => !open)}><Plus/></button>
-        {attachmentMenuOpen && <div className="nerve-attach-menu" role="menu"><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><Paperclip/><span><strong>Upload invoices</strong><small>PDF, JPEG, PNG or WebP · Up to 10 MB each</small></span></button></div>}
+        {attachmentMenuOpen && <div className="nerve-attach-menu" role="menu"><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><Paperclip/><span><strong>Upload invoices or DSRs</strong><small>Automatic document recognition · PDF, JPEG, PNG or WebP</small></span></button></div>}
         <input ref={fileInput} type="file" hidden multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={event => chooseInvoices(event.target.files)}/>
       </div>
       <input aria-label="Ask Nerve Intelligence" value={question} onChange={event => setQuestion(event.target.value)} placeholder="Ask what needs your attention…"/>
@@ -416,6 +455,31 @@ function isInvoiceFile(file: File) {
 
 function isPdfFile(file: File) {
   return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+}
+
+export function looksLikeDsr(text: string) {
+  const value = text.toUpperCase().replace(/[^A-Z0-9]+/g, " ");
+  const dsrSignals = ["OPENING STOCK", "WATER DIP", "TANK 1", "PUMPS", "TESTING", "CUMULATIVE SALES", "TOTAL STOCK"];
+  const invoiceSignals = ["TAX INVOICE", "INVOICE NUMBER", "GSTIN", "HSN", "BILL TO", "SUPPLIER"];
+  const dsrScore = dsrSignals.filter(signal => value.includes(signal)).length;
+  const invoiceScore = invoiceSignals.filter(signal => value.includes(signal)).length;
+  return dsrScore >= 3 && dsrScore > invoiceScore;
+}
+
+function looksLikeInvoice(text: string) {
+  const value = text.toUpperCase().replace(/[^A-Z0-9]+/g, " ");
+  const signals = ["TAX INVOICE", "INVOICE NUMBER", "INVOICE NO", "GSTIN", "HSN", "BILL TO", "GRAND TOTAL", "INVOICE DATE"];
+  return signals.filter(signal => value.includes(signal)).length >= 2;
+}
+
+const fileToBase64 = (file: File) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(reader.error); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.readAsDataURL(file); });
+const mimeFromFileName = (name: string) => /\.pdf$/i.test(name) ? 'application/pdf' : /\.png$/i.test(name) ? 'image/png' : 'image/jpeg';
+
+function detectDsrProduct(text: string): "HSD" | "MS" | undefined {
+  const value = ` ${text.toUpperCase().replace(/[^A-Z0-9]+/g, " ")} `;
+  if (value.includes(" HSD ") || value.includes(" HIGH SPEED DIESEL ")) return "HSD";
+  if (value.includes(" MOTOR SPIRIT ") || value.includes(" PETROL ") || value.includes(" MS ")) return "MS";
+  return undefined;
 }
 
 function InvoiceStatusIcon({ status }: { status: LocalInvoice["status"] }) {

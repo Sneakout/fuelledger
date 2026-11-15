@@ -21,6 +21,9 @@ const envSchema = z.object({
   WHATSAPP_API_VERSION: z.string().regex(/^v\d+\.\d+$/).optional(),
   WHATSAPP_TEMPLATE_NAME: z.string().regex(/^[a-z0-9_]+$/).optional(),
   WHATSAPP_TEMPLATE_LANGUAGE: z.string().min(2).default("en"),
+  WHATSAPP_TEMPLATE_STYLE: z.enum(["ALERT_BODY", "NO_PARAMETERS"]).default("ALERT_BODY"),
+  WHATSAPP_WEBHOOK_VERIFY_TOKEN: z.string().min(16).optional(),
+  WHATSAPP_APP_SECRET: z.string().min(32).optional(),
   CRON_SECRET: z.string().min(16).optional(),
   APNS_TEAM_ID: z.string().min(5).optional(),
   APNS_KEY_ID: z.string().min(5).optional(),
@@ -50,6 +53,7 @@ export const trustedOrigins = [env.CORS_ORIGIN, env.APP_URL, ...env.CORS_ADDITIO
   .map((value) => new URL(value).origin)
   .filter((value, index, all) => all.indexOf(value) === index);
 export const whatsappConfigured = Boolean(env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_API_VERSION && env.WHATSAPP_TEMPLATE_NAME);
+export const whatsappWebhookConfigured = Boolean(env.WHATSAPP_WEBHOOK_VERIFY_TOKEN && env.WHATSAPP_APP_SECRET);
 export const apnsConfigured = Boolean(env.APNS_TEAM_ID && env.APNS_KEY_ID && env.APNS_PRIVATE_KEY);
 export const isPlatformAdminEmail = (email: string) =>
   env.PLATFORM_ADMIN_EMAILS.split(",")

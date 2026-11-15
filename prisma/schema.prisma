@@ -123,6 +123,8 @@ enum OwnerNotificationType {
 enum NotificationDeliveryStatus {
   PENDING
   SENT
+  DELIVERED
+  READ
   FAILED
 }
 
@@ -192,6 +194,7 @@ model Organization {
   stationSetupDrafts         StationSetupDraft[]
   receiptTimingEvents        ReceiptTimingAuditEvent[]
   serviceTickets             ServiceTicket[]
+  historicalSalesImports     HistoricalSalesImport[]
 
   @@map("organizations")
 }
@@ -234,6 +237,7 @@ model Station {
   approvalRequests           ApprovalRequest[]
   setupDraft                 StationSetupDraft?
   receiptTimingEvents        ReceiptTimingAuditEvent[]
+  historicalSalesImports     HistoricalSalesImport[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -285,9 +289,12 @@ model OwnerNotificationDelivery {
   destination       String                     @map("destination")
   message           String
   status            NotificationDeliveryStatus @default(PENDING)
-  providerMessageId String?                    @map("provider_message_id")
+  providerMessageId String?                    @unique @map("provider_message_id")
   errorMessage      String?                    @map("error_message")
   sentAt            DateTime?                  @map("sent_at")
+  deliveredAt       DateTime?                  @map("delivered_at")
+  readAt            DateTime?                  @map("read_at")
+  failedAt          DateTime?                  @map("failed_at")
   createdAt         DateTime                   @default(now()) @map("created_at")
   organization      Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   station           Station?                   @relation(fields: [stationId], references: [id], onDelete: Restrict)
@@ -495,6 +502,7 @@ model Product {
   purchaseInvoiceLines PurchaseInvoiceLine[]
   sellingPriceHistory  ProductSellingPrice[]
   purchasePriceHistory ProductPurchasePrice[]
+  historicalSalesImports HistoricalSalesImport[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -1308,9 +1316,37 @@ model User {
   approvalRequestsMade       ApprovalRequest[]           @relation("ApprovalRequester")
   approvalDecisions          ApprovalRequest[]           @relation("ApprovalDecider")
   serviceTickets             ServiceTicket[]
+  historicalSalesImports     HistoricalSalesImport[]
 
   @@index([organizationId])
   @@map("users")
+}
+
+model HistoricalSalesImport {
+  id                String       @id @default(cuid())
+  organizationId    String       @map("organization_id")
+  stationId         String       @map("station_id")
+  productId         String       @map("product_id")
+  monthStart        DateTime     @map("month_start")
+  sourceFileName    String       @map("source_file_name")
+  sourceMimeType    String       @map("source_mime_type")
+  sourceSize        Int          @map("source_size")
+  sourceContent     Bytes        @map("source_content")
+  sourceFingerprint String       @map("source_fingerprint")
+  rows              Json
+  cutoverApplied    Boolean      @default(false) @map("cutover_applied")
+  importedById      String       @map("imported_by_id")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  station           Station      @relation(fields: [stationId], references: [id], onDelete: Restrict)
+  product           Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  importedBy        User         @relation(fields: [importedById], references: [id], onDelete: Restrict)
+
+  @@unique([stationId, productId, monthStart])
+  @@unique([organizationId, sourceFingerprint])
+  @@index([organizationId, monthStart])
+  @@index([stationId, monthStart])
+  @@map("historical_sales_imports")
 }
 
 model ServiceTicket {

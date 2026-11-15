@@ -5,7 +5,7 @@ import { isPlatformAdminEmail } from "../config/env.js";
 import { AppError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
 import { authenticate } from "../middleware/authenticate.js";
-import { presentNotificationSettings, updateSettings } from "../modules/notifications/service.js";
+import { presentNotificationSettings, sendTestNotification, updateSettings } from "../modules/notifications/service.js";
 
 export const platformRouter = Router();
 const planPricesPaise = {
@@ -120,6 +120,12 @@ platformRouter.put("/customers/:id/notifications", async (req, res) => {
   const customer = await prisma.organization.findUnique({ where: { id: req.params.id! }, select: { id: true } });
   if (!customer) throw new AppError(404, "CUSTOMER_NOT_FOUND", "This customer account was not found.");
   res.json({ settings: await updateSettings(customer.id, parsed.data) });
+});
+platformRouter.post("/customers/:id/notifications/test", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const customer = await prisma.organization.findUnique({ where: { id: req.params.id! }, select: { id: true } });
+  if (!customer) throw new AppError(404, "CUSTOMER_NOT_FOUND", "This customer account was not found.");
+  res.json({ delivery: await sendTestNotification(customer.id) });
 });
 platformRouter.put("/customers/:id/subscription", async (req, res) => {
   requirePlatformAdmin(req.user!.email);

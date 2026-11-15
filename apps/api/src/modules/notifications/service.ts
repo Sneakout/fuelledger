@@ -10,6 +10,7 @@ import { buildReport } from '../reports/service.js';
 import { dailyBriefing } from '../intelligence/daily-briefing.js';
 import { sendApns } from './apns.js';
 import { buildApprovalScenario, buildMissingRecordScenario, buildProfitScenario, buildShiftScenario, buildStockScenario } from './scenario-builders.js';
+import { buildWhatsAppTemplate } from './whatsapp-template.js';
 
 type DeliveryResult = { status: 'SENT' | 'FAILED' | 'SKIPPED'; reason?: string };
 const money = (value: number) => `₹${Math.round(value).toLocaleString('en-IN')}`;
@@ -86,14 +87,15 @@ export async function updateSettings(organizationId: string, input: OwnerNotific
 }
 
 export async function recentDeliveries(organizationId: string) {
-  return prisma.ownerNotificationDelivery.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' }, take: 12, select: { id: true, type: true, station: { select: { name: true, code: true } }, destination: true, message: true, status: true, errorMessage: true, sentAt: true, createdAt: true } });
+  return prisma.ownerNotificationDelivery.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' }, take: 12, select: { id: true, type: true, station: { select: { name: true, code: true } }, destination: true, message: true, status: true, errorMessage: true, sentAt: true, deliveredAt: true, readAt: true, failedAt: true, createdAt: true } });
 }
 
 async function sendTemplate(destination: string, message: string) {
+  const template = buildWhatsAppTemplate(env.WHATSAPP_TEMPLATE_NAME!, env.WHATSAPP_TEMPLATE_LANGUAGE, env.WHATSAPP_TEMPLATE_STYLE, message);
   const response = await fetch(`https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to: destination, type: 'template', template: { name: env.WHATSAPP_TEMPLATE_NAME, language: { code: env.WHATSAPP_TEMPLATE_LANGUAGE }, components: [{ type: 'body', parameters: [{ type: 'text', text: message }] }] } }),
+    body: JSON.stringify({ messaging_product: 'whatsapp', to: destination, type: 'template', template }),
   });
   const body = await response.json().catch(() => null) as { messages?: Array<{ id?: string }>; error?: { message?: string } } | null;
   if (!response.ok) throw new Error(body?.error?.message ?? `WhatsApp API returned ${response.status}.`);
@@ -155,8 +157,9 @@ export async function sendOwnerNotification(input: AlertInput): Promise<Delivery
   await deliverPush(alert);
   if (!settings.whatsappOptedIn || !settings.whatsappNumber) return { status: 'SKIPPED', reason: 'owner_not_opted_in' };
   if (!whatsappConfigured) return { status: 'SKIPPED', reason: 'whatsapp_not_configured' };
+  if (env.WHATSAPP_TEMPLATE_STYLE === 'NO_PARAMETERS' && input.type !== 'SYSTEM_TEST') return { status: 'SKIPPED', reason: 'whatsapp_test_template_only' };
   const existing = await prisma.ownerNotificationDelivery.findUnique({ where: { dedupeKey: input.dedupeKey }, select: { status: true } });
-  if (existing) return { status: existing.status === 'SENT' ? 'SENT' : 'SKIPPED', reason: 'already_processed' };
+  if (existing) return { status: ['SENT', 'DELIVERED', 'READ'].includes(existing.status) ? 'SENT' : 'SKIPPED', reason: 'already_processed' };
   let delivery;
   try {
     delivery = await prisma.ownerNotificationDelivery.create({ data: { organizationId: input.organizationId, stationId: input.stationId ?? null, type: input.type, dedupeKey: input.dedupeKey, destination: settings.whatsappNumber, message } });

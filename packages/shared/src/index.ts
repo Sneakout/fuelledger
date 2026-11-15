@@ -1095,3 +1095,50 @@ export type PurchaseInvoiceUpdateInput = z.infer<
 export type SupplierPaymentInput = z.infer<typeof supplierPaymentInputSchema>;
 export type ExpenseCategoryInput = z.infer<typeof expenseCategoryInputSchema>;
 export type ExpenseInput = z.infer<typeof expenseInputSchema>;
+
+const historicalNozzleReadingSchema = z.object({
+  nozzleId: z.string().cuid(),
+  meterReading: z.coerce.number().min(0),
+});
+export const historicalSalesRowSchema = z.object({
+  date: z.string().date(),
+  tankReadings: z.array(z.object({
+    tankId: z.string().cuid(),
+    dipReading: z.coerce.number().min(0).optional(),
+    openingStock: z.coerce.number().min(0),
+  })).min(1),
+  receiptQuantity: z.coerce.number().min(0).default(0),
+  totalStock: z.coerce.number().min(0).optional(),
+  nozzleReadings: z.array(historicalNozzleReadingSchema).min(1),
+  testingQuantity: z.coerce.number().min(0).default(0),
+  salesQuantity: z.coerce.number().min(0),
+  cumulativeSales: z.coerce.number().min(0).optional(),
+  stockGainLoss: z.coerce.number().optional(),
+  sellingPrice: z.coerce.number().min(0),
+  notes: z.string().trim().max(300).optional(),
+});
+export const historicalSalesImportSchema = z.object({
+  stationId: z.string().cuid(),
+  productId: z.string().cuid(),
+  month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  sourceFileName: z.string().trim().min(1).max(180),
+  sourceMimeType: z.enum(['application/pdf', 'image/jpeg', 'image/png']),
+  sourceSize: z.coerce.number().int().positive().max(5 * 1024 * 1024),
+  sourceContentBase64: z.string().min(1),
+  sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  rows: z.array(historicalSalesRowSchema).min(1).max(31),
+  applyCutover: z.boolean().default(false),
+}).superRefine((value, context) => {
+  const dates = new Set<string>();
+  for (const [index, row] of value.rows.entries()) {
+    if (!row.date.startsWith(`${value.month}-`)) context.addIssue({ code: 'custom', path: ['rows', index, 'date'], message: 'Every row must belong to the selected month.' });
+    if (dates.has(row.date)) context.addIssue({ code: 'custom', path: ['rows', index, 'date'], message: 'Each date can appear only once.' });
+    dates.add(row.date);
+    const nozzleIds = row.nozzleReadings.map(reading => reading.nozzleId);
+    if (new Set(nozzleIds).size !== nozzleIds.length) context.addIssue({ code: 'custom', path: ['rows', index, 'nozzleReadings'], message: 'A nozzle can appear only once per day.' });
+    const tankIds = row.tankReadings.map(reading => reading.tankId);
+    if (new Set(tankIds).size !== tankIds.length) context.addIssue({ code: 'custom', path: ['rows', index, 'tankReadings'], message: 'A tank can appear only once per day.' });
+  }
+});
+export type HistoricalSalesRowInput = z.infer<typeof historicalSalesRowSchema>;
+export type HistoricalSalesImportInput = z.infer<typeof historicalSalesImportSchema>;

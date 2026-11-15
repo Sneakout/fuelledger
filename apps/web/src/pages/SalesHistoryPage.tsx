@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { Activity, ArrowLeft, CalendarDays, Gauge, Info, RefreshCw, TrendingUp } from 'lucide-react';
+import { Activity, ArrowLeft, CalendarDays, FileUp, Gauge, Info, RefreshCw, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useStation } from '../components/StationProvider';
 import { api, ApiRequestError, type SalesHistory } from '../lib/api';
@@ -65,7 +65,7 @@ export function SalesHistoryPage() {
   const preset = (count: number) => { setEndDate(today); setStartDate(addIndiaDays(today, -(count - 1))); };
   return <main className="page sales-history-page">
     <Link className="back-link" to="/"><ArrowLeft/> Back to dashboard</Link>
-    <div className="page-heading"><div><span className="eyebrow">Historical fuel sales</span><h1>MS and HSD sales over time</h1><p>Compare daily litres and sales value using India business dates.</p></div></div>
+    <div className="page-heading"><div><span className="eyebrow">Historical fuel sales</span><h1>MS and HSD sales over time</h1><p>Compare daily litres and sales value using India business dates.</p></div><Link className="primary small" to="/sales/history/import"><FileUp/> Import past register</Link></div>
     <section className="sales-history-filter"><div className="sales-history-presets"><button onClick={() => preset(7)}>7 days</button><button onClick={() => preset(30)}>30 days</button><button onClick={() => preset(90)}>90 days</button></div><div className="sales-history-fields"><CalendarDays/><label>From<input type="date" value={startDate} max={endDate} onChange={event => setStartDate(event.target.value)}/></label><label>To<input type="date" value={endDate} min={startDate} max={today} onChange={event => setEndDate(event.target.value)}/></label><label>Fuel station<select value={stationId} onChange={event => { setStationId(event.target.value); selectStation(event.target.value); }}><option value="">All permitted fuel stations</option>{stations.map(station => <option key={station.id} value={station.id}>{station.name}</option>)}</select></label><button className="primary small" onClick={() => void load()} disabled={loading}><RefreshCw/> {loading ? 'Loading…' : 'Refresh'}</button></div></section>
     {error && <div className="form-error">{error}</div>}
     {loading && !data ? <div className="loading"><span/><p>Preparing fuel sales trends…</p></div> : <>

@@ -17,6 +17,7 @@ const alertChoices: Array<[keyof NotificationSettings, string]> = [
 function CustomerWhatsAppSettings({ customer }: { customer: PlatformCustomer }) {
   const [settings, setSettings] = useState(customer.notificationSettings);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState("");
   async function save() {
     setSaving(true); setMessage("");
@@ -28,6 +29,15 @@ function CustomerWhatsAppSettings({ customer }: { customer: PlatformCustomer }) 
       setMessage(error instanceof ApiRequestError ? error.message : "Unable to save WhatsApp alerts.");
     } finally { setSaving(false); }
   }
+  async function test() {
+    setTesting(true); setMessage("");
+    try {
+      const result = await api.testCustomerWhatsApp(customer.id);
+      setMessage(result.delivery.status === "SENT" ? "Test WhatsApp message accepted by Meta" : result.delivery.reason ?? "Test message was not sent");
+    } catch (error) {
+      setMessage(error instanceof ApiRequestError ? error.message : "Unable to send the test message.");
+    } finally { setTesting(false); }
+  }
   return <details className="admin-whatsapp">
     <summary><MessageCircleMore/><span><b>WhatsApp alerts</b><small>{settings.whatsappOptedIn && settings.whatsappNumber ? `Active · +${settings.whatsappNumber}` : "Not active"}</small></span></summary>
     <div className="admin-whatsapp-body">
@@ -35,7 +45,7 @@ function CustomerWhatsAppSettings({ customer }: { customer: PlatformCustomer }) 
       <label className="admin-whatsapp-optin"><input type="checkbox" checked={settings.whatsappOptedIn} onChange={(event) => setSettings({ ...settings, whatsappOptedIn: event.target.checked })}/><span>Customer opt-in confirmed</span></label>
       <div className="admin-alert-choices">{alertChoices.map(([key, label]) => <label key={key}><input type="checkbox" checked={Boolean(settings[key])} onChange={(event) => setSettings({ ...settings, [key]: event.target.checked })}/><span>{label}</span></label>)}</div>
       <div className="admin-whatsapp-thresholds"><label><span>Low stock %</span><input type="number" min="1" max="50" value={settings.lowStockPercent} onChange={(event) => setSettings({ ...settings, lowStockPercent: Number(event.target.value) })}/></label><label><span>Cash variance ₹</span><input type="number" min="0" value={settings.varianceThreshold} onChange={(event) => setSettings({ ...settings, varianceThreshold: Number(event.target.value) })}/></label><label><span>Summary hour</span><input type="number" min="0" max="23" value={settings.dailySummaryHour} onChange={(event) => setSettings({ ...settings, dailySummaryHour: Number(event.target.value) })}/></label></div>
-      <div className="admin-whatsapp-action"><button className="secondary small" disabled={saving} onClick={() => void save()}><Save size={14}/>{saving ? "Saving…" : "Save WhatsApp setup"}</button>{message && <small>{message}</small>}</div>
+      <div className="admin-whatsapp-action"><button className="secondary small" disabled={saving || testing} onClick={() => void save()}><Save size={14}/>{saving ? "Saving…" : "Save WhatsApp setup"}</button>{settings.providerReady && settings.whatsappOptedIn && settings.whatsappNumber && <button className="secondary small" disabled={saving || testing} onClick={() => void test()}><MessageCircleMore size={14}/>{testing ? "Sending…" : "Send test"}</button>}{message && <small>{message}</small>}</div>
     </div>
   </details>;
 }

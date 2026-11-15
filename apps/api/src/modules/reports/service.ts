@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 import { AppError } from '../../lib/errors.js';
 import { indiaDate, indiaDayRange, indiaDayStart } from '../../lib/india-time.js';
+import { importRows } from '../historical-sales/service.js';
 
 type ReportFilter = { startDate: string; endDate: string; stationId?: string | undefined; permittedStationIds?: string[] | undefined; asOf?: Date | undefined };
 
@@ -25,29 +26,41 @@ export async function buildSalesHistory(organizationId: string, filter: ReportFi
   const stationIds = filter.stationId ? [filter.stationId] : filter.permittedStationIds;
   const station = filter.stationId ? await prisma.station.findFirst({ where: { id: filter.stationId, organizationId, ...(filter.permittedStationIds ? { id: { in: filter.permittedStationIds } } : {}) }, select: { id: true, name: true, code: true } }) : null;
   if (filter.stationId && !station) throw new Error('REPORT_STATION_NOT_FOUND');
-  const [stations, sales] = await Promise.all([
+  const [stations, sales, historicalImports] = await Promise.all([
     prisma.station.findMany({ where: { organizationId, active: true, ...(stationIds ? { id: { in: stationIds } } : {}) }, select: { id: true, name: true, code: true }, orderBy: { name: 'asc' } }),
     prisma.sale.findMany({
       where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), occurredAt: { gte: start, lt: endExclusive }, product: { category: 'FUEL' } },
       select: { occurredAt: true, quantity: true, unitPrice: true, product: { select: { id: true, name: true, code: true, unit: true } } },
       orderBy: { occurredAt: 'asc' },
     }),
+    prisma.historicalSalesImport?.findMany({
+      where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), monthStart: { lt: endExclusive } },
+      select: { rows: true, product: { select: { id: true, name: true, code: true, unit: true } } },
+    }) ?? Promise.resolve([]),
   ]);
-  const daily = new Map<string, { key: string; date: string; productId: string; product: string; code: string; unit: string; quantity: number; revenue: number; transactions: number }>();
+  const daily = new Map<string, { key: string; date: string; productId: string; product: string; code: string; unit: string; quantity: number; revenue: number; transactions: number; source: 'LIVE' | 'HISTORICAL_IMPORT' }>();
   for (const sale of sales) {
     const date = indiaDate(sale.occurredAt), key = `${date}:${sale.product.id}`;
-    add(daily, key, () => ({ key, date, productId: sale.product.id, product: sale.product.name, code: sale.product.code, unit: sale.product.unit, quantity: 0, revenue: 0, transactions: 0 }), row => {
+    add(daily, key, () => ({ key, date, productId: sale.product.id, product: sale.product.name, code: sale.product.code, unit: sale.product.unit, quantity: 0, revenue: 0, transactions: 0, source: 'LIVE' as const }), row => {
       const quantity = number(sale.quantity);
       row.quantity += quantity;
       row.revenue += quantity * number(sale.unitPrice);
       row.transactions += 1;
     });
   }
+  let historicalDays = 0;
+  for (const record of historicalImports) for (const row of importRows(record)) {
+    if (row.date < filter.startDate || row.date > filter.endDate) continue;
+    const key = `${row.date}:${record.product.id}`;
+    if (daily.has(key)) continue;
+    daily.set(key, { key, date: row.date, productId: record.product.id, product: record.product.name, code: record.product.code, unit: record.product.unit, quantity: row.salesQuantity, revenue: row.salesQuantity * row.sellingPrice, transactions: row.salesQuantity > 0 ? 1 : 0, source: 'HISTORICAL_IMPORT' });
+    historicalDays += row.salesQuantity > 0 ? 1 : 0;
+  }
   const rows = [...daily.values()].sort((left, right) => left.date.localeCompare(right.date) || left.code.localeCompare(right.code));
   return {
     filter: { startDate: filter.startDate, endDate: filter.endDate, ...(filter.stationId ? { stationId: filter.stationId } : {}), station },
     stations,
-    summary: { quantity: sum(rows, row => row.quantity), revenue: sum(rows, row => row.revenue), transactions: sales.length },
+    summary: { quantity: sum(rows, row => row.quantity), revenue: sum(rows, row => row.revenue), transactions: sales.length + historicalDays },
     daily: rows,
   };
 }

@@ -61,7 +61,7 @@ export function InventoryPage() {
     {error && <div className="form-error">{error}</div>}
 
     <section className="inventory-product-board" aria-label="Inventory by product">
-      <header><div><span className="eyebrow">Inventory by product</span><h2>Fuel quantity and stock value</h2><p>Valued at each product’s current effective purchase price.</p></div><small>Never combines unlike products into one litre total</small></header>
+      <header><div><span className="eyebrow">Inventory by product</span><h2>Fuel quantity and stock value</h2><p>Valued at each product’s current effective purchase price.</p></div></header>
       <div>{productPosition.map(product => {
         const productFill = product.capacity > 0 ? product.stock / product.capacity * 100 : 0;
         return <article className={product.code.toLowerCase()} key={product.code}><div className="inventory-product-name"><b>{product.code}</b><span><strong>{product.name}</strong><small>{product.tanks} tank{product.tanks === 1 ? '' : 's'} · {percentage(productFill)} full</small></span></div><div className="inventory-product-numbers"><span><small>Available</small><strong>{quantity(product.stock)} L</strong></span><span><small>Stock value</small><strong>{money(product.value)}</strong></span></div><div className="inventory-product-bar"><i style={{ width: `${clamp(productFill)}%` }}/></div><footer><span>{quantity(product.capacity)} L safe capacity</span><span>{money(product.purchasePrice)}/L purchase price</span></footer></article>;

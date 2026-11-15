@@ -29,6 +29,8 @@ import { intelligenceRouter } from "./routes/intelligence.js";
 import { approvalsRouter } from "./routes/approvals.js";
 import { nerveReadRouter } from "./routes/nerve-read.js";
 import { supportRouter } from "./routes/support.js";
+import { whatsappWebhookRouter } from "./routes/whatsapp-webhook.js";
+import { historicalSalesRouter } from "./routes/historical-sales.js";
 
 export function createApp() {
   const app = express();
@@ -88,7 +90,8 @@ export function createApp() {
       },
     }),
   );
-  app.use(express.json({ limit: "1mb" }));
+  app.use("/api/notifications/whatsapp/webhook", whatsappWebhookRouter);
+  app.use(express.json({ limit: "8mb" }));
   app.use(cookieParser());
   app.get("/api/health", async (_req, res) => {
     await prisma.$queryRaw`SELECT 1`;
@@ -105,6 +108,7 @@ export function createApp() {
   app.use("/api/purchases", purchasesRouter);
   app.use("/api/accounting", accountingRouter);
   app.use("/api/reports", reportsRouter);
+  app.use("/api/historical-sales", historicalSalesRouter);
   app.use("/api/dashboard", dashboardRouter);
   app.use("/api/access", accessRouter);
   app.use("/api/platform", platformRouter);

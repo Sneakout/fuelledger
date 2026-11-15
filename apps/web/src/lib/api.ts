@@ -8,6 +8,8 @@ import type {
   ExpenseCategoryInput,
   ExpenseInput,
   GoogleAuthInput,
+  HistoricalSalesImportInput,
+  HistoricalSalesRowInput,
   InventoryAdjustmentInput,
   LoginInput,
   ManagerInput,
@@ -44,6 +46,7 @@ import {
   type OfflineRequest,
 } from "./offline-sync";
 const API_URL = import.meta.env.VITE_API_URL ?? "/api";
+export const historicalSalesSourceUrl = (id: string) => `${API_URL}/historical-sales/${encodeURIComponent(id)}/source`;
 export class ApiRequestError extends Error {
   constructor(
     message: string,
@@ -273,6 +276,18 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  historicalSalesSetup: (stationId: string) =>
+    request<HistoricalSalesSetup>(`/historical-sales/setup?stationId=${encodeURIComponent(stationId)}`),
+  historicalSalesImports: (stationId: string) =>
+    request<{ imports: HistoricalSalesImportSummary[] }>(`/historical-sales?stationId=${encodeURIComponent(stationId)}`),
+  extractHistoricalSales: (input: HistoricalSalesExtractionInput) =>
+    request<HistoricalSalesExtractionResult>("/historical-sales/extract", { method: "POST", body: JSON.stringify(input) }),
+  classifyFuelDocument: (input: { sourceFileName: string; sourceMimeType: 'application/pdf' | 'image/jpeg' | 'image/png'; sourceSize: number; sourceContentBase64: string }) =>
+    request<{ kind: 'DSR' | 'INVOICE' | 'UNKNOWN'; confidence: number; productCode: 'HSD' | 'MS' | 'UNKNOWN'; evidence: string[] }>("/historical-sales/classify-document", { method: "POST", body: JSON.stringify(input) }),
+  validateHistoricalSales: (input: HistoricalSalesImportInput) =>
+    request<{ issues: HistoricalImportIssue[] }>("/historical-sales/validate", { method: "POST", body: JSON.stringify(input) }),
+  createHistoricalSalesImport: (input: HistoricalSalesImportInput) =>
+    request<{ record: HistoricalSalesImportSummary; issues: HistoricalImportIssue[] }>("/historical-sales", { method: "POST", body: JSON.stringify(input) }),
   catalog: () => request<Catalog>("/products"),
   createProduct: (input: ProductForm) =>
     request<{ product: CatalogProduct }>("/products", {
@@ -539,6 +554,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  testCustomerWhatsApp: (id: string) =>
+    request<{ delivery: { status: "SENT" | "FAILED" | "SKIPPED"; reason?: string } }>(`/platform/customers/${id}/notifications/test`, { method: "POST" }),
   serviceTickets: () => request<{ tickets: ServiceTicket[] }>("/support/tickets"),
   createServiceTicket: (input: ServiceTicketInput) =>
     request<{ ticket: ServiceTicket }>("/support/tickets", { method: "POST", body: JSON.stringify(input) }),
@@ -568,9 +585,12 @@ export type NotificationDelivery = {
   station: { name: string; code: string } | null;
   destination: string;
   message: string;
-  status: "PENDING" | "SENT" | "FAILED";
+  status: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED";
   errorMessage: string | null;
   sentAt: string | null;
+  deliveredAt: string | null;
+  readAt: string | null;
+  failedAt: string | null;
   createdAt: string;
 };
 export type NotificationBootstrap = {
@@ -1405,8 +1425,13 @@ export type SalesHistory = {
   filter: { startDate: string; endDate: string; stationId?: string; station: ReportStation | null };
   stations: ReportStation[];
   summary: { quantity: number; revenue: number; transactions: number };
-  daily: Array<{ key: string; date: string; productId: string; product: string; code: string; unit: string; quantity: number; revenue: number; transactions: number }>;
+  daily: Array<{ key: string; date: string; productId: string; product: string; code: string; unit: string; quantity: number; revenue: number; transactions: number; source?: 'LIVE' | 'HISTORICAL_IMPORT' }>;
 };
+export type HistoricalImportIssue = { date: string; level: 'WARNING' | 'ERROR'; field: string; message: string };
+export type HistoricalSalesSetup = { products: Array<{ product: { id: string; name: string; code: string; sellingPrice: string }; tanks: Array<{ id: string; code: string; workingCapacity: string; openingStock: string }>; nozzles: Array<{ id: string; code: string; dispenserCode: string; openingMeter: string }> }> };
+export type HistoricalSalesImportSummary = { id: string; monthStart: string; sourceFileName: string; cutoverApplied: boolean; createdAt: string; product: { name: string; code: string }; importedBy: { name: string } };
+export type HistoricalSalesExtractionInput = { stationId: string; productId: string; month: string; sourceFileName: string; sourceMimeType: 'application/pdf' | 'image/jpeg' | 'image/png'; sourceSize: number; sourceContentBase64: string };
+export type HistoricalSalesExtractionResult = { rows: HistoricalSalesRowInput[]; warnings: string[]; layoutIssues: string[]; uncertainCells: string[]; periodNeedsConfirmation: boolean; effectiveMonth: string; periodSource: 'DOCUMENT' | 'SELECTED'; confidence: number; detectedProduct: string; detectedMonth: string; detectedPumpColumns: string[]; detectedTankColumns: string[] };
 export type ReportSummary = {
   grossSales: number;
   transactions: number;

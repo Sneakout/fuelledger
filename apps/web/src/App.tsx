@@ -89,6 +89,7 @@ const SalesPage = lazy(() =>
 const SalesHistoryPage = lazy(() =>
   import("./pages/SalesHistoryPage").then((module) => ({ default: module.SalesHistoryPage })),
 );
+const HistoricalSalesImportPage = lazy(() => import("./pages/HistoricalSalesImportPage").then((module) => ({ default: module.HistoricalSalesImportPage })));
 const StaffPage = lazy(() =>
   import("./pages/StaffPage").then((module) => ({ default: module.StaffPage })),
 );
@@ -127,6 +128,7 @@ export default function App() {
           <Route path="operations" element={<OperationsPage />} />
           <Route path="sales" element={<SalesPage />} />
           <Route path="sales/history" element={<SalesHistoryPage />} />
+          <Route path="sales/history/import" element={<HistoricalSalesImportPage />} />
           <Route path="inventory" element={<InventoryPage />} />
           <Route path="reconciliation" element={<ReconciliationPage />} />
           <Route path="customers" element={<CustomersPage />} />
