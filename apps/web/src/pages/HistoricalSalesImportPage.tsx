@@ -7,6 +7,7 @@ import { useStation } from '../components/StationProvider';
 import { deleteHistoricalDraft, draftFile, historicalDraftById, historicalDraftId, historicalDraftScope, latestHistoricalDraft, saveHistoricalDraft, type HistoricalOcrDraft } from '../lib/historical-draft-store';
 
 const isoDate = (month: string, day: number) => `${month}-${String(day).padStart(2, '0')}`;
+const reviewCellId = (cell: string) => `historical-review-${cell.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 const daysInMonth = (month: string) => { const [year, value] = month.split('-').map(Number); return new Date(Date.UTC(year!, value!, 0)).getUTCDate(); };
 const dsrMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const dsrYears = Array.from({ length: 80 }, (_, index) => new Date().getFullYear() + 1 - index);
@@ -63,9 +64,17 @@ export function HistoricalSalesImportPage() {
   const selected = useMemo(() => setup?.products.find(item => item.product.id === productId), [setup, productId]);
   const pendingCalibrationReviews = useMemo(() => rows.flatMap(row => row.tankReadings.filter(reading => reading.calibration && !reading.calibration.reviewConfirmed).map(reading => ({ date: row.date, reading, tank: selected?.tanks.find(tank => tank.id === reading.tankId) }))), [rows, selected]);
   const reviewMessagesFor = (row: HistoricalSalesRowInput) => {
-    const messages = issues.filter(issue => issue.date === row.date).map(issue => ({ level: issue.level, message: issue.message }));
-    const unreadable = uncertainCells.filter(cell => cell.startsWith(`${row.date}:`)).length;
-    if (unreadable) messages.unshift({ level: 'ERROR', message: `${unreadable} highlighted value${unreadable === 1 ? '' : 's'} in this row must be reviewed.` });
+    const messages: Array<{ level: string; message: string; targetId?: string }> = issues.filter(issue => issue.date === row.date).map(issue => ({ level: issue.level, message: issue.message }));
+    const unreadable = uncertainCells.filter(cell => cell.startsWith(`${row.date}:`));
+    unreadable.forEach(cell => {
+      const parts = cell.split(':');
+      const label = parts[1] === 'tank'
+        ? `${selected?.tanks.find(tank => tank.id === parts[2])?.code ?? 'Tank'} stock`
+        : parts[1] === 'nozzle'
+          ? `${selected?.nozzles.find(nozzle => nozzle.id === parts[2])?.dispenserCode ?? 'Dispenser'}/${selected?.nozzles.find(nozzle => nozzle.id === parts[2])?.code ?? 'nozzle'} meter`
+          : 'Sales litres';
+      messages.unshift({ level: 'ERROR', message: `${label} could not be read confidently.`, targetId: reviewCellId(cell) });
+    });
     const calibration = pendingCalibrationReviews.filter(item => item.date === row.date).length;
     if (calibration) messages.unshift({ level: 'WARNING', message: `${calibration} chart-derived tank volume${calibration === 1 ? '' : 's'} need verification against the DSR.` });
     return messages;

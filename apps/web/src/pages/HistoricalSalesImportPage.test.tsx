@@ -47,6 +47,8 @@ describe('HistoricalSalesImportPage', () => {
     expect(extractHistoricalSales).toHaveBeenCalledWith(expect.objectContaining({ stationId: 'station-1', productId: 'product-1', sourceFileName: 'November DSR.pdf' }));
     expect(screen.getByText('One value needs review.')).toBeInTheDocument();
     expect(screen.getByDisplayValue('1804')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByDisplayValue('1804')).toHaveClass('needs-review');
+    expect(screen.getByText('Sales litres could not be read confidently.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Confirm historical import/ })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /Confirm historical import/ }));
     expect(await screen.findByText(/Confirm the DSR month and year before importing/)).toBeInTheDocument();
