@@ -46,7 +46,6 @@ export async function renderHistoricalDsrEvidence(file: File, configuredNozzleCo
       canvas.width = 1; canvas.height = 1;
       return blob;
     };
-    const upperRegister = await crop(0, 0, source.width, source.height * .52);
     // The printed register has eight possible pump columns, but many outlets
     // use only the first two or four. Size the dedicated evidence crop to the
     // configured nozzle count so handwriting stays large without clipping an
@@ -55,7 +54,7 @@ export async function renderHistoricalDsrEvidence(file: File, configuredNozzleCo
     const nozzleCount = Math.max(1, Math.min(8, configuredNozzleCount));
     const nozzleGrid = await crop(source.width * .355, source.height * .045, source.width * .0425 * nozzleCount, source.height * .425, 1.5);
     source.width = 1; source.height = 1;
-    return [upperRegister, nozzleGrid];
+    return [nozzleGrid];
   } finally {
     if (document) await document.destroy();
     else await loadingTask.destroy();
