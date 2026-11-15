@@ -186,6 +186,8 @@
   box-shadow: 0 0 0 3px rgba(196, 122, 24, .12);
 }
 .historical-grid td.calibration-cell-review { background: #fff8e8; box-shadow: inset 0 0 0 2px rgba(196, 122, 24, .22); }
+.historical-grid .nozzle-section-start { border-left: 4px solid #a9c9bd; padding-left: 12px; }
+.historical-grid th.nozzle-section-start { box-shadow: inset 10px 0 0 #e4f0eb; }
 .calibration-note { display: block; margin-top: 5px; color: #176b55; font-weight: 700; white-space: nowrap; }
 .calibration-confirm { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: #855a09; font-size: 12px; font-weight: 700; white-space: nowrap; }
 .calibration-confirm input { width: auto !important; margin: 0; }
