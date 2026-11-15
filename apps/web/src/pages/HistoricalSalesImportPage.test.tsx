@@ -25,6 +25,16 @@ describe('HistoricalSalesImportPage', () => {
     });
   });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
+  it('does not present live equipment balances as a historical draft by default', async () => {
+    render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    await screen.findByRole('option', { name: /HSD/ });
+    expect(await screen.findByText('Attach a DSR to begin')).toBeInTheDocument();
+    expect(screen.queryByText('Review grid')).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('5000')).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue('1000')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Enter manually/ }));
+    expect(screen.getByLabelText(/HSD-1 stock/)).toHaveValue(0);
+  });
   it('uses Nerve Intelligence to populate the review grid after a DSR is attached', async () => {
     extractHistoricalSales.mockResolvedValue({ rows: [{ date: '2026-11-02', tankReadings: [{ tankId: 'tank-1', openingStock: 7900, dipReading: 83 }], receiptQuantity: 0, totalStock: 7900, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15086 }], testingQuantity: 25, salesQuantity: 1804, cumulativeSales: 1779, sellingPrice: 94 }], warnings: ['One value needs review.'], layoutIssues: [], uncertainCells: ['2026-11-02:salesQuantity'], periodNeedsConfirmation: false, effectiveMonth: '2026-11', periodSource: 'DOCUMENT', confidence: .84, detectedProduct: 'HSD', detectedMonth: 'November 2026', detectedPumpColumns: ['1'], detectedTankColumns: ['HSD-1'] });
     const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
