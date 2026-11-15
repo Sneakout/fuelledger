@@ -46,7 +46,21 @@ describe('HistoricalSalesImportPage', () => {
     expect(extractHistoricalSales).toHaveBeenCalledWith(expect.objectContaining({ stationId: 'station-1', productId: 'product-1', sourceFileName: 'November DSR.pdf' }));
     expect(screen.getByText('One value needs review.')).toBeInTheDocument();
     expect(screen.getByDisplayValue('1804')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('button', { name: /Confirm historical import/ })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: /Confirm historical import/ }));
+    expect(await screen.findByText(/Confirm the DSR month and year before importing/)).toBeInTheDocument();
     expect(view.container.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe('2026-11-02');
+  });
+
+  it('does not show draft actions or the empty state while OCR is still reading', async () => {
+    extractHistoricalSales.mockImplementationOnce(() => new Promise(() => undefined));
+    const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    await screen.findByRole('option', { name: /HSD/ });
+    fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['scan'], 'Reading.pdf', { type: 'application/pdf' })] } });
+    expect(await screen.findByText('Reading the DSR')).toBeInTheDocument();
+    expect(screen.queryByText('Browser draft')).not.toBeInTheDocument();
+    expect(screen.queryByText('Attach a DSR to begin')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Refresh calculated volumes/ })).not.toBeInTheDocument();
   });
 
   it('switches the temporary month to the period read from the physical DSR', async () => {
