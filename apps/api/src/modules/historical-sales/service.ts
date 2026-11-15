@@ -1,6 +1,6 @@
 import { Prisma, type HistoricalSalesImport } from '@prisma/client';
 import { createHash } from 'node:crypto';
-import { deriveHistoricalNozzleSales, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
+import { deriveHistoricalNozzleSales, deriveHistoricalTotalStock, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { AppError } from '../../lib/errors.js';
 import { indiaDayRange } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
@@ -88,7 +88,7 @@ export async function historicalImportSource(organizationId: string, id: string)
 
 export async function createHistoricalImport(organizationId: string, userId: string, input: HistoricalSalesImportInput) {
   const setup = await equipment(organizationId, input.stationId, input.productId);
-  const derivedRows = deriveHistoricalNozzleSales(input.rows);
+  const derivedRows = deriveHistoricalTotalStock(deriveHistoricalNozzleSales(input.rows));
   const allowedTanks = new Map(setup.tanks.map(tank => [tank.id, tank]));
   const allowedNozzles = new Map(setup.nozzles.map(nozzle => [nozzle.id, nozzle]));
   for (const row of input.rows) {

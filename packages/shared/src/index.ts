@@ -1153,6 +1153,14 @@ export const historicalSalesImportSchema = z.object({
 export type HistoricalSalesRowInput = z.infer<typeof historicalSalesRowSchema>;
 export type HistoricalSalesImportInput = z.infer<typeof historicalSalesImportSchema>;
 
+export function calculateHistoricalTotalStock(row: Pick<HistoricalSalesRowInput, 'tankReadings' | 'receiptQuantity'>): number {
+  return Number((row.tankReadings.reduce((sum, reading) => sum + reading.openingStock, 0) + row.receiptQuantity).toFixed(3));
+}
+
+export function deriveHistoricalTotalStock(rows: HistoricalSalesRowInput[]): HistoricalSalesRowInput[] {
+  return rows.map(row => ({ ...row, totalStock: calculateHistoricalTotalStock(row) }));
+}
+
 export function calculateHistoricalNozzleSales(current: HistoricalSalesRowInput, next: HistoricalSalesRowInput): number | undefined {
   const currentMeters = new Map(current.nozzleReadings.map(reading => [reading.nozzleId, reading.meterReading]));
   if (currentMeters.size !== next.nozzleReadings.length) return undefined;

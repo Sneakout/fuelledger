@@ -129,6 +129,8 @@ describe('HistoricalSalesImportPage', () => {
     await screen.findByText(/Draft ready · 1 day recognised/);
     fireEvent.change(screen.getByLabelText('HSD-1 dip 2026-10-02'), { target: { value: '126.5' } });
     expect(screen.getByLabelText('HSD-1 stock 2026-10-02')).toHaveValue(13614.54);
+    expect(screen.getByLabelText('Total stock 2026-10-02')).toHaveValue(13614.54);
+    expect(screen.getByLabelText('Total stock 2026-10-02')).toHaveAttribute('readonly');
     expect(screen.getByText(/Official chart: 13,614.54 L · interpolated/)).toBeInTheDocument();
     expect(extractHistoricalSales).toHaveBeenCalledTimes(1);
   });

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { calculateHistoricalNozzleSales, compareDipWithOcrVolume, type HistoricalSalesRowInput } from '@fuelledger/shared';
+import { calculateHistoricalNozzleSales, calculateHistoricalTotalStock, compareDipWithOcrVolume, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
 import { historicalImportSetup } from './service.js';
@@ -313,10 +313,10 @@ export function mapExtractedDsrDraft(draft: ExtractedDsrDraft, setup: SetupProdu
       return { nozzleId: nozzle.id, meterReading: meterReading ?? 0 };
     });
     if (source.salesQuantity === null) uncertainCells.push(`${date}:salesQuantity`);
-    rows.push({
+    const receiptQuantity = safe(source.receiptQuantity) ?? 0;
+    const row: HistoricalSalesRowInput = {
       date, tankReadings,
-      receiptQuantity: safe(source.receiptQuantity) ?? 0,
-      ...(safe(source.totalStock) !== undefined ? { totalStock: safe(source.totalStock) } : {}),
+      receiptQuantity,
       nozzleReadings,
       testingQuantity: safe(source.testingQuantity) ?? 0,
       salesQuantity: safe(source.salesQuantity) ?? 0,
@@ -324,7 +324,9 @@ export function mapExtractedDsrDraft(draft: ExtractedDsrDraft, setup: SetupProdu
       ...(source.stockGainLoss !== null ? { stockGainLoss: source.stockGainLoss } : {}),
       sellingPrice: Number(setup.product.sellingPrice),
       ...(source.note ? { notes: source.note.slice(0, 300) } : {}),
-    });
+    };
+    row.totalStock = calculateHistoricalTotalStock(row);
+    rows.push(row);
   }
   if (activeTankColumns.length !== setup.tanks.length) for (const reading of draft.rows.flatMap(row => row.tankReadings).filter(reading => activeTankCodes.has(normalize(reading.code)))) if (!tankByCode.has(normalize(reading.code))) warnings.push(`Tank ${reading.code} could not be matched to this fuel station.`);
   if (activePumpColumns.length !== setup.nozzles.length) for (const reading of draft.rows.flatMap(row => row.nozzleReadings).filter(reading => activeNozzleCodes.has(normalize(reading.code)))) if (!nozzleByCode.has(normalize(reading.code))) warnings.push(`Nozzle ${reading.code} could not be matched to this fuel station.`);

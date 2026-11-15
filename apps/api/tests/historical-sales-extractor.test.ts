@@ -146,6 +146,7 @@ describe('DSR extraction mapping', () => {
       openingStock: 13_614.54,
       calibration: { chartId: 'IOCL-20KL-UG-KOZHIKODE-IS-2166-1963-A', volumeLitres: 13_614.54, ocrVolumeLitres: 13_700, reviewConfirmed: false },
     });
+    expect(result.rows[0]?.totalStock).toBe(13_614.54);
     expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining('chart-derived 13614.54 L')]));
   });
 

@@ -193,6 +193,7 @@
   color: #7c390c;
   font-weight: 800;
 }
+.historical-grid .historical-derived-cell input{background:#edf8f3;color:#145d49;font-weight:750;cursor:default}
 .historical-grid input.needs-review::placeholder { color: #a34713; opacity: 1; font-weight: 800; }
 .historical-grid td:has(>input.needs-review) { background: #fff8e8; }
 .historical-grid td.calibration-cell-review { background: #fff8e8; box-shadow: inset 0 0 0 2px rgba(196, 122, 24, .22); }
