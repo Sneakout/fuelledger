@@ -110,6 +110,54 @@ export function mergeExactNozzleAudit(draft: ExtractedDsrDraft, audit: z.infer<t
   };
 }
 
+export function suspiciousNozzleCells(draft: ExtractedDsrDraft) {
+  const suspicious = new Set<string>();
+  const rows = [...draft.rows].sort((left, right) => left.day - right.day);
+  const key = (day: number, code: string) => `${day}:${normalize(code)}`;
+  for (const row of rows) {
+    const populated = row.nozzleReadings.filter(reading => reading.meterReading !== null);
+    for (let left = 0; left < populated.length; left += 1) for (let right = left + 1; right < populated.length; right += 1) {
+      if (Math.abs(populated[left]!.meterReading! - populated[right]!.meterReading!) < 0.001) {
+        suspicious.add(key(row.day, populated[left]!.code));
+        suspicious.add(key(row.day, populated[right]!.code));
+      }
+    }
+  }
+  for (let index = 0; index < rows.length - 1; index += 1) {
+    const current = rows[index]!, next = rows[index + 1]!;
+    const currentByCode = new Map(current.nozzleReadings.map(reading => [normalize(reading.code), reading]));
+    let movement = 0;
+    let complete = true;
+    for (const reading of next.nozzleReadings) {
+      const opening = currentByCode.get(normalize(reading.code));
+      if (opening?.meterReading === null || opening?.meterReading === undefined || reading.meterReading === null) { complete = false; continue; }
+      if (reading.meterReading < opening.meterReading) {
+        suspicious.add(key(current.day, opening.code));
+        suspicious.add(key(next.day, reading.code));
+      } else movement += reading.meterReading - opening.meterReading;
+    }
+    const recordedSales = safe(current.salesQuantity);
+    if (complete && recordedSales !== undefined && recordedSales > 0 && Math.abs(movement - recordedSales) > Math.max(25, recordedSales * 0.08)) {
+      current.nozzleReadings.forEach(reading => suspicious.add(key(current.day, reading.code)));
+      next.nozzleReadings.forEach(reading => suspicious.add(key(next.day, reading.code)));
+    }
+  }
+  return suspicious;
+}
+
+function restoreSuspiciousAuditCells(original: ExtractedDsrDraft, audited: ExtractedDsrDraft) {
+  const suspicious = suspiciousNozzleCells(audited);
+  if (!suspicious.size) return audited;
+  const originals = new Map(original.rows.flatMap(row => row.nozzleReadings.map(reading => [`${row.day}:${normalize(reading.code)}`, reading] as const)));
+  return { ...audited, rows: audited.rows.map(row => ({ ...row, nozzleReadings: row.nozzleReadings.map(reading => suspicious.has(`${row.day}:${normalize(reading.code)}`) ? (originals.get(`${row.day}:${normalize(reading.code)}`) ?? reading) : reading) })) };
+}
+
+function removeStillSuspiciousReadings(draft: ExtractedDsrDraft) {
+  const suspicious = suspiciousNozzleCells(draft);
+  if (!suspicious.size) return draft;
+  return { ...draft, rows: draft.rows.map(row => ({ ...row, nozzleReadings: row.nozzleReadings.map(reading => suspicious.has(`${row.day}:${normalize(reading.code)}`) ? { ...reading, meterReading: null } : reading) })) };
+}
+
 export function needsDsrVisualVerification(draft: ExtractedDsrDraft) {
   const populatedRows = draft.rows.filter(row => row.tankReadings.some(reading => reading.openingStock !== null) || row.nozzleReadings.some(reading => reading.meterReading !== null));
   const hasMissingDipBesideStock = populatedRows.some(row => row.tankReadings.some(reading => reading.openingStock !== null && reading.dipReading === null));
@@ -302,6 +350,7 @@ export async function extractHistoricalDsr(input: { organizationId: string; stat
   // Meter cells need a dedicated transcription pass. Returning the exact text
   // first prevents a vision model from shortening 18218.270 into 1828.13.
   try {
+    const preAuditDraft = draft;
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST', signal: AbortSignal.timeout(90_000), headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -316,9 +365,10 @@ export async function extractHistoricalDsr(input: { organizationId: string; stat
       const body = await response.json() as { output_text?: string; output?: Array<{ content?: Array<{ type?: string; text?: string }> }> };
       const outputText = body.output_text ?? body.output?.flatMap(item => item.content ?? []).find(item => item.type === 'output_text')?.text;
       const audit = nozzleAuditSchema.parse(JSON.parse(outputText ?? ''));
-      draft = mergeExactNozzleAudit(draft, audit);
+      draft = restoreSuspiciousAuditCells(preAuditDraft, mergeExactNozzleAudit(preAuditDraft, audit));
     }
   } catch { /* Deterministic review checks below still reject suspicious first-pass readings. */ }
+  draft = removeStillSuspiciousReadings(draft);
   return mapExtractedDsrDraft(draft, product, input.month);
 }
 

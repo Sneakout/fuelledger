@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapExtractedDsrDraft, mergeExactNozzleAudit, needsDsrVisualVerification, parseExactMeterReading, type ExtractedDsrDraft } from '../src/modules/historical-sales/extractor.js';
+import { mapExtractedDsrDraft, mergeExactNozzleAudit, needsDsrVisualVerification, parseExactMeterReading, suspiciousNozzleCells, type ExtractedDsrDraft } from '../src/modules/historical-sales/extractor.js';
 
 const setup = {
   product: { id: 'product', code: 'HSD', name: 'High Speed Diesel', sellingPrice: '94' },
@@ -22,6 +22,18 @@ describe('DSR extraction mapping', () => {
     };
     const merged = mergeExactNozzleAudit(draft, { columns: ['1', '2'], rows: [{ day: 1, readings: [{ code: '1', raw: '15086·173' }, { code: '2', raw: '18218·270' }] }] });
     expect(merged.rows[0]?.nozzleReadings).toEqual([{ code: '1', meterReading: 15086.173 }, { code: '2', meterReading: 18218.27 }]);
+  });
+
+  it('rejects missing leading digits and duplicated nozzle values using daily continuity', () => {
+    const draft: ExtractedDsrDraft = {
+      detectedProduct: 'HSD', detectedMonth: 'October 2026', periodPresent: true, periodConfidence: 0.96, detectedPumpColumns: ['1', '2'], detectedTankColumns: ['1'], confidence: 0.8,
+      rows: [
+        { day: 1, tankReadings: [], receiptQuantity: 0, totalStock: null, nozzleReadings: [{ code: '1', meterReading: 5086.13 }, { code: '2', meterReading: 3784.8 }], testingQuantity: 25, salesQuantity: 1804.42, cumulativeSales: null, stockGainLoss: null, note: '' },
+        { day: 2, tankReadings: [], receiptQuantity: 0, totalStock: null, nozzleReadings: [{ code: '1', meterReading: 15604.6 }, { code: '2', meterReading: 3784.8 }], testingQuantity: 5, salesQuantity: 1480.25, cumulativeSales: null, stockGainLoss: null, note: '' },
+      ],
+    };
+    const suspicious = suspiciousNozzleCells(draft);
+    expect(suspicious).toEqual(new Set(['1:1', '1:2', '2:1', '2:2']));
   });
 
   it('does not erase a first-pass nozzle value when the exact audit is unreadable', () => {

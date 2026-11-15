@@ -5,7 +5,7 @@ const VERSION = 1;
 const STORE = 'drafts';
 // Bump when extraction rules change so an inaccurate cached OCR result is not
 // silently reused after the reader has been improved.
-const OCR_DRAFT_VERSION = '2';
+const OCR_DRAFT_VERSION = '3';
 
 export type HistoricalOcrDraft = {
   id: string;
