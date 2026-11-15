@@ -27,9 +27,13 @@ describe('HistoricalSalesImportPage', () => {
   });
   afterEach(() => { cleanup(); vi.clearAllMocks(); });
   it('does not present live equipment balances as a historical draft by default', async () => {
-    render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
     await screen.findByRole('option', { name: /HSD/ });
     expect(await screen.findByText('Attach a DSR to begin')).toBeInTheDocument();
+    const fileInput = view.container.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const openFilePicker = vi.spyOn(fileInput, 'click');
+    fireEvent.click(screen.getByRole('button', { name: /Attach DSR/ }));
+    expect(openFilePicker).toHaveBeenCalledOnce();
     expect(screen.queryByText('Review grid')).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue('5000')).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue('1000')).not.toBeInTheDocument();

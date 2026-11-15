@@ -150,6 +150,10 @@
 .historical-file{grid-column:1/-1;display:grid!important;grid-template-columns:38px minmax(0,1fr)!important;min-height:58px;padding:10px 15px;border-radius:13px;background:#f3f9f6;color:#256b56}
 .historical-file>svg{width:20px;justify-self:center}
 .historical-file>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.historical-empty-actions{display:flex;align-items:center;gap:10px}
+.historical-empty-actions button{min-height:44px;white-space:nowrap}
+.historical-attach-action{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--forest);border-radius:12px;padding:0 17px;background:var(--forest);color:#fff;font:inherit;font-weight:750;cursor:pointer}
+.historical-attach-action:hover{background:#0e3d32}
 .historical-safety{align-items:flex-start;min-width:0;margin-bottom:18px;padding:16px 18px;border:1px solid #cce8dc;border-radius:15px;background:#eaf7f1;font-size:12px;line-height:1.55}
 .historical-safety>svg{flex:0 0 20px;margin-top:1px}
 .historical-safety>span{min-width:0;overflow-wrap:anywhere}
@@ -178,6 +182,8 @@
   .sales-history-fields label:nth-of-type(3),.sales-history-fields .primary{grid-column:auto}
   .historical-import-controls{grid-template-columns:1fr}
   .historical-file{grid-column:auto}
+  .historical-empty-actions{width:100%;flex-direction:column}
+  .historical-empty-actions button{width:100%}
 }
 
 .historical-grid input.needs-review {
