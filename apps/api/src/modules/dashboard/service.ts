@@ -1,8 +1,10 @@
+import type { HistoricalSalesImport } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 import { tankBookStocksAt, tankMovementDeltasBetween } from '../../lib/stock.js';
 import { addIndiaDays, indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { buildReport } from '../reports/service.js';
+import { importRows } from '../historical-sales/service.js';
 
 const number=(value:unknown)=>Number(value??0);
 const money=(value:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(value);
@@ -10,6 +12,24 @@ const money=(value:number)=>new Intl.NumberFormat('en-IN',{style:'currency',curr
 type RecentPurchaseForAction={id:string;invoiceNumber:string;totalAmount:unknown;supplier:{name:string}};
 type PendingPriceApprovalForAction={id:string;reason:string;evidence:unknown};
 type DashboardAction={id:string;severity:'HIGH'|'MEDIUM';title:string;detail:string;href:string};
+type DashboardTimelineSale={occurredAt:Date;totalAmount:unknown;productId:string};
+type DashboardHistoricalImport=Pick<HistoricalSalesImport,'productId'|'rows'>;
+
+export function dashboardSalesTimeline(liveSales:DashboardTimelineSale[],historicalImports:DashboardHistoricalImport[],startDate:string,endDate:string){
+  const amounts=new Map<string,number>();
+  const liveProductDays=new Set<string>();
+  for(const sale of liveSales){
+    const date=indiaDate(sale.occurredAt);
+    if(date<startDate||date>endDate)continue;
+    liveProductDays.add(`${date}:${sale.productId}`);
+    amounts.set(date,(amounts.get(date)??0)+number(sale.totalAmount));
+  }
+  for(const record of historicalImports)for(const row of importRows(record)){
+    if(row.date<startDate||row.date>endDate||liveProductDays.has(`${row.date}:${record.productId}`))continue;
+    amounts.set(row.date,(amounts.get(row.date)??0)+number(row.salesQuantity)*number(row.sellingPrice));
+  }
+  return amounts;
+}
 
 export function purchaseDashboardActions(recentPurchases:RecentPurchaseForAction[],pendingPriceApprovals:PendingPriceApprovalForAction[]):DashboardAction[]{
   const priceActions=pendingPriceApprovals.flatMap(row=>{
@@ -30,11 +50,12 @@ export function purchaseDashboardActions(recentPurchases:RecentPurchaseForAction
 }
 
 export async function bootstrap(organizationId:string,permittedStationIds?:string[],stationId?:string){
-  const now=new Date(),todayDate=indiaDate(now),todayRange=indiaDayRange(todayDate),weekStartDate=addIndiaDays(todayDate,-6),previousStartDate=addIndiaDays(todayDate,-13),weekStart=indiaDayRange(weekStartDate).start,previousStart=indiaDayRange(previousStartDate).start,tomorrow=todayRange.endExclusive;
+  const now=new Date(),todayDate=indiaDate(now),todayRange=indiaDayRange(todayDate),weekStartDate=addIndiaDays(todayDate,-6),previousStartDate=addIndiaDays(todayDate,-13),previousStart=indiaDayRange(previousStartDate).start,tomorrow=todayRange.endExclusive;
   const report=await buildReport(organizationId,{startDate:todayDate,endDate:todayDate,permittedStationIds,...(stationId?{stationId}:{})});
   const scopeIds=stationId?[stationId]:permittedStationIds;
-  const [recentSales,shifts,reconciliations,tanks,recentPurchases,pendingPriceApprovals]=await Promise.all([
-    prisma.sale.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),occurredAt:{gte:previousStart,lt:tomorrow}},select:{occurredAt:true,totalAmount:true}}),
+  const [recentSales,historicalImports,shifts,reconciliations,tanks,recentPurchases,pendingPriceApprovals]=await Promise.all([
+    prisma.sale.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),occurredAt:{gte:previousStart,lt:tomorrow}},select:{occurredAt:true,totalAmount:true,productId:true}}),
+    prisma.historicalSalesImport.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),monthStart:{lt:tomorrow}},select:{productId:true,rows:true}}),
     prisma.shift.findMany({where:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})},status:{in:['OPEN','RECONCILIATION_REQUIRED']}},select:{id:true,status:true,shiftNumber:true,openedAt:true,closedAt:true,station:{select:{id:true,name:true,code:true}}},orderBy:{openedAt:'desc'}}),
     prisma.shiftReconciliation.findMany({where:{shift:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})}},reconciledAt:{gte:todayRange.start,lt:tomorrow}},include:{collections:{select:{varianceAmount:true}}}}),
     prisma.tank.findMany({
@@ -63,9 +84,10 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
       expectedFromLastDip.set(reading.tankId,{stock:number(reading.closingDip)+number(changes.get(reading.tankId)),closedAt:closing.closedAt.toISOString()});
     }
   }));
-  const total=(from:Date,to:Date)=>recentSales.filter(row=>row.occurredAt>=from&&row.occurredAt<to).reduce((sum,row)=>sum+number(row.totalAmount),0);
-  const thisWeek=total(weekStart,tomorrow),previousWeek=total(previousStart,weekStart),weekChange=previousWeek?((thisWeek-previousWeek)/previousWeek)*100:null;
-  const trend=Array.from({length:7},(_,index)=>{const date=addIndiaDays(weekStartDate,index),range=indiaDayRange(date);return{date,amount:total(range.start,range.endExclusive)};});
+  const timeline=dashboardSalesTimeline(recentSales,historicalImports,previousStartDate,todayDate);
+  const total=(fromDate:string,toDateExclusive:string)=>[...timeline.entries()].filter(([date])=>date>=fromDate&&date<toDateExclusive).reduce((sum,[,amount])=>sum+amount,0);
+  const thisWeek=total(weekStartDate,addIndiaDays(todayDate,1)),previousWeek=total(previousStartDate,weekStartDate),weekChange=previousWeek?((thisWeek-previousWeek)/previousWeek)*100:null;
+  const trend=Array.from({length:7},(_,index)=>{const date=addIndiaDays(weekStartDate,index);return{date,amount:timeline.get(date)??0};});
   const pending=shifts.filter(row=>row.status==='RECONCILIATION_REQUIRED'),open=shifts.filter(row=>row.status==='OPEN');
   const cashVariance=reconciliations.reduce((sum,reconciliation)=>sum+reconciliation.collections.reduce((lineTotal,line)=>lineTotal+number(line.varianceAmount),0),0);
   const overdueReceivables=report.customers.reduce((sum,row)=>sum+row.ageing.days31to60+row.ageing.days61to90+row.ageing.days90plus,0);
