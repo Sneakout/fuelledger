@@ -19,7 +19,7 @@ const fileBytes = (file: File) => new Promise<ArrayBuffer>((resolve, reject) => 
   reader.readAsArrayBuffer(file);
 });
 const sha256 = async (file: File) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await fileBytes(file)))].map(value => value.toString(16).padStart(2, '0')).join('');
-const base64 = (file: File) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(reader.error); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.readAsDataURL(file); });
+const base64 = (file: Blob) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(reader.error); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.readAsDataURL(file); });
 
 function calculateReliableSales(rows: HistoricalSalesRowInput[], uncertainCells: string[]) {
   const uncertain = new Set(uncertainCells);
@@ -231,7 +231,10 @@ export function HistoricalSalesImportPage() {
     try {
       const extension = next.name.toLowerCase().split('.').at(-1);
       const mime = next.type || (extension === 'pdf' ? 'application/pdf' : extension === 'png' ? 'image/png' : 'image/jpeg');
-      const result = await api.extractHistoricalSales({ stationId, productId, month, sourceFileName: next.name, sourceMimeType: mime as 'application/pdf' | 'image/jpeg' | 'image/png', sourceSize: next.size, sourceContentBase64: await base64(next) });
+      const ocrEvidenceImagesBase64 = mime === 'application/pdf'
+        ? await import('../lib/local-pdf-text').then(module => module.renderHistoricalDsrEvidence(next, selected?.nozzles.length ?? 8)).then(images => Promise.all(images.map(base64))).catch(() => undefined)
+        : undefined;
+      const result = await api.extractHistoricalSales({ stationId, productId, month, sourceFileName: next.name, sourceMimeType: mime as 'application/pdf' | 'image/jpeg' | 'image/png', sourceSize: next.size, sourceContentBase64: await base64(next), ...(ocrEvidenceImagesBase64 ? { ocrEvidenceImagesBase64 } : {}) });
       if (result.effectiveMonth !== month) { documentPeriodSync.current = true; setMonth(result.effectiveMonth); }
       const calculated = calculateReliableSales(result.rows, result.uncertainCells);
       if (calculated.rows.length) setRows(calculated.rows);

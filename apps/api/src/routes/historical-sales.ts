@@ -32,12 +32,14 @@ historicalSalesRouter.post('/extract', async (req, res) => {
     stationId: z.string().cuid(), productId: z.string().cuid(), month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
     sourceFileName: z.string().trim().min(1).max(180), sourceMimeType: z.enum(['application/pdf', 'image/jpeg', 'image/png']),
     sourceSize: z.coerce.number().int().positive().max(5 * 1024 * 1024), sourceContentBase64: z.string().min(1),
+    ocrEvidenceImagesBase64: z.array(z.string().min(1).max(5_000_000)).max(2).optional(),
   }).strict().safeParse(req.body);
   if (!parsed.success) throw new AppError(400, 'DSR_SOURCE_INVALID', parsed.error.issues[0]?.message ?? 'Attach a valid DSR scan.');
   assertStationAccess(req.user!, parsed.data.stationId);
   const bytes = Buffer.from(parsed.data.sourceContentBase64, 'base64');
   if (bytes.byteLength !== parsed.data.sourceSize) throw new AppError(400, 'DSR_SOURCE_INVALID', 'The DSR attachment could not be verified. Attach it again.');
-  res.json(await extractHistoricalDsr({ organizationId: req.user!.organization.id, ...parsed.data }));
+  const { ocrEvidenceImagesBase64, ...source } = parsed.data;
+  res.json(await extractHistoricalDsr({ organizationId: req.user!.organization.id, ...source, ...(ocrEvidenceImagesBase64 ? { ocrEvidenceImagesBase64 } : {}) }));
 });
 
 historicalSalesRouter.post('/classify-document', async (req, res) => {

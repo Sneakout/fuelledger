@@ -24,16 +24,16 @@ describe('DSR extraction mapping', () => {
     expect(merged.rows[0]?.nozzleReadings).toEqual([{ code: '1', meterReading: 15086.173 }, { code: '2', meterReading: 18218.27 }]);
   });
 
-  it('rejects missing leading digits and duplicated nozzle values using daily continuity', () => {
+  it('rejects duplicated and backwards nozzle values using column continuity', () => {
     const draft: ExtractedDsrDraft = {
       detectedProduct: 'HSD', detectedMonth: 'October 2026', periodPresent: true, periodConfidence: 0.96, detectedPumpColumns: ['1', '2'], detectedTankColumns: ['1'], confidence: 0.8,
       rows: [
-        { day: 1, tankReadings: [], receiptQuantity: 0, totalStock: null, nozzleReadings: [{ code: '1', meterReading: 5086.13 }, { code: '2', meterReading: 3784.8 }], testingQuantity: 25, salesQuantity: 1804.42, cumulativeSales: null, stockGainLoss: null, note: '' },
-        { day: 2, tankReadings: [], receiptQuantity: 0, totalStock: null, nozzleReadings: [{ code: '1', meterReading: 15604.6 }, { code: '2', meterReading: 3784.8 }], testingQuantity: 5, salesQuantity: 1480.25, cumulativeSales: null, stockGainLoss: null, note: '' },
+        { day: 1, tankReadings: [], receiptQuantity: 0, totalStock: null, nozzleReadings: [{ code: '1', meterReading: 15086.13 }, { code: '2', meterReading: 15086.13 }], testingQuantity: 25, salesQuantity: 1804.42, cumulativeSales: null, stockGainLoss: null, note: '' },
+        { day: 2, tankReadings: [], receiptQuantity: 0, totalStock: null, nozzleReadings: [{ code: '1', meterReading: 15000 }, { code: '2', meterReading: 18914.09 }], testingQuantity: 5, salesQuantity: 1480.25, cumulativeSales: null, stockGainLoss: null, note: '' },
       ],
     };
     const suspicious = suspiciousNozzleCells(draft);
-    expect(suspicious).toEqual(new Set(['1:1', '1:2', '2:1', '2:2']));
+    expect(suspicious).toEqual(new Set(['1:1', '1:2', '2:1']));
   });
 
   it('does not erase a first-pass nozzle value when the exact audit is unreadable', () => {
@@ -152,7 +152,7 @@ describe('DSR extraction mapping', () => {
     expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining('dip on 2026-10-01 was not read'), expect.stringContaining('leading digits were dropped')]));
   });
 
-  it('flags a consistently shortened meter sequence when its movement cannot explain sales', () => {
+  it('derives sales from a monotonic meter sequence instead of trusting the OCR sales column', () => {
     const oneNozzleSetup = { ...setup, tanks: [setup.tanks[0]], nozzles: [setup.nozzles[0]] } as never;
     const draft: ExtractedDsrDraft = {
       detectedProduct: 'HSD', detectedMonth: 'October 2026', periodPresent: true, periodConfidence: 0.98, detectedPumpColumns: ['1'], detectedTankColumns: ['1'], confidence: 0.9,
@@ -162,7 +162,7 @@ describe('DSR extraction mapping', () => {
       ],
     };
     const result = mapExtractedDsrDraft(draft, oneNozzleSetup, '2026-10');
-    expect(result.uncertainCells).toEqual(expect.arrayContaining(['2026-10-01:nozzle:nozzle-1', '2026-10-02:nozzle:nozzle-1']));
-    expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining('inconsistent with recorded sales')]));
+    expect(result.uncertainCells).not.toEqual(expect.arrayContaining(['2026-10-01:nozzle:nozzle-1', '2026-10-02:nozzle:nozzle-1']));
+    expect(result.rows[0]?.salesQuantity).toBe(27.35);
   });
 });
