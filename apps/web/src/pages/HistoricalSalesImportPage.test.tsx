@@ -81,7 +81,8 @@ describe('HistoricalSalesImportPage', () => {
     await screen.findByRole('option', { name: /HSD/ });
     fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['scan'], 'DSR.pdf', { type: 'application/pdf' })] } });
     await screen.findByText(/Draft ready · 1 day recognised/);
-    fireEvent.change(screen.getByLabelText('Actual DSR month and year'), { target: { value: '2026-10' } });
+    expect(screen.getByLabelText('Actual DSR month')).toHaveValue('10');
+    fireEvent.change(screen.getByLabelText('Actual DSR year'), { target: { value: '2026' } });
     expect(view.container.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe('2026-10-02');
     expect(screen.getByLabelText('HSD-1 stock 2026-10-02')).toHaveValue(7900);
     expect(screen.getByText(/This period was selected manually/)).toBeInTheDocument();

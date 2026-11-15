@@ -207,7 +207,9 @@
   color: #655419;
 }
 .historical-period-choice { display: grid; gap: 6px; font-weight: 700; }
-.historical-period-choice input { margin: 0; background: #fff; }
+.historical-period-fields { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(110px, .55fr); gap: 10px; }
+.historical-period-fields label { display: grid; gap: 4px; color: #786d45; font-size: 12px; }
+.historical-period-fields select { min-height: 46px; margin: 0; border: 1px solid #b7cec5; border-radius: 12px; background: #fff; padding: 0 12px; color: var(--ink); font: inherit; font-size: 15px; font-weight: 700; }
 .historical-period-choice small { font-weight: 400; }
 .historical-period-ack { display: flex; align-items: flex-start; gap: 12px; padding-left: 18px; border-left: 1px solid #e0d6ad; }
 .historical-period-ack > input { margin-top: 4px; }
@@ -215,6 +217,7 @@
 .historical-period-confirm small { color: #786d45; }
 @media (max-width: 760px) {
   .historical-period-confirm { grid-template-columns: 1fr; }
+  .historical-period-fields { grid-template-columns: 1fr 1fr; }
   .historical-period-ack { padding: 14px 0 0; border-left: 0; border-top: 1px solid #e0d6ad; }
   .historical-draft-toolbar { align-items: stretch; flex-direction: column; }
   .historical-draft-toolbar > div { display: grid; }
