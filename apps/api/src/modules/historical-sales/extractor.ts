@@ -101,7 +101,10 @@ export function mergeExactNozzleAudit(draft: ExtractedDsrDraft, audit: z.infer<t
       if (!audited) return row;
       return { ...row, nozzleReadings: row.nozzleReadings.map((reading, index) => {
         const exact = audited.readings.find(item => normalize(item.code) === normalize(reading.code)) ?? audited.readings[index];
-        return { ...reading, meterReading: exact ? parseExactMeterReading(exact.raw) ?? null : null };
+        const parsed = exact ? parseExactMeterReading(exact.raw) : undefined;
+        // A failed audit must never erase a usable first-pass transcription.
+        // Deterministic progression/sales checks can still mark it for review.
+        return { ...reading, meterReading: parsed ?? reading.meterReading };
       }) };
     }),
   };

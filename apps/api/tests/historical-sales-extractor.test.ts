@@ -24,6 +24,15 @@ describe('DSR extraction mapping', () => {
     expect(merged.rows[0]?.nozzleReadings).toEqual([{ code: '1', meterReading: 15086.173 }, { code: '2', meterReading: 18218.27 }]);
   });
 
+  it('does not erase a first-pass nozzle value when the exact audit is unreadable', () => {
+    const draft: ExtractedDsrDraft = {
+      detectedProduct: 'HSD', detectedMonth: 'October 2026', periodPresent: true, periodConfidence: 0.96, detectedPumpColumns: ['1'], detectedTankColumns: ['1'], confidence: 0.8,
+      rows: [{ day: 1, tankReadings: [{ code: '1', openingStock: 7929.83, dipReading: 83 }], receiptQuantity: 0, totalStock: 7929.83, nozzleReadings: [{ code: '1', meterReading: 15086.173 }], testingQuantity: 25, salesQuantity: 1804.42, cumulativeSales: 1779.42, stockGainLoss: null, note: '' }],
+    };
+    const merged = mergeExactNozzleAudit(draft, { columns: ['1'], rows: [{ day: 1, readings: [{ code: '1', raw: null }] }] });
+    expect(merged.rows[0]?.nozzleReadings[0]?.meterReading).toBe(15086.173);
+  });
+
   it('requests a visual verification pass for missing dips or decreasing cumulative meters', () => {
     const draft: ExtractedDsrDraft = {
       detectedProduct: 'HSD', detectedMonth: 'October 2026', periodPresent: true, periodConfidence: 0.96, detectedPumpColumns: ['1'], detectedTankColumns: ['1'], confidence: 0.8,

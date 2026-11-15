@@ -45,6 +45,7 @@ describe('HistoricalSalesImportPage', () => {
     expect(await screen.findByText(/Draft ready · 1 day recognised · 84%/)).toBeInTheDocument();
     expect(extractHistoricalSales).toHaveBeenCalledWith(expect.objectContaining({ stationId: 'station-1', productId: 'product-1', sourceFileName: 'November DSR.pdf' }));
     expect(screen.getByText('One value needs review.')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('1804')).toHaveAttribute('aria-invalid', 'true');
     expect(view.container.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe('2026-11-02');
   });
 

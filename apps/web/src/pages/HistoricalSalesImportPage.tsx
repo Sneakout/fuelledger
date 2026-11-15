@@ -134,7 +134,7 @@ export function HistoricalSalesImportPage() {
       const cell = `${row.date}:tank:${tank.id}:stock`;
       const comparison = compareDipWithOcrVolume({ dipCm: reading.dipReading, ocrVolumeLitres: reading.calibration?.ocrVolumeLitres ?? (uncertainCells.includes(cell) ? undefined : reading.openingStock), toleranceLitres: 25 });
       if (comparison.calibration.status !== 'OK') { invalid += 1; continue; }
-      reading.openingStock = comparison.calibration.volumeLitres;
+      reading.openingStock = Number(comparison.calibration.volumeLitres.toFixed(3));
       reading.calibration = { chartId: comparison.calibration.chartId, volumeLitres: comparison.calibration.volumeLitres, ...(comparison.ocrVolumeLitres !== undefined ? { ocrVolumeLitres: comparison.ocrVolumeLitres } : {}), ...(comparison.differenceLitres !== undefined ? { differenceLitres: comparison.differenceLitres } : {}), toleranceLitres: comparison.toleranceLitres, interpolated: comparison.calibration.interpolated, reviewConfirmed: reading.calibration?.reviewConfirmed === true && reading.calibration.volumeLitres === comparison.calibration.volumeLitres ? true : !comparison.requiresReview };
       calibratedCells.add(cell); calibrated += 1;
     }
@@ -153,7 +153,7 @@ export function HistoricalSalesImportPage() {
     if (tank.tankType === 'UNDERGROUND' && Number(tank.nominalCapacity) === 20_000) {
       const comparison = compareDipWithOcrVolume({ dipCm: dip, ocrVolumeLitres: originalOcrVolume, toleranceLitres: 25 });
       if (comparison.calibration.status === 'OK') {
-        reading.openingStock = comparison.calibration.volumeLitres;
+        reading.openingStock = Number(comparison.calibration.volumeLitres.toFixed(3));
         reading.calibration = { chartId: comparison.calibration.chartId, volumeLitres: comparison.calibration.volumeLitres, ...(comparison.ocrVolumeLitres !== undefined ? { ocrVolumeLitres: comparison.ocrVolumeLitres } : {}), ...(comparison.differenceLitres !== undefined ? { differenceLitres: comparison.differenceLitres } : {}), toleranceLitres: comparison.toleranceLitres, interpolated: comparison.calibration.interpolated, reviewConfirmed: !comparison.requiresReview };
         setUncertainCells(current => current.filter(item => item !== cell));
         setError('');
@@ -225,4 +225,4 @@ export function HistoricalSalesImportPage() {
   </main>;
 }
 
-function Cell(props: ({ value: number; onChange(value: number): void; optional?: false } | { value: number | undefined; onChange(value: number | undefined): void; optional: true }) & { needsReview?: boolean }) { const optional = props.optional === true; return <td><input className={props.needsReview ? 'needs-review' : ''} type="number" step="0.01" value={props.needsReview ? '' : props.value ?? ''} placeholder={props.needsReview ? 'Review' : optional ? '—' : '0'} onChange={event => { if (props.needsReview && event.target.value === '') return; const value = event.target.value === '' && optional ? undefined : Number(event.target.value); (props.onChange as (next: number | undefined) => void)(value); }}/></td>; }
+function Cell(props: ({ value: number; onChange(value: number): void; optional?: false } | { value: number | undefined; onChange(value: number | undefined): void; optional: true }) & { needsReview?: boolean }) { const optional = props.optional === true; const visibleValue = props.needsReview && !(Number(props.value) > 0) ? '' : props.value ?? ''; return <td><input className={props.needsReview ? 'needs-review' : ''} type="number" step="0.001" value={visibleValue} placeholder={props.needsReview ? 'Review' : optional ? '—' : '0'} aria-invalid={props.needsReview || undefined} title={props.needsReview ? 'Verify this extracted value against the DSR' : undefined} onChange={event => { if (props.needsReview && event.target.value === '') return; const value = event.target.value === '' && optional ? undefined : Number(event.target.value); (props.onChange as (next: number | undefined) => void)(value); }}/></td>; }
