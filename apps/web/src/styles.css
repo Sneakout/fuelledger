@@ -161,6 +161,7 @@
 .historical-reader-warnings small{display:block;font-size:10px;line-height:1.5}
 .historical-reader-warnings small:before{content:'•';margin-right:7px}
 .historical-grid-card,.historical-issues,.historical-import-list{border-color:#d5e3dc;box-shadow:0 10px 32px rgba(23,63,53,.035)}
+.historical-inline-review-summary{display:flex;gap:10px;align-items:center;margin-top:16px;padding:11px 13px;border-radius:12px;background:#fff8e8;color:#855a09}.historical-inline-review-summary span{display:grid}.historical-inline-review-summary small{font-weight:400}.historical-row-review td{padding:0 8px 12px!important;border-bottom:1px solid #e1ebe7!important;color:#8b5718}.historical-row-review td>svg{float:left;margin:12px 10px 0 0}.historical-row-review td>div{display:block;margin:8px 0 0 34px;padding:10px 12px;border-radius:10px;background:#fff8e8}.historical-row-review b{display:block;margin-bottom:4px}.historical-row-review p{margin:3px 0}.historical-row-review p.error{color:#a53d2e}.historical-row-review p.warning{color:#8b5718}
 
 @media(max-width:1100px){
   .sales-history-fields{grid-template-columns:auto repeat(2,minmax(0,1fr))}

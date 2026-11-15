@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalSalesImportPage } from './HistoricalSalesImportPage';
 
-const { extractHistoricalSales } = vi.hoisted(() => ({ extractHistoricalSales: vi.fn() }));
+const { extractHistoricalSales, validateHistoricalSales } = vi.hoisted(() => ({ extractHistoricalSales: vi.fn(), validateHistoricalSales: vi.fn() }));
 vi.mock('../components/StationProvider', () => ({ useStation: () => ({ stations: [{ id: 'station-1', name: 'Saleema Petroleum' }], selectedStationId: 'station-1', selectStation: vi.fn() }) }));
 vi.mock('../lib/api', () => ({
   ApiRequestError: class extends Error {}, historicalSalesSourceUrl: vi.fn(),
@@ -13,6 +13,7 @@ vi.mock('../lib/api', () => ({
     historicalSalesImports: vi.fn().mockResolvedValue({ imports: [] }),
     subscription: vi.fn().mockResolvedValue({ intelligenceEnabledAt: '2026-01-01T00:00:00.000Z', intelligenceExpiresAt: null }),
     extractHistoricalSales,
+    validateHistoricalSales,
   },
 }));
 
@@ -61,6 +62,19 @@ describe('HistoricalSalesImportPage', () => {
     expect(screen.queryByText('Browser draft')).not.toBeInTheDocument();
     expect(screen.queryByText('Attach a DSR to begin')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Refresh calculated volumes/ })).not.toBeInTheDocument();
+  });
+
+  it('shows validation messages directly beneath the affected date row', async () => {
+    extractHistoricalSales.mockResolvedValueOnce({ rows: [{ date: '2026-11-02', tankReadings: [{ tankId: 'tank-1', openingStock: 7900, dipReading: 83 }], receiptQuantity: 0, totalStock: 7900, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15086 }], testingQuantity: 25, salesQuantity: 1804, cumulativeSales: 1779, sellingPrice: 94 }], warnings: [], layoutIssues: [], uncertainCells: [], effectiveMonth: '2026-11', periodSource: 'DOCUMENT', confidence: .9, detectedProduct: 'HSD', detectedMonth: 'November 2026', detectedPumpColumns: ['1'], detectedTankColumns: ['1'] });
+    validateHistoricalSales.mockResolvedValueOnce({ issues: [{ date: '2026-11-02', level: 'ERROR', field: 'nozzleReadings', message: 'A nozzle meter reading moves backwards.' }] });
+    const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    await screen.findByRole('option', { name: /HSD/ });
+    fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['scan'], 'DSR.pdf', { type: 'application/pdf' })] } });
+    await screen.findByText(/Draft ready/);
+    fireEvent.click(screen.getByRole('button', { name: /Check data/ }));
+    const message = await screen.findByText('A nozzle meter reading moves backwards.');
+    expect(message.closest('tr')).toHaveClass('historical-row-review');
+    expect(screen.queryByText('Checks to review')).not.toBeInTheDocument();
   });
 
   it('switches the temporary month to the period read from the physical DSR', async () => {
