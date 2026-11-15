@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mapExtractedDsrDraft, type ExtractedDsrDraft } from '../src/modules/historical-sales/extractor.js';
+import { mapExtractedDsrDraft, needsDsrVisualVerification, type ExtractedDsrDraft } from '../src/modules/historical-sales/extractor.js';
 
 const setup = {
   product: { id: 'product', code: 'HSD', name: 'High Speed Diesel', sellingPrice: '94' },
@@ -8,6 +8,17 @@ const setup = {
 } as never;
 
 describe('DSR extraction mapping', () => {
+  it('requests a visual verification pass for missing dips or decreasing cumulative meters', () => {
+    const draft: ExtractedDsrDraft = {
+      detectedProduct: 'HSD', detectedMonth: 'October 2026', periodPresent: true, periodConfidence: 0.96, detectedPumpColumns: ['1'], detectedTankColumns: ['1'], confidence: 0.8,
+      rows: [
+        { day: 1, tankReadings: [{ code: '1', openingStock: 7929.83, dipReading: null }], receiptQuantity: null, totalStock: 7929.83, nozzleReadings: [{ code: '1', meterReading: 15086.173 }], testingQuantity: 25, salesQuantity: 1804.42, cumulativeSales: 1779.42, stockGainLoss: null, note: '' },
+        { day: 2, tankReadings: [{ code: '1', openingStock: 6306.44, dipReading: 70.1 }], receiptQuantity: null, totalStock: 6306.44, nozzleReadings: [{ code: '1', meterReading: 1560.48 }], testingQuantity: 5, salesQuantity: 1480.25, cumulativeSales: 3260.27, stockGainLoss: null, note: '' },
+      ],
+    };
+    expect(needsDsrVisualVerification(draft)).toBe(true);
+  });
+
   it('maps visible tank and nozzle columns without inventing unreadable values', () => {
     const draft: ExtractedDsrDraft = {
       detectedProduct: 'HSD', detectedMonth: 'October 2026', periodPresent: true, periodConfidence: 0.96, detectedPumpColumns: ['1', '2'], detectedTankColumns: ['HSD-1', 'HSD-2'], confidence: 0.82,
@@ -88,5 +99,19 @@ describe('DSR extraction mapping', () => {
       calibration: { chartId: 'IOCL-20KL-UG-KOZHIKODE-IS-2166-1963-A', volumeLitres: 13_614.54, ocrVolumeLitres: 13_700, reviewConfirmed: false },
     });
     expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining('chart-derived 13614.54 L')]));
+  });
+
+  it('does not silently accept a missing calibrated dip or a decreasing meter', () => {
+    const calibratedSetup = { ...setup, tanks: [{ ...setup.tanks[0], nominalCapacity: '20000', tankType: 'UNDERGROUND' }], nozzles: [setup.nozzles[0]] } as never;
+    const draft: ExtractedDsrDraft = {
+      detectedProduct: 'HSD', detectedMonth: 'October 2026', periodPresent: true, periodConfidence: 0.98, detectedPumpColumns: ['1'], detectedTankColumns: ['1'], confidence: 0.9,
+      rows: [
+        { day: 1, tankReadings: [{ code: '1', openingStock: 7929.83, dipReading: null }], receiptQuantity: 0, totalStock: 7929.83, nozzleReadings: [{ code: '1', meterReading: 15086.173 }], testingQuantity: 25, salesQuantity: 1804.42, cumulativeSales: 1779.42, stockGainLoss: null, note: '' },
+        { day: 2, tankReadings: [{ code: '1', openingStock: 6306.44, dipReading: 70.1 }], receiptQuantity: 0, totalStock: 6306.44, nozzleReadings: [{ code: '1', meterReading: 1560.48 }], testingQuantity: 5, salesQuantity: 1480.25, cumulativeSales: 3260.27, stockGainLoss: null, note: '' },
+      ],
+    };
+    const result = mapExtractedDsrDraft(draft, calibratedSetup, '2026-10');
+    expect(result.uncertainCells).toEqual(expect.arrayContaining(['2026-10-01:tank:tank-1:stock', '2026-10-02:nozzle:nozzle-1']));
+    expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining('dip on 2026-10-01 was not read'), expect.stringContaining('leading digits were dropped')]));
   });
 });

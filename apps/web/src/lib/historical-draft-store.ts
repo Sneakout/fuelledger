@@ -3,6 +3,9 @@ import type { HistoricalSalesRowInput } from '@fuelledger/shared';
 const DATABASE = 'fuelnerve-historical-drafts-v1';
 const VERSION = 1;
 const STORE = 'drafts';
+// Bump when extraction rules change so an inaccurate cached OCR result is not
+// silently reused after the reader has been improved.
+const OCR_DRAFT_VERSION = '2';
 
 export type HistoricalOcrDraft = {
   id: string;
@@ -28,7 +31,7 @@ export type HistoricalOcrDraft = {
 };
 
 export const historicalDraftScope = (stationId: string, productId: string) => `${stationId}:${productId}`;
-export const historicalDraftId = (stationId: string, productId: string, sourceFingerprint: string) => `${historicalDraftScope(stationId, productId)}:${sourceFingerprint}`;
+export const historicalDraftId = (stationId: string, productId: string, sourceFingerprint: string) => `${historicalDraftScope(stationId, productId)}:v${OCR_DRAFT_VERSION}:${sourceFingerprint}`;
 
 function database(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
