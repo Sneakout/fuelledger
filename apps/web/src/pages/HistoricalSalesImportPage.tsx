@@ -134,7 +134,9 @@ export function HistoricalSalesImportPage() {
     const scope = historicalDraftScope(stationId, productId);
     if (restoredDraftScope.current === scope) return;
     restoredDraftScope.current = scope;
-    void latestHistoricalDraft(stationId, productId).then(draft => { if (draft) restoreDraft(draft, 'Saved OCR draft restored from this browser.'); }).catch(() => undefined);
+    let active = true;
+    void latestHistoricalDraft(stationId, productId).then(draft => { if (active && restoredDraftScope.current === scope && draft) restoreDraft(draft, 'Saved OCR draft restored from this browser.'); }).catch(() => undefined);
+    return () => { active = false; };
   }, [selected, stationId, productId]);
   useEffect(() => {
     if (!rows.length) return;
@@ -193,6 +195,14 @@ export function HistoricalSalesImportPage() {
     }
     setMonth(nextMonth);
   };
+  function changeProduct(nextProductId: string) {
+    if (nextProductId === productId || editingImport) return;
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setRows([]); setFile(null); setDraftId(''); setSourceFingerprint(''); setIssues([]); setExtractionWarnings([]); setLayoutIssues([]); setUncertainCells([]);
+    setPeriodNeedsConfirmation(false); setPeriodConfirmed(false); setPeriodSource('SELECTED'); setReaderStatus(''); setDraftStatus(''); setError(''); setApplyCutover(false);
+    restoredDraftScope.current = '';
+    setProductId(nextProductId);
+  }
   const addDay = () => { if (!selected || rows.length >= daysInMonth(month)) return; const previous = rows.at(-1); setRows(current => calculateDraftRows([...current, emptyRow(isoDate(month, current.length + 1), selected, previous)], uncertainCells).rows); };
   function restoreDraft(draft: HistoricalOcrDraft, message: string) {
     if (draft.month !== month) { documentPeriodSync.current = true; setMonth(draft.month); }
@@ -313,7 +323,7 @@ export function HistoricalSalesImportPage() {
   return <main className="page historical-import-page">
     <Link className="back-link" to="/stations"><ArrowLeft/> Back to petrol pumps</Link>
     <div className="page-heading"><div><span className="eyebrow">Customer onboarding</span><h1>Import the monthly sales register</h1><p>Record MS and HSD separately. FuelNerve checks the tank, receipt and nozzle chain before adding historical trends.</p></div></div>
-    <section className="historical-import-controls"><label>Fuel station<select disabled={Boolean(editingImport)} value={stationId} onChange={event => { setStationId(event.target.value); selectStation(event.target.value); }}>{stations.map(station => <option key={station.id} value={station.id}>{station.name}</option>)}</select></label><label>Product<select disabled={Boolean(editingImport)} value={productId} onChange={event => setProductId(event.target.value)}>{setup?.products.map(item => <option key={item.product.id} value={item.product.id}>{item.product.code} · {item.product.name}</option>)}</select></label><label>Month<input disabled={Boolean(editingImport)} type="month" value={month} onChange={event => changePeriod(event.target.value)}/></label>{!editingImport && <label className="historical-file"><FileUp/><span>{file ? file.name : intelligenceActive ? 'Attach DSR — Nerve Intelligence will fill the table' : 'Attach register scan (PDF/JPG/PNG)'}</span><input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png" onChange={event => void attachRegister(event.target.files?.[0] ?? null)}/></label>}</section>
+    <section className="historical-import-controls"><label>Fuel station<select disabled={Boolean(editingImport)} value={stationId} onChange={event => { setStationId(event.target.value); selectStation(event.target.value); }}>{stations.map(station => <option key={station.id} value={station.id}>{station.name}</option>)}</select></label><label>Product<select disabled={Boolean(editingImport)} value={productId} onChange={event => changeProduct(event.target.value)}>{setup?.products.map(item => <option key={item.product.id} value={item.product.id}>{item.product.code} · {item.product.name}</option>)}</select></label><label>Month<input disabled={Boolean(editingImport)} type="month" value={month} onChange={event => changePeriod(event.target.value)}/></label>{!editingImport && <label className="historical-file"><FileUp/><span>{file ? file.name : intelligenceActive ? 'Attach DSR — Nerve Intelligence will fill the table' : 'Attach register scan (PDF/JPG/PNG)'}</span><input ref={fileInputRef} type="file" accept="application/pdf,image/jpeg,image/png" onChange={event => void attachRegister(event.target.files?.[0] ?? null)}/></label>}</section>
     {editingImport && <div className="historical-correction-banner"><Pencil/><span><b>Editing submitted register · {editingImport.product.code} {editingImport.month}</b><small>Every edit is recalculated and saved as an audited correction. The original DSR remains attached, and live tank or nozzle balances are not changed.</small>{draftStatus && <em>{draftStatus}</em>}<a href={historicalSalesSourceUrl(editingImport.id)} target="_blank" rel="noreferrer">View original DSR</a></span><button className="icon-button" aria-label="Close correction editor" onClick={cancelCorrection}><X/></button></div>}
     {readerStatus && <div className={`historical-reader-status ${busy ? 'reading' : ''}`} aria-live="polite">{busy ? <LoaderCircle className="spin"/> : <Sparkles/>}<span><b>{busy ? 'Reading the DSR' : 'Automatic draft'}</b>{readerStatus}</span></div>}
     {extractionWarnings.length > 0 && <div className="historical-reader-warnings"><AlertTriangle/><span><b>Review before confirming</b>{extractionWarnings.map(warning => <small key={warning}>{warning}</small>)}</span></div>}

@@ -9,7 +9,10 @@ vi.mock('../components/StationProvider', () => ({ useStation: () => ({ stations:
 vi.mock('../lib/api', () => ({
   ApiRequestError: class extends Error {}, historicalSalesSourceUrl: vi.fn(),
   api: {
-    historicalSalesSetup: vi.fn().mockResolvedValue({ products: [{ product: { id: 'product-1', code: 'HSD', name: 'High Speed Diesel', sellingPrice: '94' }, tanks: [{ id: 'tank-1', code: 'HSD-1', nominalCapacity: '20000', workingCapacity: '19000', openingStock: '5000', tankType: 'UNDERGROUND' }], nozzles: [{ id: 'nozzle-1', code: 'HSD-1', dispenserCode: 'D-1', openingMeter: '1000' }] }] }),
+    historicalSalesSetup: vi.fn().mockResolvedValue({ products: [
+      { product: { id: 'product-1', code: 'HSD', name: 'High Speed Diesel', sellingPrice: '94' }, tanks: [{ id: 'tank-1', code: 'HSD-1', nominalCapacity: '20000', workingCapacity: '19000', openingStock: '5000', tankType: 'UNDERGROUND' }], nozzles: [{ id: 'nozzle-1', code: 'HSD-1', dispenserCode: 'D-1', openingMeter: '1000' }] },
+      { product: { id: 'product-2', code: 'MS', name: 'Motor Spirit', sellingPrice: '105' }, tanks: [{ id: 'tank-2', code: 'MS-1', nominalCapacity: '20000', workingCapacity: '19000', openingStock: '4000', tankType: 'UNDERGROUND' }], nozzles: [{ id: 'nozzle-2', code: 'MS-1', dispenserCode: 'D-2', openingMeter: '2000' }] },
+    ] }),
     historicalSalesImports,
     historicalSalesImport,
     subscription: vi.fn().mockResolvedValue({ intelligenceEnabledAt: '2026-01-01T00:00:00.000Z', intelligenceExpiresAt: null }),
@@ -43,6 +46,29 @@ describe('HistoricalSalesImportPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Enter manually/ }));
     expect(screen.getByLabelText(/HSD-1 stock/)).toHaveValue(0);
   });
+
+  it('switches from an HSD draft to MS without rendering the HSD equipment against MS', async () => {
+    extractHistoricalSales
+      .mockResolvedValueOnce({ rows: [{ date: '2026-11-02', tankReadings: [{ tankId: 'tank-1', openingStock: 7900, dipReading: 83 }], receiptQuantity: 0, totalStock: 7900, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15086 }], testingQuantity: 25, salesQuantity: 0, sellingPrice: 94 }], warnings: [], layoutIssues: [], uncertainCells: [], periodNeedsConfirmation: false, effectiveMonth: '2026-11', periodSource: 'DOCUMENT', confidence: .9, detectedProduct: 'HSD', detectedMonth: 'November 2026', detectedPumpColumns: ['1'], detectedTankColumns: ['1'] })
+      .mockResolvedValueOnce({ rows: [{ date: '2026-11-02', tankReadings: [{ tankId: 'tank-2', openingStock: 6800, dipReading: 75 }], receiptQuantity: 0, totalStock: 6800, nozzleReadings: [{ nozzleId: 'nozzle-2', meterReading: 2200 }], testingQuantity: 5, salesQuantity: 0, sellingPrice: 105 }], warnings: [], layoutIssues: [], uncertainCells: [], periodNeedsConfirmation: false, effectiveMonth: '2026-11', periodSource: 'DOCUMENT', confidence: .92, detectedProduct: 'MS', detectedMonth: 'November 2026', detectedPumpColumns: ['1'], detectedTankColumns: ['1'] });
+    const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    await screen.findByRole('option', { name: /MS · Motor Spirit/ });
+    fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['scan'], 'HSD draft.pdf', { type: 'application/pdf' })] } });
+    await screen.findByText(/Draft ready/);
+
+    fireEvent.change(screen.getByLabelText('Product'), { target: { value: 'product-2' } });
+
+    expect(screen.getByLabelText('Product')).toHaveValue('product-2');
+    expect(await screen.findByText('Attach a DSR to begin')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/HSD-1 stock/)).not.toBeInTheDocument();
+    expect(screen.queryByText('HSD draft.pdf')).not.toBeInTheDocument();
+
+    fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['ms scan'], 'MS draft.pdf', { type: 'application/pdf' })] } });
+    expect(await screen.findByText(/Draft ready · 1 day recognised · 92%/)).toBeInTheDocument();
+    expect(screen.getByLabelText('MS-1 stock 2026-11-02')).toBeInTheDocument();
+    expect(extractHistoricalSales).toHaveBeenLastCalledWith(expect.objectContaining({ productId: 'product-2', sourceFileName: 'MS draft.pdf' }));
+  });
+
   it('uses Nerve Intelligence to populate the review grid after a DSR is attached', async () => {
     extractHistoricalSales.mockResolvedValue({ rows: [{ date: '2026-11-02', tankReadings: [{ tankId: 'tank-1', openingStock: 7900, dipReading: 83 }], receiptQuantity: 0, totalStock: 7900, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15086 }], testingQuantity: 25, salesQuantity: 1804, cumulativeSales: 1779, sellingPrice: 94 }], warnings: ['One value needs review.'], layoutIssues: [], uncertainCells: ['2026-11-02:salesQuantity'], periodNeedsConfirmation: false, effectiveMonth: '2026-11', periodSource: 'DOCUMENT', confidence: .84, detectedProduct: 'HSD', detectedMonth: 'November 2026', detectedPumpColumns: ['1'], detectedTankColumns: ['HSD-1'] });
     const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
