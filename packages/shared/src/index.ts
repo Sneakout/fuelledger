@@ -1173,11 +1173,54 @@ export function calculateHistoricalNozzleSales(current: HistoricalSalesRowInput,
   return Number(Math.max(0, movement - current.testingQuantity).toFixed(3));
 }
 
+export function calculateHistoricalTankSales(current: HistoricalSalesRowInput, next: HistoricalSalesRowInput): number | undefined {
+  const available = calculateHistoricalTotalStock(current);
+  const nextMorningStock = next.tankReadings.reduce((sum, reading) => sum + reading.openingStock, 0);
+  const movement = available - nextMorningStock;
+  if (movement < 0) return undefined;
+  return Number(movement.toFixed(3));
+}
+
+export function calculateHistoricalStockGainLoss(current: HistoricalSalesRowInput, next: HistoricalSalesRowInput): number | undefined {
+  const nozzleSales = calculateHistoricalNozzleSales(current, next);
+  const tankSales = calculateHistoricalTankSales(current, next);
+  if (nozzleSales === undefined || tankSales === undefined) return undefined;
+  return Number((nozzleSales - tankSales).toFixed(3));
+}
+
 export function deriveHistoricalNozzleSales(rows: HistoricalSalesRowInput[]): HistoricalSalesRowInput[] {
   return rows.map((row, index) => {
     const next = rows[index + 1];
     if (!next) return row;
     const salesQuantity = calculateHistoricalNozzleSales(row, next);
     return salesQuantity === undefined ? row : { ...row, salesQuantity };
+  });
+}
+
+/**
+ * Derives every day-dependent register value from the physical morning readings.
+ * A row represents the opening of that day, so its sales can only be calculated
+ * after the following morning row exists. The final row therefore carries the
+ * cumulative total through the last completed day but has no gain/loss of its own.
+ */
+export function deriveHistoricalSalesMetrics(rows: HistoricalSalesRowInput[]): HistoricalSalesRowInput[] {
+  let cumulativeSales = 0;
+  let hasCompletedDay = false;
+  return rows.map((source, index) => {
+    const { cumulativeSales: _sourceCumulative, stockGainLoss: _sourceGainLoss, ...withoutImportedMetrics } = source;
+    const row: HistoricalSalesRowInput = { ...withoutImportedMetrics, totalStock: calculateHistoricalTotalStock(source) };
+    const next = rows[index + 1];
+    if (!next) return hasCompletedDay ? { ...row, salesQuantity: 0, cumulativeSales: Number(cumulativeSales.toFixed(3)) } : { ...row, salesQuantity: 0 };
+    const salesQuantity = calculateHistoricalNozzleSales(row, next);
+    if (salesQuantity === undefined) return { ...row, salesQuantity: 0 };
+    cumulativeSales += salesQuantity;
+    hasCompletedDay = true;
+    const stockGainLoss = calculateHistoricalStockGainLoss(row, next);
+    return {
+      ...row,
+      salesQuantity,
+      cumulativeSales: Number(cumulativeSales.toFixed(3)),
+      ...(stockGainLoss !== undefined ? { stockGainLoss } : {}),
+    };
   });
 }

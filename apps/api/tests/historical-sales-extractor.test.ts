@@ -73,7 +73,7 @@ describe('DSR extraction mapping', () => {
       rows: [{ day: 1, tankReadings: [{ code: 'HSD-1', openingStock: 7929.83, dipReading: 83 }, { code: 'HSD-2', openingStock: null, dipReading: null }], receiptQuantity: 0, totalStock: 7929.83, nozzleReadings: [{ code: 'D-1/HSD-1', meterReading: 15086.173 }, { code: 'D-1/HSD-2', meterReading: null }], testingQuantity: 25, salesQuantity: 1804.42, cumulativeSales: 1779.42, stockGainLoss: null, note: '' }],
     };
     const result = mapExtractedDsrDraft(draft, setup, '2026-10');
-    expect(result.rows[0]).toMatchObject({ date: '2026-10-01', receiptQuantity: 0, salesQuantity: 1804.42, testingQuantity: 25, sellingPrice: 94 });
+    expect(result.rows[0]).toMatchObject({ date: '2026-10-01', receiptQuantity: 0, salesQuantity: 0, testingQuantity: 25, sellingPrice: 94 });
     expect(result.rows[0]?.tankReadings).toEqual([{ tankId: 'tank-1', openingStock: 7929.83, dipReading: 83 }, { tankId: 'tank-2', openingStock: 0 }]);
     expect(result.rows[0]?.nozzleReadings).toEqual([{ nozzleId: 'nozzle-1', meterReading: 15086.173 }, { nozzleId: 'nozzle-2', meterReading: 0 }]);
     expect(result.uncertainCells).toEqual(expect.arrayContaining(['2026-10-01:tank:tank-2:stock', '2026-10-01:nozzle:nozzle-2']));

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { historicalSalesImportSchema } from '@fuelledger/shared';
+import { deriveHistoricalSalesMetrics, historicalSalesImportSchema } from '@fuelledger/shared';
 import { AppError } from '../lib/errors.js';
 import { assertStationAccess, requireOwner } from '../lib/station-access.js';
 import { authenticate } from '../middleware/authenticate.js';
@@ -64,7 +64,8 @@ historicalSalesRouter.post('/validate', async (req, res) => {
   const parsed = historicalSalesImportSchema.safeParse(req.body);
   if (!parsed.success) throw new AppError(400, 'HISTORICAL_IMPORT_INVALID', parsed.error.issues[0]?.message ?? 'Review the historical sales data.', parsed.error.flatten());
   assertStationAccess(req.user!, parsed.data.stationId);
-  res.json({ issues: validateHistoricalRows(parsed.data.rows) });
+  const orderedRows = [...parsed.data.rows].sort((left, right) => left.date.localeCompare(right.date));
+  res.json({ issues: validateHistoricalRows(deriveHistoricalSalesMetrics(orderedRows)) });
 });
 
 historicalSalesRouter.post('/', async (req, res) => {

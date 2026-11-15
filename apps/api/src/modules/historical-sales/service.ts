@@ -1,6 +1,6 @@
 import { Prisma, type HistoricalSalesImport } from '@prisma/client';
 import { createHash } from 'node:crypto';
-import { deriveHistoricalNozzleSales, deriveHistoricalTotalStock, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
+import { calculateHistoricalNozzleSales, calculateHistoricalStockGainLoss, calculateHistoricalTankSales, deriveHistoricalSalesMetrics, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { AppError } from '../../lib/errors.js';
 import { indiaDayRange } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
@@ -34,16 +34,16 @@ export function validateHistoricalRows(rows: HistoricalSalesRowInput[]): Histori
       }
     }
     if (!next) continue;
-    const currentMeters = new Map(row.nozzleReadings.map(reading => [reading.nozzleId, reading.meterReading]));
-    let movement = 0;
-    for (const reading of next.nozzleReadings) {
-      const current = currentMeters.get(reading.nozzleId);
-      if (current === undefined) continue;
-      if (reading.meterReading < current) issues.push({ date: next.date, level: 'ERROR', field: 'nozzleReadings', message: 'A nozzle meter reading moves backwards.' });
-      else movement += reading.meterReading - current;
+    const calculatedSales = calculateHistoricalNozzleSales(row, next);
+    if (calculatedSales === undefined) {
+      issues.push({ date: next.date, level: 'ERROR', field: 'nozzleReadings', message: 'A nozzle meter reading moves backwards or does not match the configured nozzles.' });
+      continue;
     }
-    const calculatedSales = Math.max(0, movement - row.testingQuantity);
-    if (Math.abs(calculatedSales - row.salesQuantity) > tolerance) issues.push({ date: row.date, level: 'WARNING', field: 'salesQuantity', message: `Meter movement less testing gives ${calculatedSales.toFixed(1)} L, not ${row.salesQuantity.toFixed(1)} L.` });
+    if (Math.abs(calculatedSales - row.salesQuantity) > tolerance) issues.push({ date: row.date, level: 'WARNING', field: 'salesQuantity', message: `Meter movement less returned testing gives ${calculatedSales.toFixed(1)} L, not ${row.salesQuantity.toFixed(1)} L.` });
+    const tankSales = calculateHistoricalTankSales(row, next);
+    if (tankSales === undefined) issues.push({ date: row.date, level: 'ERROR', field: 'tankReadings', message: 'The following morning tank stock is above the available stock. Check the dip and receipt quantity.' });
+    const gainLoss = calculateHistoricalStockGainLoss(row, next);
+    if (gainLoss !== undefined && row.stockGainLoss !== undefined && Math.abs(gainLoss - row.stockGainLoss) > tolerance) issues.push({ date: row.date, level: 'WARNING', field: 'stockGainLoss', message: `Nozzle sales minus tank sales gives ${gainLoss.toFixed(1)} L, not ${row.stockGainLoss.toFixed(1)} L.` });
   }
   return issues;
 }
@@ -88,7 +88,8 @@ export async function historicalImportSource(organizationId: string, id: string)
 
 export async function createHistoricalImport(organizationId: string, userId: string, input: HistoricalSalesImportInput) {
   const setup = await equipment(organizationId, input.stationId, input.productId);
-  const derivedRows = deriveHistoricalTotalStock(deriveHistoricalNozzleSales(input.rows));
+  const orderedRows = [...input.rows].sort((left, right) => left.date.localeCompare(right.date));
+  const derivedRows = deriveHistoricalSalesMetrics(orderedRows);
   const allowedTanks = new Map(setup.tanks.map(tank => [tank.id, tank]));
   const allowedNozzles = new Map(setup.nozzles.map(nozzle => [nozzle.id, nozzle]));
   for (const row of input.rows) {

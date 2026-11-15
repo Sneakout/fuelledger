@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { calculateHistoricalNozzleSales, calculateHistoricalTotalStock, compareDipWithOcrVolume, type HistoricalSalesRowInput } from '@fuelledger/shared';
+import { calculateHistoricalNozzleSales, calculateHistoricalStockGainLoss, calculateHistoricalTotalStock, compareDipWithOcrVolume, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
 import { historicalImportSetup } from './service.js';
@@ -312,16 +312,13 @@ export function mapExtractedDsrDraft(draft: ExtractedDsrDraft, setup: SetupProdu
       if (meterReading !== undefined) previousMeters.set(nozzle.id, meterReading);
       return { nozzleId: nozzle.id, meterReading: meterReading ?? 0 };
     });
-    if (source.salesQuantity === null) uncertainCells.push(`${date}:salesQuantity`);
     const receiptQuantity = safe(source.receiptQuantity) ?? 0;
     const row: HistoricalSalesRowInput = {
       date, tankReadings,
       receiptQuantity,
       nozzleReadings,
       testingQuantity: safe(source.testingQuantity) ?? 0,
-      salesQuantity: safe(source.salesQuantity) ?? 0,
-      ...(safe(source.cumulativeSales) !== undefined ? { cumulativeSales: safe(source.cumulativeSales) } : {}),
-      ...(source.stockGainLoss !== null ? { stockGainLoss: source.stockGainLoss } : {}),
+      salesQuantity: 0,
       sellingPrice: Number(setup.product.sellingPrice),
       ...(source.note ? { notes: source.note.slice(0, 300) } : {}),
     };
@@ -332,20 +329,36 @@ export function mapExtractedDsrDraft(draft: ExtractedDsrDraft, setup: SetupProdu
   if (activePumpColumns.length !== setup.nozzles.length) for (const reading of draft.rows.flatMap(row => row.nozzleReadings).filter(reading => activeNozzleCodes.has(normalize(reading.code)))) if (!nozzleByCode.has(normalize(reading.code))) warnings.push(`Nozzle ${reading.code} could not be matched to this fuel station.`);
   if (activePumpColumns.length !== setup.nozzles.length) layoutIssues.push(`The DSR contains ${activePumpColumns.length} populated pump columns (${activePumpColumns.join(', ') || 'none'}), but ${setup.product.code} is configured with ${setup.nozzles.length} active nozzles. Correct the fuel-station equipment before importing.`);
   if (activeTankColumns.length && activeTankColumns.length !== setup.tanks.length) layoutIssues.push(`The DSR contains ${activeTankColumns.length} populated tank columns (${activeTankColumns.join(', ')}), but ${setup.product.code} is configured with ${setup.tanks.length} active tanks. Confirm the tank layout before importing.`);
+  let cumulativeSales = 0;
+  let cumulativeReliable = true;
+  let hasCompletedDay = false;
   for (let index = 0; index < rows.length - 1; index += 1) {
     const row = rows[index]!, next = rows[index + 1]!;
     const nozzleCells = [
       ...row.nozzleReadings.map(reading => `${row.date}:nozzle:${reading.nozzleId}`),
       ...next.nozzleReadings.map(reading => `${next.date}:nozzle:${reading.nozzleId}`),
     ];
-    if (nozzleCells.some(cell => uncertainCells.includes(cell))) continue;
+    if (nozzleCells.some(cell => uncertainCells.includes(cell))) { cumulativeReliable = false; continue; }
     const calculated = calculateHistoricalNozzleSales(row, next);
-    if (calculated === undefined) continue;
+    if (calculated === undefined) { cumulativeReliable = false; continue; }
     row.salesQuantity = calculated;
+    cumulativeSales += calculated;
+    hasCompletedDay = true;
+    if (cumulativeReliable) row.cumulativeSales = Number(cumulativeSales.toFixed(3));
+    const tankCells = [
+      ...row.tankReadings.map(reading => `${row.date}:tank:${reading.tankId}:stock`),
+      ...next.tankReadings.map(reading => `${next.date}:tank:${reading.tankId}:stock`),
+    ];
+    if (!tankCells.some(cell => uncertainCells.includes(cell))) {
+      const gainLoss = calculateHistoricalStockGainLoss(row, next);
+      if (gainLoss !== undefined) row.stockGainLoss = gainLoss;
+    }
     const salesCell = `${row.date}:salesQuantity`;
     const salesIndex = uncertainCells.indexOf(salesCell);
     if (salesIndex >= 0) uncertainCells.splice(salesIndex, 1);
   }
+  const finalRow = rows.at(-1);
+  if (finalRow && cumulativeReliable && hasCompletedDay) finalRow.cumulativeSales = Number(cumulativeSales.toFixed(3));
   const periodNeedsConfirmation = !periodReliable;
   const detectedProduct = normalize(draft.detectedProduct), selectedProduct = normalize(`${setup.product.code}${setup.product.name}`);
   const selectedName = normalize(setup.product.name).replace(new RegExp(`${normalize(setup.product.code)}$`), '');

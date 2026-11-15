@@ -50,9 +50,9 @@ describe('HistoricalSalesImportPage', () => {
     expect(await screen.findByText(/Draft ready · 1 day recognised · 84%/)).toBeInTheDocument();
     expect(extractHistoricalSales).toHaveBeenCalledWith(expect.objectContaining({ stationId: 'station-1', productId: 'product-1', sourceFileName: 'November DSR.pdf' }));
     expect(screen.getByText('One value needs review.')).toBeInTheDocument();
-    expect(screen.getByDisplayValue('1804')).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.getByDisplayValue('1804')).toHaveClass('needs-review');
-    expect(screen.getByText('Sales litres could not be read confidently.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Nozzle sales 2026-11-02')).toHaveValue(null);
+    expect(screen.getByLabelText('Nozzle sales 2026-11-02')).toHaveAttribute('readonly');
+    expect(screen.queryByText('Sales litres could not be read confidently.')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Confirm historical import/ })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: /Confirm historical import/ }));
     expect(await screen.findByText(/Confirm the DSR month and year before importing/)).toBeInTheDocument();
@@ -68,8 +68,16 @@ describe('HistoricalSalesImportPage', () => {
     await screen.findByRole('option', { name: /HSD/ });
     fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['scan'], 'DSR.pdf', { type: 'application/pdf' })] } });
     await screen.findByText(/Draft ready/);
-    expect(screen.getByDisplayValue('100')).not.toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Nozzle sales 2026-11-01')).toHaveValue(100);
+    expect(screen.getByLabelText('Cumulative sales 2026-11-01')).toHaveValue(100);
+    expect(screen.getByLabelText('Stock gain or loss 2026-11-01')).toHaveValue(-800);
     expect(screen.queryByText('Sales litres could not be read confidently.')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByDisplayValue('15125'), { target: { value: '15150' } });
+    expect(screen.getByLabelText('Nozzle sales 2026-11-01')).toHaveValue(125);
+    expect(screen.getByLabelText('Cumulative sales 2026-11-01')).toHaveValue(125);
+    expect(screen.getByLabelText('Stock gain or loss 2026-11-01')).toHaveValue(-775);
+    fireEvent.change(screen.getByLabelText('HSD-1 stock 2026-11-02'), { target: { value: '6950' } });
+    expect(screen.getByLabelText('Stock gain or loss 2026-11-01')).toHaveValue(-825);
   });
 
   it('does not show draft actions or the empty state while OCR is still reading', async () => {
