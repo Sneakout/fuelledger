@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ArrowLeft, CheckCircle2, FileUp, LoaderCircle, Plus, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
-import { compareDipWithOcrVolume, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
+import { calculateHistoricalNozzleSales, compareDipWithOcrVolume, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { api, ApiRequestError, historicalSalesSourceUrl, type HistoricalImportIssue, type HistoricalSalesImportSummary, type HistoricalSalesSetup } from '../lib/api';
 import { useStation } from '../components/StationProvider';
 import { deleteHistoricalDraft, draftFile, historicalDraftById, historicalDraftId, historicalDraftScope, latestHistoricalDraft, saveHistoricalDraft, type HistoricalOcrDraft } from '../lib/historical-draft-store';
@@ -20,6 +20,21 @@ const fileBytes = (file: File) => new Promise<ArrayBuffer>((resolve, reject) => 
 });
 const sha256 = async (file: File) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await fileBytes(file)))].map(value => value.toString(16).padStart(2, '0')).join('');
 const base64 = (file: File) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(reader.error); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.readAsDataURL(file); });
+
+function calculateReliableSales(rows: HistoricalSalesRowInput[], uncertainCells: string[]) {
+  const uncertain = new Set(uncertainCells);
+  const nextRows = rows.map(row => structuredClone(row));
+  for (let index = 0; index < nextRows.length - 1; index += 1) {
+    const row = nextRows[index]!, next = nextRows[index + 1]!;
+    const hasUncertainMeter = [...row.nozzleReadings.map(reading => `${row.date}:nozzle:${reading.nozzleId}`), ...next.nozzleReadings.map(reading => `${next.date}:nozzle:${reading.nozzleId}`)].some(cell => uncertain.has(cell));
+    if (hasUncertainMeter) continue;
+    const calculated = calculateHistoricalNozzleSales(row, next);
+    if (calculated === undefined) continue;
+    row.salesQuantity = calculated;
+    uncertain.delete(`${row.date}:salesQuantity`);
+  }
+  return { rows: nextRows, uncertainCells: [...uncertain] };
+}
 
 function emptyRow(date: string, setup: HistoricalSalesSetup['products'][number], previous?: HistoricalSalesRowInput): HistoricalSalesRowInput {
   return {
@@ -91,6 +106,13 @@ export function HistoricalSalesImportPage() {
     void latestHistoricalDraft(stationId, productId).then(draft => { if (draft) restoreDraft(draft, 'Saved OCR draft restored from this browser.'); }).catch(() => undefined);
   }, [selected, stationId, productId]);
   useEffect(() => {
+    if (!rows.length) return;
+    const calculated = calculateReliableSales(rows, uncertainCells);
+    const salesChanged = calculated.rows.some((row, index) => row.salesQuantity !== rows[index]?.salesQuantity);
+    if (salesChanged) setRows(calculated.rows);
+    if (calculated.uncertainCells.length !== uncertainCells.length) setUncertainCells(calculated.uncertainCells);
+  }, [uncertainCells]);
+  useEffect(() => {
     if (!file || !draftId || !sourceFingerprint || !rows.length || busy) return;
     setDraftStatus('Saving draft in this browser…');
     const timer = window.setTimeout(() => {
@@ -112,7 +134,7 @@ export function HistoricalSalesImportPage() {
     routedDocumentHandled.current = true;
     void attachRegister(routedDocument.file);
   }, [routedDocument, setup, intelligenceActive, stationId, productId, selectStation]);
-  const changeRow = (index: number, change: (row: HistoricalSalesRowInput) => void) => setRows(previous => previous.map((row, rowIndex) => { if (rowIndex !== index) return row; const next = structuredClone(row); change(next); return next; }));
+  const changeRow = (index: number, change: (row: HistoricalSalesRowInput) => void) => setRows(previous => calculateReliableSales(previous.map((row, rowIndex) => { if (rowIndex !== index) return row; const next = structuredClone(row); change(next); return next; }), uncertainCells).rows);
   const markReviewed = (cell: string) => setUncertainCells(previous => previous.filter(item => item !== cell));
   const changePeriod = (nextMonth: string, preserveDraft = periodNeedsConfirmation) => {
     if (!/^\d{4}-\d{2}$/.test(nextMonth) || nextMonth === month) return;
@@ -139,7 +161,8 @@ export function HistoricalSalesImportPage() {
   const addDay = () => { if (!selected || rows.length >= daysInMonth(month)) return; const previous = rows.at(-1); setRows(current => [...current, emptyRow(isoDate(month, current.length + 1), selected, previous)]); };
   function restoreDraft(draft: HistoricalOcrDraft, message: string) {
     if (draft.month !== month) { documentPeriodSync.current = true; setMonth(draft.month); }
-    setFile(draftFile(draft)); setSourceFingerprint(draft.sourceFingerprint); setDraftId(draft.id); setRows(draft.rows); setExtractionWarnings(draft.extractionWarnings); setLayoutIssues(draft.layoutIssues); setUncertainCells(draft.uncertainCells); setPeriodNeedsConfirmation(draft.periodNeedsConfirmation); setPeriodConfirmed(draft.periodConfirmed); setPeriodSource(draft.periodSource); setReaderStatus(draft.readerStatus); setApplyCutover(draft.applyCutover); setDraftStatus(message); setError('');
+    const calculated = calculateReliableSales(draft.rows, draft.uncertainCells);
+    setFile(draftFile(draft)); setSourceFingerprint(draft.sourceFingerprint); setDraftId(draft.id); setRows(calculated.rows); setExtractionWarnings(draft.extractionWarnings); setLayoutIssues(draft.layoutIssues); setUncertainCells(calculated.uncertainCells); setPeriodNeedsConfirmation(draft.periodNeedsConfirmation); setPeriodConfirmed(draft.periodConfirmed); setPeriodSource(draft.periodSource); setReaderStatus(draft.readerStatus); setApplyCutover(draft.applyCutover); setDraftStatus(message); setError('');
   }
   function refreshCalibratedVolumes() {
     if (!selected) return;
@@ -210,10 +233,11 @@ export function HistoricalSalesImportPage() {
       const mime = next.type || (extension === 'pdf' ? 'application/pdf' : extension === 'png' ? 'image/png' : 'image/jpeg');
       const result = await api.extractHistoricalSales({ stationId, productId, month, sourceFileName: next.name, sourceMimeType: mime as 'application/pdf' | 'image/jpeg' | 'image/png', sourceSize: next.size, sourceContentBase64: await base64(next) });
       if (result.effectiveMonth !== month) { documentPeriodSync.current = true; setMonth(result.effectiveMonth); }
-      if (result.rows.length) setRows(result.rows);
+      const calculated = calculateReliableSales(result.rows, result.uncertainCells);
+      if (calculated.rows.length) setRows(calculated.rows);
       setExtractionWarnings(result.warnings);
       setLayoutIssues(result.layoutIssues);
-      setUncertainCells(result.uncertainCells);
+      setUncertainCells(calculated.uncertainCells);
       setPeriodSource(result.periodSource);
       setPeriodNeedsConfirmation(true);
       setReaderStatus(result.rows.length ? `Draft ready · ${result.rows.length} day${result.rows.length === 1 ? '' : 's'} recognised · ${Math.round(result.confidence * 100)}% document confidence` : 'No reliable rows were found. You can enter the register manually.');

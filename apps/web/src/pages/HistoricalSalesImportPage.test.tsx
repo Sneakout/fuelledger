@@ -55,6 +55,19 @@ describe('HistoricalSalesImportPage', () => {
     expect(view.container.querySelector<HTMLInputElement>('input[type="date"]')?.value).toBe('2026-11-02');
   });
 
+  it('calculates daily sales from all nozzle movement less testing', async () => {
+    extractHistoricalSales.mockResolvedValueOnce({ rows: [
+      { date: '2026-11-01', tankReadings: [{ tankId: 'tank-1', openingStock: 7900, dipReading: 83 }], receiptQuantity: 0, totalStock: 7900, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15000 }], testingQuantity: 25, salesQuantity: 0, sellingPrice: 94 },
+      { date: '2026-11-02', tankReadings: [{ tankId: 'tank-1', openingStock: 7000, dipReading: 75 }], receiptQuantity: 0, totalStock: 7000, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15125 }], testingQuantity: 0, salesQuantity: 0, sellingPrice: 94 },
+    ], warnings: [], layoutIssues: [], uncertainCells: ['2026-11-01:salesQuantity'], periodNeedsConfirmation: false, effectiveMonth: '2026-11', periodSource: 'DOCUMENT', confidence: .9, detectedProduct: 'HSD', detectedMonth: 'November 2026', detectedPumpColumns: ['1'], detectedTankColumns: ['1'] });
+    const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    await screen.findByRole('option', { name: /HSD/ });
+    fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['scan'], 'DSR.pdf', { type: 'application/pdf' })] } });
+    await screen.findByText(/Draft ready/);
+    expect(screen.getByDisplayValue('100')).not.toHaveAttribute('aria-invalid', 'true');
+    expect(screen.queryByText('Sales litres could not be read confidently.')).not.toBeInTheDocument();
+  });
+
   it('does not show draft actions or the empty state while OCR is still reading', async () => {
     extractHistoricalSales.mockImplementationOnce(() => new Promise(() => undefined));
     const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);

@@ -1,6 +1,6 @@
 import { Prisma, type HistoricalSalesImport } from '@prisma/client';
 import { createHash } from 'node:crypto';
-import type { HistoricalSalesImportInput, HistoricalSalesRowInput } from '@fuelledger/shared';
+import { deriveHistoricalNozzleSales, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { AppError } from '../../lib/errors.js';
 import { indiaDayRange } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
@@ -88,6 +88,7 @@ export async function historicalImportSource(organizationId: string, id: string)
 
 export async function createHistoricalImport(organizationId: string, userId: string, input: HistoricalSalesImportInput) {
   const setup = await equipment(organizationId, input.stationId, input.productId);
+  const derivedRows = deriveHistoricalNozzleSales(input.rows);
   const allowedTanks = new Map(setup.tanks.map(tank => [tank.id, tank]));
   const allowedNozzles = new Map(setup.nozzles.map(nozzle => [nozzle.id, nozzle]));
   for (const row of input.rows) {
@@ -103,9 +104,9 @@ export async function createHistoricalImport(organizationId: string, userId: str
       if ((reading.calibration.differenceLitres ?? 0) > reading.calibration.toleranceLitres && !reading.calibration.reviewConfirmed) throw new AppError(400, 'DIP_CALIBRATION_REVIEW_REQUIRED', `Confirm the ${tank.code} dip/volume mismatch on ${row.date} before importing.`);
     }
   }
-  const issues = validateHistoricalRows(input.rows);
+  const issues = validateHistoricalRows(derivedRows);
   if (issues.some(issue => issue.level === 'ERROR')) throw new AppError(400, 'HISTORICAL_IMPORT_INVALID', 'Correct the meter readings that move backwards before importing.', issues);
-  const sorted = [...input.rows].sort((left, right) => left.date.localeCompare(right.date));
+  const sorted = [...derivedRows].sort((left, right) => left.date.localeCompare(right.date));
   const sourceContent = Buffer.from(input.sourceContentBase64, 'base64');
   if (sourceContent.byteLength !== input.sourceSize) throw new AppError(400, 'HISTORICAL_SOURCE_INVALID', 'The attached register could not be verified. Attach it again.');
   if (createHash('sha256').update(sourceContent).digest('hex') !== input.sourceFingerprint) throw new AppError(400, 'HISTORICAL_SOURCE_INVALID', 'The attached register fingerprint does not match its content.');

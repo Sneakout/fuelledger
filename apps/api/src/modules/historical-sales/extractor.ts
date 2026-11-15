@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { compareDipWithOcrVolume, type HistoricalSalesRowInput } from '@fuelledger/shared';
+import { calculateHistoricalNozzleSales, compareDipWithOcrVolume, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
 import { historicalImportSetup } from './service.js';
@@ -242,6 +242,20 @@ export function mapExtractedDsrDraft(draft: ExtractedDsrDraft, setup: SetupProdu
   if (activePumpColumns.length !== setup.nozzles.length) for (const reading of draft.rows.flatMap(row => row.nozzleReadings).filter(reading => activeNozzleCodes.has(normalize(reading.code)))) if (!nozzleByCode.has(normalize(reading.code))) warnings.push(`Nozzle ${reading.code} could not be matched to this fuel station.`);
   if (activePumpColumns.length !== setup.nozzles.length) layoutIssues.push(`The DSR contains ${activePumpColumns.length} populated pump columns (${activePumpColumns.join(', ') || 'none'}), but ${setup.product.code} is configured with ${setup.nozzles.length} active nozzles. Correct the fuel-station equipment before importing.`);
   if (activeTankColumns.length && activeTankColumns.length !== setup.tanks.length) layoutIssues.push(`The DSR contains ${activeTankColumns.length} populated tank columns (${activeTankColumns.join(', ')}), but ${setup.product.code} is configured with ${setup.tanks.length} active tanks. Confirm the tank layout before importing.`);
+  for (let index = 0; index < rows.length - 1; index += 1) {
+    const row = rows[index]!, next = rows[index + 1]!;
+    const nozzleCells = [
+      ...row.nozzleReadings.map(reading => `${row.date}:nozzle:${reading.nozzleId}`),
+      ...next.nozzleReadings.map(reading => `${next.date}:nozzle:${reading.nozzleId}`),
+    ];
+    if (nozzleCells.some(cell => uncertainCells.includes(cell))) continue;
+    const calculated = calculateHistoricalNozzleSales(row, next);
+    if (calculated === undefined) continue;
+    row.salesQuantity = calculated;
+    const salesCell = `${row.date}:salesQuantity`;
+    const salesIndex = uncertainCells.indexOf(salesCell);
+    if (salesIndex >= 0) uncertainCells.splice(salesIndex, 1);
+  }
   const periodNeedsConfirmation = !periodReliable;
   const detectedProduct = normalize(draft.detectedProduct), selectedProduct = normalize(`${setup.product.code}${setup.product.name}`);
   const selectedName = normalize(setup.product.name).replace(new RegExp(`${normalize(setup.product.code)}$`), '');

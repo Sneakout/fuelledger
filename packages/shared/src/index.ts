@@ -1152,3 +1152,24 @@ export const historicalSalesImportSchema = z.object({
 });
 export type HistoricalSalesRowInput = z.infer<typeof historicalSalesRowSchema>;
 export type HistoricalSalesImportInput = z.infer<typeof historicalSalesImportSchema>;
+
+export function calculateHistoricalNozzleSales(current: HistoricalSalesRowInput, next: HistoricalSalesRowInput): number | undefined {
+  const currentMeters = new Map(current.nozzleReadings.map(reading => [reading.nozzleId, reading.meterReading]));
+  if (currentMeters.size !== next.nozzleReadings.length) return undefined;
+  let movement = 0;
+  for (const reading of next.nozzleReadings) {
+    const opening = currentMeters.get(reading.nozzleId);
+    if (opening === undefined || reading.meterReading < opening) return undefined;
+    movement += reading.meterReading - opening;
+  }
+  return Number(Math.max(0, movement - current.testingQuantity).toFixed(3));
+}
+
+export function deriveHistoricalNozzleSales(rows: HistoricalSalesRowInput[]): HistoricalSalesRowInput[] {
+  return rows.map((row, index) => {
+    const next = rows[index + 1];
+    if (!next) return row;
+    const salesQuantity = calculateHistoricalNozzleSales(row, next);
+    return salesQuantity === undefined ? row : { ...row, salesQuantity };
+  });
+}
