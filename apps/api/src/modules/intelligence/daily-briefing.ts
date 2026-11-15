@@ -7,6 +7,7 @@ import { addIndiaDays, databaseDate, indiaDate } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
 import { bootstrap as dashboardBootstrap } from '../dashboard/service.js';
 import { buildReport } from '../reports/service.js';
+import { missingDailyRecords } from './history-completeness.js';
 
 export type BriefingFact = { id: string; category: string; severity: 'URGENT' | 'ATTENTION' | 'POSITIVE' | 'INFORMATION'; label: string; value: string; context: string; evidenceLabel: string; evidencePath: string };
 type Narrative = { headline: string; summary: string; items: Array<{ factId: string; explanation: string; action: string }> };
@@ -61,9 +62,10 @@ export async function dailyBriefing(organizationId: string, permittedStationIds?
   const now = new Date();
   if (!options.demoAccess) await requireIntelligenceAccess(organizationId, now);
   const today = indiaDate(now), yesterday = addIndiaDays(today, -1);
-  const [dashboard, previous] = await Promise.all([
+  const [dashboard, previous, historyGaps] = await Promise.all([
     dashboardBootstrap(organizationId, permittedStationIds, stationId),
     buildReport(organizationId, { startDate: yesterday, endDate: yesterday, permittedStationIds, ...(stationId ? { stationId } : {}) }),
+    missingDailyRecords(organizationId, permittedStationIds, stationId, now),
   ]);
   const facts: BriefingFact[] = [];
   const add = (fact: BriefingFact) => facts.push(fact);
@@ -85,6 +87,21 @@ export async function dailyBriefing(organizationId: string, permittedStationIds?
     evidenceLabel: 'Purchase records',
     evidencePath: action.href,
   });
+  for (const gap of historyGaps) {
+    const count = gap.missingDates.length;
+    const preview = gap.missingDates.slice(0, 4).join(', ');
+    const remainder = count > 4 ? ` and ${count - 4} more` : '';
+    add({
+      id: `missing-daily-records-${gap.stationId}-${gap.productId}`,
+      category: 'HISTORY',
+      severity: count > 1 ? 'ATTENTION' : 'INFORMATION',
+      label: `${gap.productCode} daily records are missing`,
+      value: `${count} day${count === 1 ? '' : 's'}`,
+      context: `${gap.stationName} has verified ${gap.productCode} data through ${gap.lastAvailableDate}. Missing: ${preview}${remainder}. Upload the next DSR/register to complete the timeline through today.`,
+      evidenceLabel: 'Past sales register upload',
+      evidencePath: '/sales/history/import',
+    });
+  }
   facts.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity] || a.id.localeCompare(b.id));
   const stationScope = stationId ?? 'ALL';
   const dateValue = databaseDate(today);

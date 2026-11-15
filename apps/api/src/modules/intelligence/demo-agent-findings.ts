@@ -8,13 +8,13 @@ const definitions = [
   { agentKey: "credit-watch", categories: ["CREDIT"] },
   { agentKey: "purchase-check", categories: ["PURCHASES"] },
   { agentKey: "profit-insight", categories: ["PROFIT", "SALES"] },
-  { agentKey: "business-assistant", categories: ["*"] },
+  { agentKey: "business-assistant", categories: ["*", "HISTORY"] },
 ] as const;
 
 export function demoAgentFindings(input: { organizationId: string; stationId: string; generatedAt: string; facts: BriefingFact[]; sourceMode?: "VERIFIED_DEMO" | "VERIFIED_BRIEFING" }) {
   const agents = definitions.map(definition => {
     const agent = agentPresentation(definition.agentKey);
-    const matchedFacts = definition.categories[0] === "*" ? input.facts.slice(0, 1) : input.facts.filter(fact => (definition.categories as readonly string[]).includes(fact.category));
+    const matchedFacts = definition.categories[0] === "*" ? input.facts.filter((fact, index) => index === 0 || fact.category === "HISTORY") : input.facts.filter(fact => (definition.categories as readonly string[]).includes(fact.category));
     const findings = matchedFacts.map((fact, index) => ({
       findingId: stableUuid(`${input.organizationId}:${input.stationId}:${definition.agentKey}:${fact.id}`),
       type: `DEMO_${fact.category}_${fact.id}`.toUpperCase().replace(/[^A-Z0-9]+/g, "_"),
