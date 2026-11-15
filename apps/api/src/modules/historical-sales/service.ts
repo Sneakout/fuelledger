@@ -1,8 +1,8 @@
 import { Prisma, type HistoricalSalesImport } from '@prisma/client';
 import { createHash } from 'node:crypto';
-import { calculateHistoricalNozzleSales, calculateHistoricalStockGainLoss, calculateHistoricalTankSales, deriveHistoricalSalesMetrics, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
+import { calculateHistoricalNozzleSales, calculateHistoricalStockGainLoss, calculateHistoricalTankSales, deriveHistoricalSalesMetrics, type HistoricalSalesCorrectionInput, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { AppError } from '../../lib/errors.js';
-import { indiaDayRange } from '../../lib/india-time.js';
+import { indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
 import { calibrateDip, MASTER_20KL_UG_CALIBRATION } from '@fuelledger/shared';
 
@@ -77,7 +77,22 @@ export async function historicalImportSetup(organizationId: string, stationId: s
 }
 
 export async function listHistoricalImports(organizationId: string, stationId: string) {
-  return prisma.historicalSalesImport.findMany({ where: { organizationId, stationId }, select: { id: true, monthStart: true, sourceFileName: true, cutoverApplied: true, createdAt: true, product: { select: { name: true, code: true } }, importedBy: { select: { name: true } } }, orderBy: { monthStart: 'desc' } });
+  const records = await prisma.historicalSalesImport.findMany({ where: { organizationId, stationId }, select: { id: true, monthStart: true, sourceFileName: true, cutoverApplied: true, createdAt: true, updatedAt: true, product: { select: { name: true, code: true } }, importedBy: { select: { name: true } }, _count: { select: { corrections: true } } }, orderBy: { monthStart: 'desc' } });
+  return records.map(record => ({ ...record, month: indiaDate(record.monthStart).slice(0, 7) }));
+}
+
+export async function historicalImportDetail(organizationId: string, id: string) {
+  const record = await prisma.historicalSalesImport.findFirst({
+    where: { id, organizationId },
+    select: {
+      id: true, stationId: true, productId: true, monthStart: true, sourceFileName: true,
+      cutoverApplied: true, createdAt: true, updatedAt: true, rows: true,
+      product: { select: { name: true, code: true } }, importedBy: { select: { name: true } },
+      corrections: { orderBy: { changedAt: 'desc' }, select: { id: true, reason: true, changedAt: true, changedBy: { select: { name: true } } } },
+    },
+  });
+  if (!record) throw new AppError(404, 'HISTORICAL_IMPORT_NOT_FOUND', 'The imported register could not be found.');
+  return { ...record, month: indiaDate(record.monthStart).slice(0, 7), rows: importRows(record) };
 }
 
 export async function historicalImportSource(organizationId: string, id: string) {
@@ -86,14 +101,12 @@ export async function historicalImportSource(organizationId: string, id: string)
   return source;
 }
 
-export async function createHistoricalImport(organizationId: string, userId: string, input: HistoricalSalesImportInput) {
-  const setup = await equipment(organizationId, input.stationId, input.productId);
-  const orderedRows = [...input.rows].sort((left, right) => left.date.localeCompare(right.date));
-  const derivedRows = deriveHistoricalSalesMetrics(orderedRows);
+function validateRowsAgainstSetup(setup: Awaited<ReturnType<typeof equipment>>, rows: HistoricalSalesRowInput[]) {
   const allowedTanks = new Map(setup.tanks.map(tank => [tank.id, tank]));
   const allowedNozzles = new Map(setup.nozzles.map(nozzle => [nozzle.id, nozzle]));
-  for (const row of input.rows) {
+  for (const row of rows) {
     if (row.tankReadings.some(reading => !allowedTanks.has(reading.tankId)) || row.nozzleReadings.some(reading => !allowedNozzles.has(reading.nozzleId))) throw new AppError(400, 'HISTORICAL_IMPORT_EQUIPMENT_INVALID', 'Every tank and nozzle must belong to the selected product and fuel station.');
+    if (new Set(row.tankReadings.map(reading => reading.tankId)).size !== allowedTanks.size || new Set(row.nozzleReadings.map(reading => reading.nozzleId)).size !== allowedNozzles.size) throw new AppError(400, 'HISTORICAL_IMPORT_EQUIPMENT_INCOMPLETE', `Every saved day must contain all ${allowedTanks.size} active tank${allowedTanks.size === 1 ? '' : 's'} and ${allowedNozzles.size} active nozzle${allowedNozzles.size === 1 ? '' : 's'}.`);
     for (const reading of row.tankReadings) {
       const tank = allowedTanks.get(reading.tankId)!;
       const usesMasterChart = tank.tankType === 'UNDERGROUND' && n(tank.nominalCapacity) === 20_000;
@@ -102,12 +115,25 @@ export async function createHistoricalImport(organizationId: string, userId: str
       const calibration = calibrateDip(reading.dipReading);
       if (calibration.status !== 'OK') throw new AppError(400, 'DIP_CALIBRATION_INVALID', `${tank.code} dip on ${row.date} is outside the approved ${MASTER_20KL_UG_CALIBRATION.entries[0]!.dipCm}-${MASTER_20KL_UG_CALIBRATION.entries.at(-1)!.dipCm} cm calibration range.`);
       if (!reading.calibration || reading.calibration.chartId !== calibration.chartId || Math.abs(reading.openingStock - calibration.volumeLitres) > 0.001) throw new AppError(400, 'DIP_CALIBRATION_REQUIRED', `${tank.code} stock on ${row.date} must use the approved 20 KL dip calibration chart.`);
-      if ((reading.calibration.differenceLitres ?? 0) > reading.calibration.toleranceLitres && !reading.calibration.reviewConfirmed) throw new AppError(400, 'DIP_CALIBRATION_REVIEW_REQUIRED', `Confirm the ${tank.code} dip/volume mismatch on ${row.date} before importing.`);
+      if ((reading.calibration.differenceLitres ?? 0) > reading.calibration.toleranceLitres && !reading.calibration.reviewConfirmed) throw new AppError(400, 'DIP_CALIBRATION_REVIEW_REQUIRED', `Confirm the ${tank.code} dip/volume mismatch on ${row.date} before saving.`);
     }
   }
+}
+
+function prepareHistoricalRows(setup: Awaited<ReturnType<typeof equipment>>, rows: HistoricalSalesRowInput[], month: string) {
+  if (rows.some(row => !row.date.startsWith(`${month}-`))) throw new AppError(400, 'HISTORICAL_IMPORT_PERIOD_INVALID', 'Every row must belong to the saved register month.');
+  validateRowsAgainstSetup(setup, rows);
+  const derivedRows = deriveHistoricalSalesMetrics([...rows].sort((left, right) => left.date.localeCompare(right.date)));
   const issues = validateHistoricalRows(derivedRows);
-  if (issues.some(issue => issue.level === 'ERROR')) throw new AppError(400, 'HISTORICAL_IMPORT_INVALID', 'Correct the meter readings that move backwards before importing.', issues);
-  const sorted = [...derivedRows].sort((left, right) => left.date.localeCompare(right.date));
+  if (issues.some(issue => issue.level === 'ERROR')) throw new AppError(400, 'HISTORICAL_IMPORT_INVALID', 'Correct the meter readings that move backwards before saving.', issues);
+  return { rows: derivedRows, issues };
+}
+
+export async function createHistoricalImport(organizationId: string, userId: string, input: HistoricalSalesImportInput) {
+  const setup = await equipment(organizationId, input.stationId, input.productId);
+  const prepared = prepareHistoricalRows(setup, input.rows, input.month);
+  const issues = prepared.issues;
+  const sorted = prepared.rows;
   const sourceContent = Buffer.from(input.sourceContentBase64, 'base64');
   if (sourceContent.byteLength !== input.sourceSize) throw new AppError(400, 'HISTORICAL_SOURCE_INVALID', 'The attached register could not be verified. Attach it again.');
   if (createHash('sha256').update(sourceContent).digest('hex') !== input.sourceFingerprint) throw new AppError(400, 'HISTORICAL_SOURCE_INVALID', 'The attached register fingerprint does not match its content.');
@@ -124,13 +150,42 @@ export async function createHistoricalImport(organizationId: string, userId: str
     if (shift || sale || ledger || reading) throw new AppError(409, 'HISTORICAL_CUTOVER_LOCKED', 'Live operations already exist. Import the history without changing current tank or nozzle balances.');
   }
   return prisma.$transaction(async tx => {
-    const record = await tx.historicalSalesImport.create({ data: { organizationId, stationId: input.stationId, productId: input.productId, monthStart, sourceFileName: input.sourceFileName, sourceMimeType: input.sourceMimeType, sourceSize: input.sourceSize, sourceContent, sourceFingerprint: input.sourceFingerprint, rows: sorted as unknown as Prisma.InputJsonValue, cutoverApplied: input.applyCutover, importedById: userId }, select: { id: true, monthStart: true, sourceFileName: true, cutoverApplied: true, createdAt: true, product: { select: { name: true, code: true } }, importedBy: { select: { name: true } } } });
+    const record = await tx.historicalSalesImport.create({ data: { organizationId, stationId: input.stationId, productId: input.productId, monthStart, sourceFileName: input.sourceFileName, sourceMimeType: input.sourceMimeType, sourceSize: input.sourceSize, sourceContent, sourceFingerprint: input.sourceFingerprint, rows: sorted as unknown as Prisma.InputJsonValue, cutoverApplied: input.applyCutover, importedById: userId }, select: { id: true, monthStart: true, sourceFileName: true, cutoverApplied: true, createdAt: true, updatedAt: true, product: { select: { name: true, code: true } }, importedBy: { select: { name: true } }, _count: { select: { corrections: true } } } });
     if (input.applyCutover) {
       const latest = sorted.at(-1)!;
       await Promise.all(latest.tankReadings.map(reading => tx.tank.update({ where: { id: reading.tankId }, data: { openingStock: new Prisma.Decimal(reading.openingStock) } })));
       await Promise.all(latest.nozzleReadings.map(reading => tx.nozzle.update({ where: { id: reading.nozzleId }, data: { openingMeter: new Prisma.Decimal(reading.meterReading) } })));
     }
-    return { record, issues };
+    return { record: { ...record, month: input.month }, issues };
+  });
+}
+
+export async function validateHistoricalCorrection(organizationId: string, id: string, input: HistoricalSalesCorrectionInput) {
+  const record = await prisma.historicalSalesImport.findFirst({ where: { id, organizationId }, select: { stationId: true, productId: true, monthStart: true } });
+  if (!record) throw new AppError(404, 'HISTORICAL_IMPORT_NOT_FOUND', 'The imported register could not be found.');
+  const setup = await equipment(organizationId, record.stationId, record.productId);
+  return prepareHistoricalRows(setup, input.rows, indiaDate(record.monthStart).slice(0, 7));
+}
+
+export async function correctHistoricalImport(organizationId: string, userId: string, id: string, input: HistoricalSalesCorrectionInput) {
+  const existing = await prisma.historicalSalesImport.findFirst({ where: { id, organizationId }, select: { id: true, stationId: true, productId: true, monthStart: true, rows: true, updatedAt: true } });
+  if (!existing) throw new AppError(404, 'HISTORICAL_IMPORT_NOT_FOUND', 'The imported register could not be found.');
+  const setup = await equipment(organizationId, existing.stationId, existing.productId);
+  const prepared = prepareHistoricalRows(setup, input.rows, indiaDate(existing.monthStart).slice(0, 7));
+  return prisma.$transaction(async tx => {
+    const updated = await tx.historicalSalesImport.updateMany({
+      where: { id, organizationId, updatedAt: new Date(input.expectedUpdatedAt) },
+      data: { rows: prepared.rows as unknown as Prisma.InputJsonValue },
+    });
+    if (updated.count !== 1) throw new AppError(409, 'HISTORICAL_IMPORT_CHANGED', 'This register was changed in another session. Reopen it before saving your corrections.');
+    await tx.historicalSalesImportCorrection.create({ data: {
+      importId: id, organizationId, stationId: existing.stationId,
+      previousRows: existing.rows as Prisma.InputJsonValue,
+      correctedRows: prepared.rows as unknown as Prisma.InputJsonValue,
+      reason: input.reason, changedById: userId,
+    } });
+    const record = await tx.historicalSalesImport.findUniqueOrThrow({ where: { id }, select: { id: true, stationId: true, productId: true, monthStart: true, sourceFileName: true, cutoverApplied: true, createdAt: true, updatedAt: true, rows: true, product: { select: { name: true, code: true } }, importedBy: { select: { name: true } }, corrections: { orderBy: { changedAt: 'desc' }, select: { id: true, reason: true, changedAt: true, changedBy: { select: { name: true } } } } } });
+    return { record: { ...record, month: indiaDate(record.monthStart).slice(0, 7) }, issues: prepared.issues, liveBalancesUnchanged: true };
   });
 }
 

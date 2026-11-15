@@ -4,16 +4,19 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalSalesImportPage } from './HistoricalSalesImportPage';
 
-const { extractHistoricalSales, validateHistoricalSales } = vi.hoisted(() => ({ extractHistoricalSales: vi.fn(), validateHistoricalSales: vi.fn() }));
+const { correctHistoricalSalesImport, extractHistoricalSales, historicalSalesImport, historicalSalesImports, validateHistoricalSales, validateHistoricalSalesCorrection } = vi.hoisted(() => ({ correctHistoricalSalesImport: vi.fn(), extractHistoricalSales: vi.fn(), historicalSalesImport: vi.fn(), historicalSalesImports: vi.fn().mockResolvedValue({ imports: [] }), validateHistoricalSales: vi.fn(), validateHistoricalSalesCorrection: vi.fn() }));
 vi.mock('../components/StationProvider', () => ({ useStation: () => ({ stations: [{ id: 'station-1', name: 'Saleema Petroleum' }], selectedStationId: 'station-1', selectStation: vi.fn() }) }));
 vi.mock('../lib/api', () => ({
   ApiRequestError: class extends Error {}, historicalSalesSourceUrl: vi.fn(),
   api: {
     historicalSalesSetup: vi.fn().mockResolvedValue({ products: [{ product: { id: 'product-1', code: 'HSD', name: 'High Speed Diesel', sellingPrice: '94' }, tanks: [{ id: 'tank-1', code: 'HSD-1', nominalCapacity: '20000', workingCapacity: '19000', openingStock: '5000', tankType: 'UNDERGROUND' }], nozzles: [{ id: 'nozzle-1', code: 'HSD-1', dispenserCode: 'D-1', openingMeter: '1000' }] }] }),
-    historicalSalesImports: vi.fn().mockResolvedValue({ imports: [] }),
+    historicalSalesImports,
+    historicalSalesImport,
     subscription: vi.fn().mockResolvedValue({ intelligenceEnabledAt: '2026-01-01T00:00:00.000Z', intelligenceExpiresAt: null }),
     extractHistoricalSales,
     validateHistoricalSales,
+    validateHistoricalSalesCorrection,
+    correctHistoricalSalesImport,
   },
 }));
 
@@ -141,5 +144,27 @@ describe('HistoricalSalesImportPage', () => {
     expect(screen.getByLabelText('Total stock 2026-10-02')).toHaveAttribute('readonly');
     expect(screen.getByText(/Official chart: 13,614.54 L · interpolated/)).toBeInTheDocument();
     expect(extractHistoricalSales).toHaveBeenCalledTimes(1);
+  });
+
+  it('reopens a submitted register, recalculates edits, and saves an audited correction', async () => {
+    const rows = [
+      { date: '2026-10-01', tankReadings: [{ tankId: 'tank-1', openingStock: 8000 }], receiptQuantity: 0, totalStock: 8000, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 1000 }], testingQuantity: 10, salesQuantity: 90, cumulativeSales: 90, sellingPrice: 94 },
+      { date: '2026-10-02', tankReadings: [{ tankId: 'tank-1', openingStock: 7900 }], receiptQuantity: 0, totalStock: 7900, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 1100 }], testingQuantity: 0, salesQuantity: 0, cumulativeSales: 90, sellingPrice: 94 },
+    ];
+    const record = { id: 'import-1', stationId: 'station-1', productId: 'product-1', month: '2026-10', monthStart: '2026-09-30T18:30:00.000Z', sourceFileName: 'October DSR.pdf', cutoverApplied: false, createdAt: '2026-11-15T10:00:00.000Z', updatedAt: '2026-11-15T10:00:00.000Z', product: { name: 'High Speed Diesel', code: 'HSD' }, importedBy: { name: 'Owner' }, corrections: [], rows };
+    historicalSalesImports.mockResolvedValueOnce({ imports: [{ ...record, _count: { corrections: 0 } }] });
+    historicalSalesImport.mockResolvedValueOnce({ record });
+    validateHistoricalSalesCorrection.mockResolvedValueOnce({ issues: [] });
+    correctHistoricalSalesImport.mockResolvedValueOnce({ record: { ...record, updatedAt: '2026-11-15T11:00:00.000Z', corrections: [{ id: 'correction-1', reason: 'Corrected meter', changedAt: '2026-11-15T11:00:00.000Z', changedBy: { name: 'Owner' } }] }, issues: [], liveBalancesUnchanged: true });
+
+    render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /View \/ edit data/ }));
+    expect(await screen.findByText(/Editing submitted register/)).toBeInTheDocument();
+    fireEvent.change(screen.getByDisplayValue('1100'), { target: { value: '1125' } });
+    expect(screen.getByLabelText('Nozzle sales 2026-10-01')).toHaveValue(115);
+    fireEvent.change(screen.getByPlaceholderText('What was corrected, and why?'), { target: { value: 'Corrected meter from physical DSR' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save corrections/ }));
+    await waitFor(() => expect(correctHistoricalSalesImport).toHaveBeenCalledWith('import-1', expect.objectContaining({ reason: 'Corrected meter from physical DSR', expectedUpdatedAt: '2026-11-15T10:00:00.000Z', rows: expect.arrayContaining([expect.objectContaining({ salesQuantity: 115 })]) })));
+    expect(await screen.findByText(/Corrections saved/)).toBeInTheDocument();
   });
 });

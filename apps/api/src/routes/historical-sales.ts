@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { deriveHistoricalSalesMetrics, historicalSalesImportSchema } from '@fuelledger/shared';
+import { deriveHistoricalSalesMetrics, historicalSalesCorrectionSchema, historicalSalesImportSchema } from '@fuelledger/shared';
 import { AppError } from '../lib/errors.js';
 import { assertStationAccess, requireOwner } from '../lib/station-access.js';
 import { authenticate } from '../middleware/authenticate.js';
-import { createHistoricalImport, historicalImportSetup, historicalImportSource, listHistoricalImports, validateHistoricalRows } from '../modules/historical-sales/service.js';
+import { correctHistoricalImport, createHistoricalImport, historicalImportDetail, historicalImportSetup, historicalImportSource, listHistoricalImports, validateHistoricalCorrection, validateHistoricalRows } from '../modules/historical-sales/service.js';
 import { classifyFuelDocument, extractHistoricalDsr } from '../modules/historical-sales/extractor.js';
 import { requireIntelligenceAccess } from '../modules/intelligence/daily-briefing.js';
 
@@ -57,6 +57,32 @@ historicalSalesRouter.get('/:id/source', async (req, res) => {
   res.setHeader('Content-Type', source.sourceMimeType);
   res.setHeader('Content-Disposition', `inline; filename="${source.sourceFileName.replaceAll(/["\\\r\n]/g, '_')}"`);
   res.send(source.sourceContent);
+});
+
+historicalSalesRouter.get('/:id', async (req, res) => {
+  requireOwner(req.user!);
+  const record = await historicalImportDetail(req.user!.organization.id, req.params.id!);
+  assertStationAccess(req.user!, record.stationId);
+  res.json({ record });
+});
+
+historicalSalesRouter.post('/:id/validate-correction', async (req, res) => {
+  requireOwner(req.user!);
+  const parsed = historicalSalesCorrectionSchema.safeParse(req.body);
+  if (!parsed.success) throw new AppError(400, 'HISTORICAL_CORRECTION_INVALID', parsed.error.issues[0]?.message ?? 'Review the corrected historical data.', parsed.error.flatten());
+  const record = await historicalImportDetail(req.user!.organization.id, req.params.id!);
+  assertStationAccess(req.user!, record.stationId);
+  const result = await validateHistoricalCorrection(req.user!.organization.id, req.params.id!, parsed.data);
+  res.json({ issues: result.issues });
+});
+
+historicalSalesRouter.patch('/:id', async (req, res) => {
+  requireOwner(req.user!);
+  const parsed = historicalSalesCorrectionSchema.safeParse(req.body);
+  if (!parsed.success) throw new AppError(400, 'HISTORICAL_CORRECTION_INVALID', parsed.error.issues[0]?.message ?? 'Review the corrected historical data.', parsed.error.flatten());
+  const record = await historicalImportDetail(req.user!.organization.id, req.params.id!);
+  assertStationAccess(req.user!, record.stationId);
+  res.json(await correctHistoricalImport(req.user!.organization.id, req.user!.id, req.params.id!, parsed.data));
 });
 
 historicalSalesRouter.post('/validate', async (req, res) => {

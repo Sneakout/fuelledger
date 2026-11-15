@@ -195,6 +195,7 @@ model Organization {
   receiptTimingEvents        ReceiptTimingAuditEvent[]
   serviceTickets             ServiceTicket[]
   historicalSalesImports     HistoricalSalesImport[]
+  historicalSalesCorrections HistoricalSalesImportCorrection[]
 
   @@map("organizations")
 }
@@ -238,6 +239,7 @@ model Station {
   setupDraft                 StationSetupDraft?
   receiptTimingEvents        ReceiptTimingAuditEvent[]
   historicalSalesImports     HistoricalSalesImport[]
+  historicalSalesCorrections HistoricalSalesImportCorrection[]
 
   @@unique([organizationId, code])
   @@index([organizationId])
@@ -1317,6 +1319,7 @@ model User {
   approvalDecisions          ApprovalRequest[]           @relation("ApprovalDecider")
   serviceTickets             ServiceTicket[]
   historicalSalesImports     HistoricalSalesImport[]
+  historicalSalesCorrections HistoricalSalesImportCorrection[]
 
   @@index([organizationId])
   @@map("users")
@@ -1337,16 +1340,38 @@ model HistoricalSalesImport {
   cutoverApplied    Boolean      @default(false) @map("cutover_applied")
   importedById      String       @map("imported_by_id")
   createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
   organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   station           Station      @relation(fields: [stationId], references: [id], onDelete: Restrict)
   product           Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
   importedBy        User         @relation(fields: [importedById], references: [id], onDelete: Restrict)
+  corrections       HistoricalSalesImportCorrection[]
 
   @@unique([stationId, productId, monthStart])
   @@unique([organizationId, sourceFingerprint])
   @@index([organizationId, monthStart])
   @@index([stationId, monthStart])
   @@map("historical_sales_imports")
+}
+
+model HistoricalSalesImportCorrection {
+  id                String                @id @default(cuid())
+  importId          String                @map("import_id")
+  organizationId    String                @map("organization_id")
+  stationId         String                @map("station_id")
+  previousRows      Json                  @map("previous_rows")
+  correctedRows     Json                  @map("corrected_rows")
+  reason            String
+  changedById       String                @map("changed_by_id")
+  changedAt         DateTime              @default(now()) @map("changed_at")
+  import            HistoricalSalesImport @relation(fields: [importId], references: [id], onDelete: Restrict)
+  organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  station           Station               @relation(fields: [stationId], references: [id], onDelete: Restrict)
+  changedBy         User                  @relation(fields: [changedById], references: [id], onDelete: Restrict)
+
+  @@index([importId, changedAt])
+  @@index([organizationId, changedAt])
+  @@map("historical_sales_import_corrections")
 }
 
 model ServiceTicket {

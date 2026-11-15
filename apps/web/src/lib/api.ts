@@ -9,6 +9,7 @@ import type {
   ExpenseInput,
   GoogleAuthInput,
   HistoricalSalesImportInput,
+  HistoricalSalesCorrectionInput,
   HistoricalSalesRowInput,
   InventoryAdjustmentInput,
   LoginInput,
@@ -280,6 +281,7 @@ export const api = {
     request<HistoricalSalesSetup>(`/historical-sales/setup?stationId=${encodeURIComponent(stationId)}`),
   historicalSalesImports: (stationId: string) =>
     request<{ imports: HistoricalSalesImportSummary[] }>(`/historical-sales?stationId=${encodeURIComponent(stationId)}`),
+  historicalSalesImport: (id: string) => request<{ record: HistoricalSalesImportDetail }>(`/historical-sales/${encodeURIComponent(id)}`),
   extractHistoricalSales: (input: HistoricalSalesExtractionInput) =>
     request<HistoricalSalesExtractionResult>("/historical-sales/extract", { method: "POST", body: JSON.stringify(input) }),
   classifyFuelDocument: (input: { sourceFileName: string; sourceMimeType: 'application/pdf' | 'image/jpeg' | 'image/png'; sourceSize: number; sourceContentBase64: string }) =>
@@ -288,6 +290,10 @@ export const api = {
     request<{ issues: HistoricalImportIssue[] }>("/historical-sales/validate", { method: "POST", body: JSON.stringify(input) }),
   createHistoricalSalesImport: (input: HistoricalSalesImportInput) =>
     request<{ record: HistoricalSalesImportSummary; issues: HistoricalImportIssue[] }>("/historical-sales", { method: "POST", body: JSON.stringify(input) }),
+  validateHistoricalSalesCorrection: (id: string, input: HistoricalSalesCorrectionInput) =>
+    request<{ issues: HistoricalImportIssue[] }>(`/historical-sales/${encodeURIComponent(id)}/validate-correction`, { method: "POST", body: JSON.stringify(input) }),
+  correctHistoricalSalesImport: (id: string, input: HistoricalSalesCorrectionInput) =>
+    request<{ record: HistoricalSalesImportDetail; issues: HistoricalImportIssue[]; liveBalancesUnchanged: true }>(`/historical-sales/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }),
   catalog: () => request<Catalog>("/products"),
   createProduct: (input: ProductForm) =>
     request<{ product: CatalogProduct }>("/products", {
@@ -1429,7 +1435,8 @@ export type SalesHistory = {
 };
 export type HistoricalImportIssue = { date: string; level: 'WARNING' | 'ERROR'; field: string; message: string };
 export type HistoricalSalesSetup = { products: Array<{ product: { id: string; name: string; code: string; sellingPrice: string }; tanks: Array<{ id: string; code: string; nominalCapacity: string; workingCapacity: string; openingStock: string; tankType: string }>; nozzles: Array<{ id: string; code: string; dispenserCode: string; openingMeter: string }> }> };
-export type HistoricalSalesImportSummary = { id: string; monthStart: string; sourceFileName: string; cutoverApplied: boolean; createdAt: string; product: { name: string; code: string }; importedBy: { name: string } };
+export type HistoricalSalesImportSummary = { id: string; month: string; monthStart: string; sourceFileName: string; cutoverApplied: boolean; createdAt: string; updatedAt: string; product: { name: string; code: string }; importedBy: { name: string }; _count?: { corrections: number } };
+export type HistoricalSalesImportDetail = Omit<HistoricalSalesImportSummary, '_count'> & { stationId: string; productId: string; rows: HistoricalSalesRowInput[]; corrections: Array<{ id: string; reason: string; changedAt: string; changedBy: { name: string } }> };
 export type HistoricalSalesExtractionInput = { stationId: string; productId: string; month: string; sourceFileName: string; sourceMimeType: 'application/pdf' | 'image/jpeg' | 'image/png'; sourceSize: number; sourceContentBase64: string; ocrEvidenceImagesBase64?: string[] };
 export type HistoricalSalesExtractionResult = { rows: HistoricalSalesRowInput[]; warnings: string[]; layoutIssues: string[]; uncertainCells: string[]; periodNeedsConfirmation: boolean; effectiveMonth: string; periodSource: 'DOCUMENT' | 'SELECTED'; confidence: number; detectedProduct: string; detectedMonth: string; detectedPumpColumns: string[]; detectedTankColumns: string[] };
 export type ReportSummary = {

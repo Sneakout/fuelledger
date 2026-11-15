@@ -1153,6 +1153,23 @@ export const historicalSalesImportSchema = z.object({
 export type HistoricalSalesRowInput = z.infer<typeof historicalSalesRowSchema>;
 export type HistoricalSalesImportInput = z.infer<typeof historicalSalesImportSchema>;
 
+export const historicalSalesCorrectionSchema = z.object({
+  rows: z.array(historicalSalesRowSchema).min(1).max(31),
+  reason: z.string().trim().min(3).max(300),
+  expectedUpdatedAt: z.string().datetime(),
+}).strict().superRefine((value, context) => {
+  const dates = new Set<string>();
+  for (const [index, row] of value.rows.entries()) {
+    if (dates.has(row.date)) context.addIssue({ code: 'custom', path: ['rows', index, 'date'], message: 'Each date can appear only once.' });
+    dates.add(row.date);
+    const nozzleIds = row.nozzleReadings.map(reading => reading.nozzleId);
+    if (new Set(nozzleIds).size !== nozzleIds.length) context.addIssue({ code: 'custom', path: ['rows', index, 'nozzleReadings'], message: 'A nozzle can appear only once per day.' });
+    const tankIds = row.tankReadings.map(reading => reading.tankId);
+    if (new Set(tankIds).size !== tankIds.length) context.addIssue({ code: 'custom', path: ['rows', index, 'tankReadings'], message: 'A tank can appear only once per day.' });
+  }
+});
+export type HistoricalSalesCorrectionInput = z.infer<typeof historicalSalesCorrectionSchema>;
+
 export function calculateHistoricalTotalStock(row: Pick<HistoricalSalesRowInput, 'tankReadings' | 'receiptQuantity'>): number {
   return Number((row.tankReadings.reduce((sum, reading) => sum + reading.openingStock, 0) + row.receiptQuantity).toFixed(3));
 }

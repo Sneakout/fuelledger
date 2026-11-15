@@ -207,6 +207,15 @@
 .historical-draft-toolbar > span small { color: #61766f; }
 .historical-draft-toolbar > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .historical-draft-toolbar .danger { color: #a33b2d; }
+.historical-correction-banner { display: flex; align-items: flex-start; gap: 14px; margin: 0 0 16px; padding: 16px 18px; border: 1px solid #b9d8cc; border-radius: 16px; background: linear-gradient(135deg,#edf8f3,#f9fcfa); color: #184c3f; }
+.historical-correction-banner > svg { flex: 0 0 auto; width: 22px; height: 22px; margin-top: 2px; }
+.historical-correction-banner > span { display: grid; flex: 1; gap: 4px; }
+.historical-correction-banner small { color: #5e766e; }
+.historical-correction-banner em { width: fit-content; padding: 6px 9px; border-radius: 9px; background: #dff3e9; color: #12674f; font-size: 12px; font-style: normal; font-weight: 800; }
+.historical-correction-banner a { width: fit-content; color: #12674f; font-weight: 800; }
+.historical-correction-reason { display: grid; flex: 1; gap: 6px; max-width: 720px; color: #284f44; font-weight: 800; }
+.historical-correction-reason textarea { min-height: 76px; resize: vertical; border: 1px solid #bdd4cb; border-radius: 12px; padding: 10px 12px; background: #fff; color: var(--ink); font: inherit; }
+.historical-correction-reason small { color: var(--muted); font-weight: 500; }
 
 .historical-period-confirm {
   display: grid;
