@@ -4,6 +4,7 @@ import type { HistoricalSalesImportInput, HistoricalSalesRowInput } from '@fuell
 import { AppError } from '../../lib/errors.js';
 import { indiaDayRange } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
+import { calibrateDip, MASTER_20KL_UG_CALIBRATION } from '@fuelledger/shared';
 
 const n = (value: unknown) => Number(value ?? 0);
 const tolerance = 2;
@@ -53,7 +54,7 @@ async function equipment(organizationId: string, stationId: string, productId: s
     select: {
       id: true, name: true,
       configurations: { where: { active: true }, take: 1, orderBy: { version: 'desc' }, select: {
-        tanks: { where: { productId, status: 'ACTIVE' }, orderBy: { code: 'asc' }, select: { id: true, code: true, workingCapacity: true, openingStock: true } },
+        tanks: { where: { productId, status: 'ACTIVE' }, orderBy: { code: 'asc' }, select: { id: true, code: true, nominalCapacity: true, workingCapacity: true, openingStock: true, tankType: true } },
         dispensers: { where: { status: 'ACTIVE' }, orderBy: { code: 'asc' }, select: { code: true, nozzles: { where: { productId, status: 'ACTIVE' }, orderBy: { code: 'asc' }, select: { id: true, code: true, openingMeter: true } } } },
       } },
     },
@@ -91,7 +92,16 @@ export async function createHistoricalImport(organizationId: string, userId: str
   const allowedNozzles = new Map(setup.nozzles.map(nozzle => [nozzle.id, nozzle]));
   for (const row of input.rows) {
     if (row.tankReadings.some(reading => !allowedTanks.has(reading.tankId)) || row.nozzleReadings.some(reading => !allowedNozzles.has(reading.nozzleId))) throw new AppError(400, 'HISTORICAL_IMPORT_EQUIPMENT_INVALID', 'Every tank and nozzle must belong to the selected product and fuel station.');
-    for (const reading of row.tankReadings) if (reading.openingStock > n(allowedTanks.get(reading.tankId)!.workingCapacity)) throw new AppError(400, 'HISTORICAL_IMPORT_CAPACITY_EXCEEDED', `${allowedTanks.get(reading.tankId)!.code} exceeds its safe working capacity on ${row.date}.`);
+    for (const reading of row.tankReadings) {
+      const tank = allowedTanks.get(reading.tankId)!;
+      const usesMasterChart = tank.tankType === 'UNDERGROUND' && n(tank.nominalCapacity) === 20_000;
+      if ((!usesMasterChart || reading.dipReading === undefined) && reading.openingStock > n(tank.workingCapacity)) throw new AppError(400, 'HISTORICAL_IMPORT_CAPACITY_EXCEEDED', `${tank.code} exceeds its safe working capacity on ${row.date}.`);
+      if (!usesMasterChart || reading.dipReading === undefined) continue;
+      const calibration = calibrateDip(reading.dipReading);
+      if (calibration.status !== 'OK') throw new AppError(400, 'DIP_CALIBRATION_INVALID', `${tank.code} dip on ${row.date} is outside the approved ${MASTER_20KL_UG_CALIBRATION.entries[0]!.dipCm}-${MASTER_20KL_UG_CALIBRATION.entries.at(-1)!.dipCm} cm calibration range.`);
+      if (!reading.calibration || reading.calibration.chartId !== calibration.chartId || Math.abs(reading.openingStock - calibration.volumeLitres) > 0.001) throw new AppError(400, 'DIP_CALIBRATION_REQUIRED', `${tank.code} stock on ${row.date} must use the approved 20 KL dip calibration chart.`);
+      if ((reading.calibration.differenceLitres ?? 0) > reading.calibration.toleranceLitres && !reading.calibration.reviewConfirmed) throw new AppError(400, 'DIP_CALIBRATION_REVIEW_REQUIRED', `Confirm the ${tank.code} dip/volume mismatch on ${row.date} before importing.`);
+    }
   }
   const issues = validateHistoricalRows(input.rows);
   if (issues.some(issue => issue.level === 'ERROR')) throw new AppError(400, 'HISTORICAL_IMPORT_INVALID', 'Correct the meter readings that move backwards before importing.', issues);

@@ -1,13 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, CheckCircle2, FileUp, LoaderCircle, Plus, Save, Sparkles, Trash2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, CheckCircle2, FileUp, LoaderCircle, Plus, RefreshCw, Save, Sparkles, Trash2 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
-import type { HistoricalSalesImportInput, HistoricalSalesRowInput } from '@fuelledger/shared';
+import { compareDipWithOcrVolume, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { api, ApiRequestError, historicalSalesSourceUrl, type HistoricalImportIssue, type HistoricalSalesImportSummary, type HistoricalSalesSetup } from '../lib/api';
 import { useStation } from '../components/StationProvider';
+import { deleteHistoricalDraft, draftFile, historicalDraftById, historicalDraftId, historicalDraftScope, latestHistoricalDraft, saveHistoricalDraft, type HistoricalOcrDraft } from '../lib/historical-draft-store';
 
 const isoDate = (month: string, day: number) => `${month}-${String(day).padStart(2, '0')}`;
 const daysInMonth = (month: string) => { const [year, value] = month.split('-').map(Number); return new Date(Date.UTC(year!, value!, 0)).getUTCDate(); };
-const sha256 = async (file: File) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()))].map(value => value.toString(16).padStart(2, '0')).join('');
+const fileBytes = (file: File) => new Promise<ArrayBuffer>((resolve, reject) => {
+  if (typeof file.arrayBuffer === 'function') { void file.arrayBuffer().then(resolve, reject); return; }
+  const reader = new FileReader();
+  reader.onerror = () => reject(reader.error);
+  reader.onload = () => resolve(reader.result as ArrayBuffer);
+  reader.readAsArrayBuffer(file);
+});
+const sha256 = async (file: File) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', await fileBytes(file)))].map(value => value.toString(16).padStart(2, '0')).join('');
 const base64 = (file: File) => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onerror = () => reject(reader.error); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.readAsDataURL(file); });
 
 function emptyRow(date: string, setup: HistoricalSalesSetup['products'][number], previous?: HistoricalSalesRowInput): HistoricalSalesRowInput {
@@ -25,6 +33,7 @@ export function HistoricalSalesImportPage() {
   const routedDocument = (location.state as { intelligenceDocument?: { kind: 'DSR'; file: File; stationId?: string; productCode?: string } } | null)?.intelligenceDocument;
   const routedDocumentHandled = useRef(false);
   const documentPeriodSync = useRef(false);
+  const restoredDraftScope = useRef('');
   const { stations, selectedStationId, selectStation } = useStation();
   const today = new Date();
   const [stationId, setStationId] = useState(selectedStationId || stations[0]?.id || '');
@@ -46,11 +55,35 @@ export function HistoricalSalesImportPage() {
   const [periodNeedsConfirmation, setPeriodNeedsConfirmation] = useState(false);
   const [periodConfirmed, setPeriodConfirmed] = useState(false);
   const [periodSource, setPeriodSource] = useState<'DOCUMENT' | 'SELECTED'>('SELECTED');
+  const [sourceFingerprint, setSourceFingerprint] = useState('');
+  const [draftId, setDraftId] = useState('');
+  const [draftStatus, setDraftStatus] = useState('');
   const selected = useMemo(() => setup?.products.find(item => item.product.id === productId), [setup, productId]);
+  const pendingCalibrationReviews = useMemo(() => rows.flatMap(row => row.tankReadings.filter(reading => reading.calibration && !reading.calibration.reviewConfirmed).map(reading => ({ date: row.date, reading, tank: selected?.tanks.find(tank => tank.id === reading.tankId) }))), [rows, selected]);
   useEffect(() => { if (!stationId) return; let active = true; setError(''); Promise.all([api.historicalSalesSetup(stationId), api.historicalSalesImports(stationId)]).then(([next, prior]) => { if (!active) return; setSetup(next); setImports(prior.imports); setProductId(current => next.products.some(item => item.product.id === current) ? current : next.products[0]?.product.id ?? ''); }).catch(caught => active && setError(caught instanceof ApiRequestError ? caught.message : 'Unable to prepare the historical import.')); return () => { active = false; }; }, [stationId]);
   useEffect(() => { if (!stationId && stations[0]) setStationId(stations[0].id); }, [stationId, stations]);
   useEffect(() => { let active = true; void api.subscription().then(value => { if (!active) return; const expires = value.intelligenceExpiresAt ? new Date(value.intelligenceExpiresAt) : null; setIntelligenceActive(Boolean(value.intelligenceEnabledAt) && (!expires || expires > new Date())); }).catch(() => undefined); return () => { active = false; }; }, []);
   useEffect(() => { if (!selected) return; if (documentPeriodSync.current) { documentPeriodSync.current = false; return; } setRows([emptyRow(isoDate(month, 1), selected)]); setIssues([]); setPeriodConfirmed(false); }, [selected?.product.id, month]);
+  useEffect(() => {
+    if (!selected || !stationId || !productId) return;
+    const scope = historicalDraftScope(stationId, productId);
+    if (restoredDraftScope.current === scope) return;
+    restoredDraftScope.current = scope;
+    void latestHistoricalDraft(stationId, productId).then(draft => { if (draft) restoreDraft(draft, 'Saved OCR draft restored from this browser.'); }).catch(() => undefined);
+  }, [selected, stationId, productId]);
+  useEffect(() => {
+    if (!file || !draftId || !sourceFingerprint || !rows.length || busy) return;
+    setDraftStatus('Saving draft in this browser…');
+    const timer = window.setTimeout(() => {
+      const draft: HistoricalOcrDraft = {
+        id: draftId, scopeKey: historicalDraftScope(stationId, productId), stationId, productId, sourceFingerprint,
+        sourceFileName: file.name, sourceMimeType: file.type || 'application/pdf', sourceLastModified: file.lastModified, sourceBlob: file,
+        month, rows, extractionWarnings, layoutIssues, uncertainCells, periodNeedsConfirmation, periodConfirmed, periodSource, readerStatus, applyCutover, updatedAt: new Date().toISOString(),
+      };
+      void saveHistoricalDraft(draft).then(() => setDraftStatus(`Draft saved locally at ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}. Nothing has been submitted.`)).catch(() => setDraftStatus('Browser autosave is unavailable. Keep this page open until you finish.'));
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [file, draftId, sourceFingerprint, rows, extractionWarnings, layoutIssues, uncertainCells, periodNeedsConfirmation, periodConfirmed, periodSource, readerStatus, applyCutover, month, stationId, productId, busy]);
   useEffect(() => {
     if (!routedDocument || routedDocumentHandled.current || !setup || !intelligenceActive) return;
     if (routedDocument.stationId && stationId !== routedDocument.stationId) { setStationId(routedDocument.stationId); selectStation(routedDocument.stationId); return; }
@@ -62,13 +95,95 @@ export function HistoricalSalesImportPage() {
   }, [routedDocument, setup, intelligenceActive, stationId, productId, selectStation]);
   const changeRow = (index: number, change: (row: HistoricalSalesRowInput) => void) => setRows(previous => previous.map((row, rowIndex) => { if (rowIndex !== index) return row; const next = structuredClone(row); change(next); return next; }));
   const markReviewed = (cell: string) => setUncertainCells(previous => previous.filter(item => item !== cell));
+  const changePeriod = (nextMonth: string, preserveDraft = periodNeedsConfirmation) => {
+    if (!/^\d{4}-\d{2}$/.test(nextMonth) || nextMonth === month) return;
+    if (preserveDraft) {
+      const dateChanges = new Map<string, string>();
+      const remappedRows = rows.map(row => {
+        const day = Math.min(Number(row.date.slice(-2)), daysInMonth(nextMonth));
+        const date = isoDate(nextMonth, day);
+        dateChanges.set(row.date, date);
+        return { ...row, date };
+      });
+      setRows(remappedRows);
+      setUncertainCells(current => current.map(cell => {
+        const date = cell.slice(0, 10);
+        return dateChanges.has(date) ? `${dateChanges.get(date)}${cell.slice(10)}` : cell;
+      }));
+      setLayoutIssues(current => current.filter(issue => !/DSR period/i.test(issue)));
+      setPeriodSource('SELECTED');
+      setPeriodConfirmed(false);
+      documentPeriodSync.current = true;
+    }
+    setMonth(nextMonth);
+  };
   const addDay = () => { if (!selected || rows.length >= daysInMonth(month)) return; const previous = rows.at(-1); setRows(current => [...current, emptyRow(isoDate(month, current.length + 1), selected, previous)]); };
+  function restoreDraft(draft: HistoricalOcrDraft, message: string) {
+    if (draft.month !== month) { documentPeriodSync.current = true; setMonth(draft.month); }
+    setFile(draftFile(draft)); setSourceFingerprint(draft.sourceFingerprint); setDraftId(draft.id); setRows(draft.rows); setExtractionWarnings(draft.extractionWarnings); setLayoutIssues(draft.layoutIssues); setUncertainCells(draft.uncertainCells); setPeriodNeedsConfirmation(draft.periodNeedsConfirmation); setPeriodConfirmed(draft.periodConfirmed); setPeriodSource(draft.periodSource); setReaderStatus(draft.readerStatus); setApplyCutover(draft.applyCutover); setDraftStatus(message); setError('');
+  }
+  function refreshCalibratedVolumes() {
+    if (!selected) return;
+    const nextRows = structuredClone(rows);
+    const calibratedCells = new Set<string>();
+    let calibrated = 0;
+    let invalid = 0;
+    for (const row of nextRows) for (const tank of selected.tanks) {
+      const reading = row.tankReadings.find(item => item.tankId === tank.id);
+      if (!reading || reading.dipReading === undefined || tank.tankType !== 'UNDERGROUND' || Number(tank.nominalCapacity) !== 20_000) continue;
+      const cell = `${row.date}:tank:${tank.id}:stock`;
+      const comparison = compareDipWithOcrVolume({ dipCm: reading.dipReading, ocrVolumeLitres: reading.calibration?.ocrVolumeLitres ?? (uncertainCells.includes(cell) ? undefined : reading.openingStock), toleranceLitres: 25 });
+      if (comparison.calibration.status !== 'OK') { invalid += 1; continue; }
+      reading.openingStock = comparison.calibration.volumeLitres;
+      reading.calibration = { chartId: comparison.calibration.chartId, volumeLitres: comparison.calibration.volumeLitres, ...(comparison.ocrVolumeLitres !== undefined ? { ocrVolumeLitres: comparison.ocrVolumeLitres } : {}), ...(comparison.differenceLitres !== undefined ? { differenceLitres: comparison.differenceLitres } : {}), toleranceLitres: comparison.toleranceLitres, interpolated: comparison.calibration.interpolated, reviewConfirmed: reading.calibration?.reviewConfirmed === true && reading.calibration.volumeLitres === comparison.calibration.volumeLitres ? true : !comparison.requiresReview };
+      calibratedCells.add(cell); calibrated += 1;
+    }
+    setRows(nextRows);
+    setUncertainCells(current => current.filter(cell => !calibratedCells.has(cell)));
+    setError(invalid ? `${invalid} dip reading${invalid === 1 ? ' is' : 's are'} outside the approved chart range and still need review.` : '');
+    setDraftStatus(`${calibrated} chart-derived volume${calibrated === 1 ? '' : 's'} refreshed locally. OCR was not run again.`);
+  }
+  function updateDip(rowIndex: number, tank: HistoricalSalesSetup['products'][number]['tanks'][number], dip: number | undefined) {
+    const nextRows = structuredClone(rows);
+    const row = nextRows[rowIndex]!;
+    const reading = row.tankReadings.find(item => item.tankId === tank.id)!;
+    const cell = `${row.date}:tank:${tank.id}:stock`;
+    const originalOcrVolume = reading.calibration?.ocrVolumeLitres ?? (uncertainCells.includes(cell) ? undefined : reading.openingStock);
+    reading.dipReading = dip;
+    if (tank.tankType === 'UNDERGROUND' && Number(tank.nominalCapacity) === 20_000) {
+      const comparison = compareDipWithOcrVolume({ dipCm: dip, ocrVolumeLitres: originalOcrVolume, toleranceLitres: 25 });
+      if (comparison.calibration.status === 'OK') {
+        reading.openingStock = comparison.calibration.volumeLitres;
+        reading.calibration = { chartId: comparison.calibration.chartId, volumeLitres: comparison.calibration.volumeLitres, ...(comparison.ocrVolumeLitres !== undefined ? { ocrVolumeLitres: comparison.ocrVolumeLitres } : {}), ...(comparison.differenceLitres !== undefined ? { differenceLitres: comparison.differenceLitres } : {}), toleranceLitres: comparison.toleranceLitres, interpolated: comparison.calibration.interpolated, reviewConfirmed: !comparison.requiresReview };
+        setUncertainCells(current => current.filter(item => item !== cell));
+        setError('');
+      } else {
+        delete reading.calibration;
+        reading.openingStock = 0;
+        setUncertainCells(current => current.includes(cell) ? current : [...current, cell]);
+        setError(dip === undefined ? 'Enter a valid dip to calculate the official chart volume.' : `Dip ${dip} cm is outside the approved 1-210 cm chart range.`);
+      }
+    }
+    setRows(nextRows);
+  }
+  async function discardDraft() {
+    if (!window.confirm('Discard this saved OCR draft and all manual corrections from this browser?')) return;
+    const id = draftId; setDraftId(''); setSourceFingerprint(''); setFile(null); setExtractionWarnings([]); setLayoutIssues([]); setUncertainCells([]); setPeriodNeedsConfirmation(false); setPeriodConfirmed(false); setReaderStatus(''); setDraftStatus('Draft removed from this browser.'); setRows(selected ? [emptyRow(isoDate(month, 1), selected)] : []);
+    if (id) await deleteHistoricalDraft(id).catch(() => undefined);
+  }
   async function payload(): Promise<HistoricalSalesImportInput> { if (!file) throw new Error('Attach the scanned register first.'); const extension = file.name.toLowerCase().split('.').at(-1); const mime = file.type || (extension === 'pdf' ? 'application/pdf' : extension === 'png' ? 'image/png' : 'image/jpeg'); return { stationId, productId, month, sourceFileName: file.name, sourceMimeType: mime as HistoricalSalesImportInput['sourceMimeType'], sourceSize: file.size, sourceContentBase64: await base64(file), sourceFingerprint: await sha256(file), rows, applyCutover }; }
-  async function attachRegister(next: File | null) {
+  async function attachRegister(next: File | null, options: { forceOcr?: boolean } = {}) {
     setExtractionWarnings([]); setLayoutIssues([]); setUncertainCells([]); setPeriodNeedsConfirmation(false); setPeriodConfirmed(false); setPeriodSource('SELECTED'); setReaderStatus(''); setError('');
     if (!next) { setFile(null); return; }
     if (next.size > 5 * 1024 * 1024) { setError('The register scan must be 5 MB or smaller.'); return; }
     setFile(next);
+    const fingerprint = await sha256(next);
+    const nextDraftId = historicalDraftId(stationId, productId, fingerprint);
+    setSourceFingerprint(fingerprint); setDraftId(nextDraftId);
+    if (!options.forceOcr) {
+      const saved = await historicalDraftById(nextDraftId).catch(() => undefined);
+      if (saved) { restoreDraft(saved, 'This document already has a saved OCR draft. Restored without running OCR again.'); return; }
+    }
     if (!intelligenceActive || !stationId || !productId) return;
     setBusy(true); setReaderStatus('Nerve Intelligence is reading the DSR layout and handwriting…');
     try {
@@ -89,19 +204,21 @@ export function HistoricalSalesImportPage() {
     } finally { setBusy(false); }
   }
   async function validate() { setBusy(true); setError(''); try { const result = await api.validateHistoricalSales(await payload()); setIssues(result.issues); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to validate this register.'); } finally { setBusy(false); } }
-  async function save() { if (layoutIssues.length) { setError('Correct the fuel-station equipment layout or selected period and read the DSR again before confirming.'); return; } if (periodNeedsConfirmation && !periodConfirmed) { setError('Confirm the DSR month and year before importing.'); return; } if (uncertainCells.length) { setError(`Review the ${uncertainCells.length} highlighted unreadable value${uncertainCells.length === 1 ? '' : 's'} before confirming.`); return; } setBusy(true); setError(''); try { const result = await api.createHistoricalSalesImport(await payload()); setIssues(result.issues); setImports(previous => [result.record, ...previous]); setFile(null); setApplyCutover(false); } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : caught instanceof Error ? caught.message : 'Unable to import this register.'); } finally { setBusy(false); } }
+  async function save() { if (layoutIssues.length) { setError('Correct the fuel-station equipment layout or selected period and read the DSR again before confirming.'); return; } if (periodNeedsConfirmation && !periodConfirmed) { setError('Confirm the DSR month and year before importing.'); return; } if (uncertainCells.length) { setError(`Review the ${uncertainCells.length} highlighted unreadable value${uncertainCells.length === 1 ? '' : 's'} before confirming.`); return; } if (pendingCalibrationReviews.length) { setError('Verify every highlighted dip/volume difference before importing.'); return; } setBusy(true); setError(''); try { const result = await api.createHistoricalSalesImport(await payload()); setIssues(result.issues); setImports(previous => [result.record, ...previous]); if (draftId) await deleteHistoricalDraft(draftId).catch(() => undefined); setDraftId(''); setSourceFingerprint(''); setDraftStatus('Imported successfully. The local draft has been cleared.'); setFile(null); setApplyCutover(false); } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : caught instanceof Error ? caught.message : 'Unable to import this register.'); } finally { setBusy(false); } }
   return <main className="page historical-import-page">
     <Link className="back-link" to="/stations"><ArrowLeft/> Back to petrol pumps</Link>
     <div className="page-heading"><div><span className="eyebrow">Customer onboarding</span><h1>Import the monthly sales register</h1><p>Record MS and HSD separately. FuelNerve checks the tank, receipt and nozzle chain before adding historical trends.</p></div></div>
-    <section className="historical-import-controls"><label>Fuel station<select value={stationId} onChange={event => { setStationId(event.target.value); selectStation(event.target.value); }}>{stations.map(station => <option key={station.id} value={station.id}>{station.name}</option>)}</select></label><label>Product<select value={productId} onChange={event => setProductId(event.target.value)}>{setup?.products.map(item => <option key={item.product.id} value={item.product.id}>{item.product.code} · {item.product.name}</option>)}</select></label><label>Month<input type="month" value={month} onChange={event => setMonth(event.target.value)}/></label><label className="historical-file"><FileUp/><span>{file ? file.name : intelligenceActive ? 'Attach DSR — Nerve Intelligence will fill the table' : 'Attach register scan (PDF/JPG/PNG)'}</span><input type="file" accept="application/pdf,image/jpeg,image/png" onChange={event => void attachRegister(event.target.files?.[0] ?? null)}/></label></section>
+    <section className="historical-import-controls"><label>Fuel station<select value={stationId} onChange={event => { setStationId(event.target.value); selectStation(event.target.value); }}>{stations.map(station => <option key={station.id} value={station.id}>{station.name}</option>)}</select></label><label>Product<select value={productId} onChange={event => setProductId(event.target.value)}>{setup?.products.map(item => <option key={item.product.id} value={item.product.id}>{item.product.code} · {item.product.name}</option>)}</select></label><label>Month<input type="month" value={month} onChange={event => changePeriod(event.target.value)}/></label><label className="historical-file"><FileUp/><span>{file ? file.name : intelligenceActive ? 'Attach DSR — Nerve Intelligence will fill the table' : 'Attach register scan (PDF/JPG/PNG)'}</span><input type="file" accept="application/pdf,image/jpeg,image/png" onChange={event => void attachRegister(event.target.files?.[0] ?? null)}/></label></section>
     {readerStatus && <div className={`historical-reader-status ${busy ? 'reading' : ''}`} aria-live="polite">{busy ? <LoaderCircle className="spin"/> : <Sparkles/>}<span><b>{busy ? 'Reading the DSR' : 'Automatic draft'}</b>{readerStatus}</span></div>}
     {extractionWarnings.length > 0 && <div className="historical-reader-warnings"><AlertTriangle/><span><b>Review before confirming</b>{extractionWarnings.map(warning => <small key={warning}>{warning}</small>)}</span></div>}
     {layoutIssues.length > 0 && <div className="form-error"><b>Equipment layout does not match this DSR.</b>{layoutIssues.map(issue => <div key={issue}>{issue}</div>)}<div>Update the fuel-station tanks and nozzles, then read the DSR again. Confirmation is blocked so no document column is silently ignored.</div></div>}
     {uncertainCells.length > 0 && <div className="historical-reader-warnings"><AlertTriangle/><span><b>{uncertainCells.length} unreadable value{uncertainCells.length === 1 ? '' : 's'} need review</b><small>FuelNerve has not assumed these readings are zero. Enter each highlighted value before confirming.</small></span></div>}
-    {periodNeedsConfirmation && <label className="historical-period-confirm"><input type="checkbox" checked={periodConfirmed} onChange={event => setPeriodConfirmed(event.target.checked)}/><span><b>Confirm DSR period: {month}</b><small>{periodSource === 'DOCUMENT' ? 'Nerve Intelligence read this month and year from the physical DSR and updated the register automatically. Confirm it against the source.' : 'The Month/Year heading was missing or uncertain. Check the source and confirm the selected period.'}</small></span></label>}
+    {pendingCalibrationReviews.length > 0 && <div className="historical-reader-warnings calibration-review"><AlertTriangle/><span><b>{pendingCalibrationReviews.length} dip/volume difference{pendingCalibrationReviews.length === 1 ? '' : 's'} need verification</b><small>The official 20 KL UG calibration value is being used. Compare each highlighted item with the physical DSR and confirm it in the grid.</small></span></div>}
+    {periodNeedsConfirmation && <div className="historical-period-confirm"><label className="historical-period-choice"><span>Actual DSR month and year</span><input aria-label="Actual DSR month and year" type="month" value={month} onChange={event => changePeriod(event.target.value, true)}/><small>Use the period written on the physical document. Changing it keeps the OCR values and moves every draft row to the chosen month.</small></label><label className="historical-period-ack"><input type="checkbox" checked={periodConfirmed} onChange={event => setPeriodConfirmed(event.target.checked)}/><span><b>Confirm DSR period: {month}</b><small>{periodSource === 'DOCUMENT' ? 'Nerve Intelligence suggested this month and year from the physical DSR. Correct it above if OCR was inaccurate, then confirm.' : 'This period was selected manually. Check it against the physical DSR before confirming.'}</small></span></label></div>}
+    {file && <div className="historical-draft-toolbar"><span><b>Browser draft</b><small>{draftStatus || 'Your OCR draft will save automatically in this browser. Nothing is submitted until you confirm the import.'}</small></span><div><button className="secondary small" type="button" onClick={refreshCalibratedVolumes}><RefreshCw/> Refresh calculated volumes</button><button className="secondary small" type="button" disabled={busy} onClick={() => void attachRegister(file, { forceOcr: true })}><Sparkles/> Read source again</button><button className="secondary small danger" type="button" disabled={busy} onClick={() => void discardDraft()}><Trash2/> Discard draft</button></div></div>}
     <div className="historical-safety"><CheckCircle2/><span><b>Historical only.</b> These rows power sales graphs and intelligence. They do not create cash, tax, customer or supplier entries.</span></div>
     {error && <div className="form-error">{error}</div>}
-    {selected && <section className="historical-grid-card"><header><div><span className="eyebrow">Review grid</span><h2>{selected.product.code} · {month}</h2><p>{selected.tanks.length} tank{selected.tanks.length === 1 ? '' : 's'} · {selected.nozzles.length} nozzle{selected.nozzles.length === 1 ? '' : 's'}</p></div><button className="secondary small" onClick={addDay} disabled={rows.length >= daysInMonth(month)}><Plus/> Add next day</button></header><div className="historical-grid-wrap"><table className="historical-grid"><thead><tr><th>Date</th>{selected.tanks.map(tank => <th key={tank.id}>{tank.code}<small>Stock / dip</small></th>)}<th>Receipt</th><th>Total stock</th>{selected.nozzles.map(nozzle => <th key={nozzle.id}>{nozzle.dispenserCode}/{nozzle.code}<small>Meter</small></th>)}<th>Testing</th><th>Sales L</th><th>RSP ₹/L</th><th>Cumulative</th><th>Gain/loss</th><th/></tr></thead><tbody>{rows.map((row, index) => <tr key={row.date}><td><input type="date" value={row.date} min={`${month}-01`} max={`${month}-${daysInMonth(month)}`} onChange={event => changeRow(index, next => { next.date = event.target.value; })}/></td>{selected.tanks.map(tank => { const reading = row.tankReadings.find(item => item.tankId === tank.id)!; const cell = `${row.date}:tank:${tank.id}:stock`; return <td key={tank.id}><input className={uncertainCells.includes(cell) ? 'needs-review' : ''} aria-label={`${tank.code} stock ${row.date}`} type="number" min="0" step="0.01" value={uncertainCells.includes(cell) ? '' : reading.openingStock} placeholder={uncertainCells.includes(cell) ? 'Review' : '0'} onChange={event => { changeRow(index, next => { next.tankReadings.find(item => item.tankId === tank.id)!.openingStock = Number(event.target.value); }); if (event.target.value !== '') markReviewed(cell); }}/><input aria-label={`${tank.code} dip ${row.date}`} placeholder="Dip" type="number" min="0" step="0.01" value={reading.dipReading ?? ''} onChange={event => changeRow(index, next => { next.tankReadings.find(item => item.tankId === tank.id)!.dipReading = event.target.value === '' ? undefined : Number(event.target.value); })}/></td>; })}<Cell value={row.receiptQuantity} onChange={value => changeRow(index, next => { next.receiptQuantity = value; })}/><Cell optional value={row.totalStock} onChange={value => changeRow(index, next => { next.totalStock = value; })}/>{selected.nozzles.map(nozzle => { const cell = `${row.date}:nozzle:${nozzle.id}`; return <Cell key={nozzle.id} needsReview={uncertainCells.includes(cell)} value={row.nozzleReadings.find(item => item.nozzleId === nozzle.id)!.meterReading} onChange={value => { changeRow(index, next => { next.nozzleReadings.find(item => item.nozzleId === nozzle.id)!.meterReading = value ?? 0; }); markReviewed(cell); }}/>; })}<Cell value={row.testingQuantity} onChange={value => changeRow(index, next => { next.testingQuantity = value ?? 0; })}/><Cell needsReview={uncertainCells.includes(`${row.date}:salesQuantity`)} value={row.salesQuantity} onChange={value => { changeRow(index, next => { next.salesQuantity = value ?? 0; }); markReviewed(`${row.date}:salesQuantity`); }}/><Cell value={row.sellingPrice} onChange={value => changeRow(index, next => { next.sellingPrice = value ?? 0; })}/><Cell optional value={row.cumulativeSales} onChange={value => changeRow(index, next => { next.cumulativeSales = value; })}/><Cell optional value={row.stockGainLoss} onChange={value => changeRow(index, next => { next.stockGainLoss = value; })}/><td><button aria-label={`Remove ${row.date}`} className="icon-button" onClick={() => setRows(current => current.filter((_, rowIndex) => rowIndex !== index))}><Trash2/></button></td></tr>)}</tbody></table></div><footer><label className="historical-cutover"><input type="checkbox" checked={applyCutover} onChange={event => setApplyCutover(event.target.checked)}/><span><b>Use the final row as the live starting position</b><small>Available only before this station has shifts, sales, stock movements or tank checks.</small></span></label><div><button className="secondary" disabled={busy || !file || !rows.length} onClick={() => void validate()}><AlertTriangle/> Check data</button><button className="primary" disabled={busy || !file || !rows.length || layoutIssues.length > 0 || uncertainCells.length > 0} onClick={() => void save()}><Save/> {busy ? 'Checking…' : 'Confirm historical import'}</button></div></footer></section>}
+    {selected && <section className="historical-grid-card"><header><div><span className="eyebrow">Review grid</span><h2>{selected.product.code} · {month}</h2><p>{selected.tanks.length} tank{selected.tanks.length === 1 ? '' : 's'} · {selected.nozzles.length} nozzle{selected.nozzles.length === 1 ? '' : 's'}</p></div><button className="secondary small" onClick={addDay} disabled={rows.length >= daysInMonth(month)}><Plus/> Add next day</button></header><div className="historical-grid-wrap"><table className="historical-grid"><thead><tr><th>Date</th>{selected.tanks.map(tank => <th key={tank.id}>{tank.code}<small>Stock / dip</small></th>)}<th>Receipt</th><th>Total stock</th>{selected.nozzles.map(nozzle => <th key={nozzle.id}>{nozzle.dispenserCode}/{nozzle.code}<small>Meter</small></th>)}<th>Testing</th><th>Sales L</th><th>RSP ₹/L</th><th>Cumulative</th><th>Gain/loss</th><th/></tr></thead><tbody>{rows.map((row, index) => <tr key={row.date}><td><input type="date" value={row.date} min={`${month}-01`} max={`${month}-${daysInMonth(month)}`} onChange={event => changeRow(index, next => { next.date = event.target.value; })}/></td>{selected.tanks.map(tank => { const reading = row.tankReadings.find(item => item.tankId === tank.id)!; const cell = `${row.date}:tank:${tank.id}:stock`; const calibrated = reading.calibration; return <td key={tank.id} className={calibrated && !calibrated.reviewConfirmed ? 'calibration-cell-review' : ''}><input className={uncertainCells.includes(cell) ? 'needs-review' : ''} aria-label={`${tank.code} stock ${row.date}`} type="number" min="0" step="0.01" readOnly={Boolean(calibrated)} value={uncertainCells.includes(cell) ? '' : reading.openingStock} placeholder={uncertainCells.includes(cell) ? 'Review' : '0'} onChange={event => { if (calibrated) return; changeRow(index, next => { next.tankReadings.find(item => item.tankId === tank.id)!.openingStock = Number(event.target.value); }); if (event.target.value !== '') markReviewed(cell); }}/><input aria-label={`${tank.code} dip ${row.date}`} placeholder="Dip" type="number" min="0" step="0.01" value={reading.dipReading ?? ''} onChange={event => updateDip(index, tank, event.target.value === '' ? undefined : Number(event.target.value))}/>{calibrated && <small className="calibration-note">Official chart: {calibrated.volumeLitres.toLocaleString('en-IN', { maximumFractionDigits: 2 })} L{calibrated.interpolated ? ' · interpolated' : ''}</small>}{calibrated && !calibrated.reviewConfirmed && <label className="calibration-confirm"><input type="checkbox" aria-label={`Verify ${tank.code} calibration ${row.date}`} checked={false} onChange={() => changeRow(index, next => { next.tankReadings.find(item => item.tankId === tank.id)!.calibration!.reviewConfirmed = true; })}/><span>Verified against DSR</span></label>}</td>; })}<Cell value={row.receiptQuantity} onChange={value => changeRow(index, next => { next.receiptQuantity = value; })}/><Cell optional value={row.totalStock} onChange={value => changeRow(index, next => { next.totalStock = value; })}/>{selected.nozzles.map(nozzle => { const cell = `${row.date}:nozzle:${nozzle.id}`; return <Cell key={nozzle.id} needsReview={uncertainCells.includes(cell)} value={row.nozzleReadings.find(item => item.nozzleId === nozzle.id)!.meterReading} onChange={value => { changeRow(index, next => { next.nozzleReadings.find(item => item.nozzleId === nozzle.id)!.meterReading = value ?? 0; }); markReviewed(cell); }}/>; })}<Cell value={row.testingQuantity} onChange={value => changeRow(index, next => { next.testingQuantity = value ?? 0; })}/><Cell needsReview={uncertainCells.includes(`${row.date}:salesQuantity`)} value={row.salesQuantity} onChange={value => { changeRow(index, next => { next.salesQuantity = value ?? 0; }); markReviewed(`${row.date}:salesQuantity`); }}/><Cell value={row.sellingPrice} onChange={value => changeRow(index, next => { next.sellingPrice = value ?? 0; })}/><Cell optional value={row.cumulativeSales} onChange={value => changeRow(index, next => { next.cumulativeSales = value; })}/><Cell optional value={row.stockGainLoss} onChange={value => changeRow(index, next => { next.stockGainLoss = value; })}/><td><button aria-label={`Remove ${row.date}`} className="icon-button" onClick={() => setRows(current => current.filter((_, rowIndex) => rowIndex !== index))}><Trash2/></button></td></tr>)}</tbody></table></div><footer><label className="historical-cutover"><input type="checkbox" checked={applyCutover} onChange={event => setApplyCutover(event.target.checked)}/><span><b>Use the final row as the live starting position</b><small>Available only before this station has shifts, sales, stock movements or tank checks.</small></span></label><div><button className="secondary" disabled={busy || !file || !rows.length} onClick={() => void validate()}><AlertTriangle/> Check data</button><button className="primary" disabled={busy || !file || !rows.length || layoutIssues.length > 0 || uncertainCells.length > 0 || pendingCalibrationReviews.length > 0} onClick={() => void save()}><Save/> {busy ? 'Checking…' : 'Confirm historical import'}</button></div></footer></section>}
     {issues.length > 0 && <section className="historical-issues"><h2>Checks to review</h2>{issues.map((issue, index) => <div key={`${issue.date}-${issue.field}-${index}`} className={issue.level.toLowerCase()}><AlertTriangle/><span><b>{issue.date}</b>{issue.message}</span></div>)}</section>}
     {imports.length > 0 && <section className="historical-import-list"><header><span className="eyebrow">Audit trail</span><h2>Imported registers</h2></header>{imports.map(item => <article key={item.id}><FileUp/><span><b>{item.product.code} · {item.monthStart.slice(0, 7)}</b><small>{item.sourceFileName} · imported by {item.importedBy.name}</small></span><a className="secondary small" href={historicalSalesSourceUrl(item.id)} target="_blank" rel="noreferrer">View source</a>{item.cutoverApplied && <em>Live cutover applied</em>}</article>)}</section>}
   </main>;

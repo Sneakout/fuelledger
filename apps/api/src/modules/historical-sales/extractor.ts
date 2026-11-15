@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import type { HistoricalSalesRowInput } from '@fuelledger/shared';
+import { compareDipWithOcrVolume, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
 import { historicalImportSetup } from './service.js';
@@ -59,6 +59,7 @@ const normalize = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]/g, '
 const safe = (value: number | null | undefined) => value === null || value === undefined || value < 0 ? undefined : value;
 const dateFor = (month: string, day: number) => `${month}-${String(day).padStart(2, '0')}`;
 const monthNames = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+const DIP_VOLUME_TOLERANCE_LITRES = 25;
 
 function detectedPeriodIso(value: string) {
   const normalized = normalize(value);
@@ -103,9 +104,31 @@ export function mapExtractedDsrDraft(draft: ExtractedDsrDraft, setup: SetupProdu
     const date = dateFor(effectiveMonth, source.day);
     const tankReadings = setup.tanks.map((tank, index) => {
       const found = tankValues.get(normalize(tank.code)) ?? (useTankPosition ? sourceTankReadings[index] : undefined);
-      const openingStock = safe(found?.openingStock);
+      const ocrOpeningStock = safe(found?.openingStock);
+      const dipReading = safe(found?.dipReading);
+      const usesMasterChart = tank.tankType === 'UNDERGROUND' && Number(tank.nominalCapacity) === 20_000;
+      const comparison = usesMasterChart && dipReading !== undefined ? compareDipWithOcrVolume({ dipCm: dipReading, ocrVolumeLitres: ocrOpeningStock, toleranceLitres: DIP_VOLUME_TOLERANCE_LITRES }) : undefined;
+      const openingStock = comparison?.calibration.status === 'OK' ? comparison.calibration.volumeLitres : ocrOpeningStock;
       if (openingStock === undefined) uncertainCells.push(`${date}:tank:${tank.id}:stock`);
-      return { tankId: tank.id, openingStock: openingStock ?? 0, ...(safe(found?.dipReading) !== undefined ? { dipReading: safe(found?.dipReading) } : {}) };
+      if (comparison?.calibration.status === 'OUT_OF_RANGE') {
+        uncertainCells.push(`${date}:tank:${tank.id}:stock`);
+        warnings.push(`${tank.code} dip ${dipReading} cm on ${date} is outside the master chart range and must be verified manually.`);
+      }
+      if (comparison?.calibration.status === 'OK' && comparison.requiresReview) warnings.push(`${tank.code} on ${date}: OCR volume ${comparison.ocrVolumeLitres?.toFixed(2)} L differs from the chart-derived ${comparison.calibration.volumeLitres.toFixed(2)} L by ${comparison.differenceLitres?.toFixed(2)} L. The chart value is being used; verify the source before importing.`);
+      return {
+        tankId: tank.id,
+        openingStock: openingStock ?? 0,
+        ...(dipReading !== undefined ? { dipReading } : {}),
+        ...(comparison?.calibration.status === 'OK' ? { calibration: {
+          chartId: comparison.calibration.chartId,
+          volumeLitres: comparison.calibration.volumeLitres,
+          ...(comparison.ocrVolumeLitres !== undefined ? { ocrVolumeLitres: comparison.ocrVolumeLitres } : {}),
+          ...(comparison.differenceLitres !== undefined ? { differenceLitres: comparison.differenceLitres } : {}),
+          toleranceLitres: comparison.toleranceLitres,
+          interpolated: comparison.calibration.interpolated,
+          reviewConfirmed: !comparison.requiresReview,
+        } } : {}),
+      };
     });
     const nozzleReadings = setup.nozzles.map((nozzle, index) => {
       const found = nozzleValues.get(normalize(`${nozzle.dispenserCode}/${nozzle.code}`)) ?? nozzleValues.get(normalize(nozzle.code)) ?? (useNozzlePosition ? sourceNozzleReadings[index] : undefined);

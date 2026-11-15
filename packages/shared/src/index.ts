@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export * from "./stock-rules.js";
 export * from "./purchase-price.js";
+export * from "./calibration/dip-calibration.js";
 
 export const roles = ["OWNER", "MANAGER", "ACCOUNTANT", "STAFF"] as const;
 export const userSchema = z.object({
@@ -1106,6 +1107,15 @@ export const historicalSalesRowSchema = z.object({
     tankId: z.string().cuid(),
     dipReading: z.coerce.number().min(0).optional(),
     openingStock: z.coerce.number().min(0),
+    calibration: z.object({
+      chartId: z.string().min(1),
+      volumeLitres: z.coerce.number().min(0),
+      ocrVolumeLitres: z.coerce.number().min(0).optional(),
+      differenceLitres: z.coerce.number().min(0).optional(),
+      toleranceLitres: z.coerce.number().min(0),
+      interpolated: z.boolean(),
+      reviewConfirmed: z.boolean(),
+    }).optional(),
   })).min(1),
   receiptQuantity: z.coerce.number().min(0).default(0),
   totalStock: z.coerce.number().min(0).optional(),

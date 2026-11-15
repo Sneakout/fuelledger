@@ -184,11 +184,21 @@
   background: #fff8e8;
   box-shadow: 0 0 0 3px rgba(196, 122, 24, .12);
 }
+.historical-grid td.calibration-cell-review { background: #fff8e8; box-shadow: inset 0 0 0 2px rgba(196, 122, 24, .22); }
+.calibration-note { display: block; margin-top: 5px; color: #176b55; font-weight: 700; white-space: nowrap; }
+.calibration-confirm { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: #855a09; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.calibration-confirm input { width: auto !important; margin: 0; }
+.historical-draft-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 16px; padding: 14px 16px; border: 1px solid #c9ddd6; border-radius: 14px; background: #f5faf8; }
+.historical-draft-toolbar > span { display: grid; gap: 3px; color: #244c41; }
+.historical-draft-toolbar > span small { color: #61766f; }
+.historical-draft-toolbar > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.historical-draft-toolbar .danger { color: #a33b2d; }
 
 .historical-period-confirm {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: minmax(250px, .7fr) 1.3fr;
+  align-items: center;
+  gap: 18px;
   margin-bottom: 16px;
   padding: 15px 17px;
   border: 1px solid #d8c98e;
@@ -196,6 +206,16 @@
   background: #fffbea;
   color: #655419;
 }
-.historical-period-confirm input { margin-top: 4px; }
-.historical-period-confirm span { display: grid; gap: 3px; }
+.historical-period-choice { display: grid; gap: 6px; font-weight: 700; }
+.historical-period-choice input { margin: 0; background: #fff; }
+.historical-period-choice small { font-weight: 400; }
+.historical-period-ack { display: flex; align-items: flex-start; gap: 12px; padding-left: 18px; border-left: 1px solid #e0d6ad; }
+.historical-period-ack > input { margin-top: 4px; }
+.historical-period-ack span { display: grid; gap: 3px; }
 .historical-period-confirm small { color: #786d45; }
+@media (max-width: 760px) {
+  .historical-period-confirm { grid-template-columns: 1fr; }
+  .historical-period-ack { padding: 14px 0 0; border-left: 0; border-top: 1px solid #e0d6ad; }
+  .historical-draft-toolbar { align-items: stretch; flex-direction: column; }
+  .historical-draft-toolbar > div { display: grid; }
+}

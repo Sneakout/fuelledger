@@ -74,4 +74,19 @@ describe('DSR extraction mapping', () => {
     expect(result.rows[0]?.date).toBe('2026-10-01');
     expect(result.layoutIssues).toEqual([]);
   });
+
+  it('uses the 20 KL UG master chart instead of an OCR volume and flags a material difference', () => {
+    const calibratedSetup = { ...setup, tanks: [{ ...setup.tanks[0], nominalCapacity: '20000', tankType: 'UNDERGROUND' }] } as never;
+    const draft: ExtractedDsrDraft = {
+      detectedProduct: 'HSD', detectedMonth: 'October 2026', periodPresent: true, periodConfidence: 0.98, detectedPumpColumns: ['1', '2'], detectedTankColumns: ['1'], confidence: 0.9,
+      rows: [{ day: 1, tankReadings: [{ code: '1', openingStock: 13_700, dipReading: 126.5 }], receiptQuantity: 0, totalStock: 13_700, nozzleReadings: [{ code: '1', meterReading: 15086 }, { code: '2', meterReading: 18218 }], testingQuantity: 0, salesQuantity: 100, cumulativeSales: 100, stockGainLoss: null, note: '' }],
+    };
+    const result = mapExtractedDsrDraft(draft, calibratedSetup, '2026-10');
+    expect(result.rows[0]?.tankReadings[0]).toMatchObject({
+      dipReading: 126.5,
+      openingStock: 13_614.54,
+      calibration: { chartId: 'IOCL-20KL-UG-KOZHIKODE-IS-2166-1963-A', volumeLitres: 13_614.54, ocrVolumeLitres: 13_700, reviewConfirmed: false },
+    });
+    expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining('chart-derived 13614.54 L')]));
+  });
 });
