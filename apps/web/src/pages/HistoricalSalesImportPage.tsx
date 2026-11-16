@@ -4,7 +4,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { calculateHistoricalNozzleSales, calculateHistoricalStockGainLoss, calculateHistoricalTotalStock, compareDipWithOcrVolume, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { api, ApiRequestError, historicalSalesSourceUrl, type HistoricalImportIssue, type HistoricalSalesImportDetail, type HistoricalSalesImportSummary, type HistoricalSalesSetup } from '../lib/api';
 import { useStation } from '../components/StationProvider';
-import { deleteHistoricalDraft, draftFile, historicalDraftById, historicalDraftId, historicalDraftScope, latestHistoricalDraft, saveHistoricalDraft, type HistoricalOcrDraft } from '../lib/historical-draft-store';
+import { deleteHistoricalDraft, deleteHistoricalDraftsForImport, draftFile, historicalDraftById, historicalDraftId, historicalDraftScope, latestHistoricalDraft, saveHistoricalDraft, type HistoricalOcrDraft } from '../lib/historical-draft-store';
 
 const isoDate = (month: string, day: number) => `${month}-${String(day).padStart(2, '0')}`;
 const reviewCellId = (cell: string) => `historical-review-${cell.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
@@ -110,6 +110,7 @@ export function HistoricalSalesImportPage() {
   const [draftStatus, setDraftStatus] = useState('');
   const [editingImport, setEditingImport] = useState<HistoricalSalesImportDetail | null>(null);
   const [submittedImport, setSubmittedImport] = useState<HistoricalSalesImportSummary | null>(null);
+  const [importsLoaded, setImportsLoaded] = useState(false);
   const [correctionReason, setCorrectionReason] = useState('');
   const selected = useMemo(() => setup?.products.find(item => item.product.id === productId), [setup, productId]);
   const pendingCalibrationReviews = useMemo(() => rows.flatMap(row => row.tankReadings.filter(reading => reading.calibration && !reading.calibration.reviewConfirmed).map(reading => ({ date: row.date, reading, tank: selected?.tanks.find(tank => tank.id === reading.tankId) }))), [rows, selected]);
@@ -129,19 +130,23 @@ export function HistoricalSalesImportPage() {
     if (calibration) messages.unshift({ level: 'WARNING', message: `${calibration} chart-derived tank volume${calibration === 1 ? '' : 's'} need verification against the DSR.` });
     return messages;
   };
-  useEffect(() => { if (!stationId) return; let active = true; setError(''); Promise.all([api.historicalSalesSetup(stationId), api.historicalSalesImports(stationId)]).then(([next, prior]) => { if (!active) return; setSetup(next); setImports(prior.imports); setProductId(current => next.products.some(item => item.product.id === current) ? current : next.products[0]?.product.id ?? ''); }).catch(caught => active && setError(caught instanceof ApiRequestError ? caught.message : 'Unable to prepare the historical import.')); return () => { active = false; }; }, [stationId]);
+  useEffect(() => { if (!stationId) return; let active = true; setError(''); setImportsLoaded(false); Promise.all([api.historicalSalesSetup(stationId), api.historicalSalesImports(stationId)]).then(([next, prior]) => { if (!active) return; setSetup(next); setImports(prior.imports); setProductId(current => next.products.some(item => item.product.id === current) ? current : next.products[0]?.product.id ?? ''); setImportsLoaded(true); }).catch(caught => { if (!active) return; setImportsLoaded(true); setError(caught instanceof ApiRequestError ? caught.message : 'Unable to prepare the historical import.'); }); return () => { active = false; }; }, [stationId]);
   useEffect(() => { if (!stationId && stations[0]) setStationId(stations[0].id); }, [stationId, stations]);
   useEffect(() => { let active = true; void api.subscription().then(value => { if (!active) return; const expires = value.intelligenceExpiresAt ? new Date(value.intelligenceExpiresAt) : null; setIntelligenceActive(Boolean(value.intelligenceEnabledAt) && (!expires || expires > new Date())); }).catch(() => undefined); return () => { active = false; }; }, []);
   useEffect(() => { if (!selected) return; if (documentPeriodSync.current) { documentPeriodSync.current = false; return; } setRows([]); setIssues([]); setPeriodConfirmed(false); }, [selected?.product.id, month]);
   useEffect(() => {
-    if (!selected || !stationId || !productId) return;
+    if (!selected || !stationId || !productId || !importsLoaded) return;
     const scope = historicalDraftScope(stationId, productId);
     if (restoredDraftScope.current === scope) return;
     restoredDraftScope.current = scope;
     let active = true;
-    void latestHistoricalDraft(stationId, productId).then(draft => { if (active && restoredDraftScope.current === scope && draft) restoreDraft(draft, 'Saved OCR draft restored from this browser.'); }).catch(() => undefined);
+    const submittedMonths = imports.filter(item => item.product.code === selected.product.code).map(item => item.month);
+    void Promise.all(submittedMonths.map(importedMonth => deleteHistoricalDraftsForImport(stationId, productId, importedMonth)))
+      .then(() => latestHistoricalDraft(stationId, productId))
+      .then(draft => { if (active && restoredDraftScope.current === scope && draft) restoreDraft(draft, 'Saved OCR draft restored from this browser.'); })
+      .catch(() => undefined);
     return () => { active = false; };
-  }, [selected, stationId, productId]);
+  }, [selected, stationId, productId, imports, importsLoaded]);
   useEffect(() => {
     if (!rows.length) return;
     const calculated = calculateDraftRows(rows, uncertainCells);
@@ -347,7 +352,7 @@ export function HistoricalSalesImportPage() {
     } finally { setBusy(false); }
   }
   async function validate() { setBusy(true); setError(''); try { const result = editingImport ? await api.validateHistoricalSalesCorrection(editingImport.id, correctionPayload()) : await api.validateHistoricalSales(await payload()); setIssues(result.issues); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to validate this register.'); } finally { setBusy(false); } }
-  async function save() { if (layoutIssues.length) { setError('Correct the fuel-station equipment layout or selected period and read the DSR again before confirming.'); return; } if (periodNeedsConfirmation && !periodConfirmed) { setError('Confirm the DSR month and year before importing.'); return; } if (uncertainCells.length) { setError(`Review the ${uncertainCells.length} highlighted unreadable value${uncertainCells.length === 1 ? '' : 's'} before confirming.`); return; } if (pendingCalibrationReviews.length) { setError('Verify every highlighted dip/volume difference before importing.'); return; } setBusy(true); setError(''); try { if (editingImport) { const result = await api.correctHistoricalSalesImport(editingImport.id, correctionPayload()); setEditingImport(result.record); setRows(result.record.rows); setIssues(result.issues); setCorrectionReason(''); setImports(previous => previous.map(item => item.id === result.record.id ? { ...item, updatedAt: result.record.updatedAt, _count: { corrections: result.record.corrections.length } } : item)); setDraftStatus('Corrections saved. All calculated fields were refreshed; live tank and nozzle balances were not changed.'); } else { const result = await api.createHistoricalSalesImport(await payload()); setImports(previous => [result.record, ...previous.filter(item => item.id !== result.record.id)]); if (draftId) await deleteHistoricalDraft(draftId).catch(() => undefined); if (fileInputRef.current) fileInputRef.current.value = ''; setSubmittedImport(result.record); setRows([]); setIssues([]); setExtractionWarnings([]); setLayoutIssues([]); setUncertainCells([]); setPeriodNeedsConfirmation(false); setPeriodConfirmed(false); setReaderStatus(''); setDraftId(''); setSourceFingerprint(''); setDraftStatus(''); setFile(null); setApplyCutover(false); } } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : caught instanceof Error ? caught.message : editingImport ? 'Unable to save these corrections.' : 'Unable to import this register.'); } finally { setBusy(false); } }
+  async function save() { if (layoutIssues.length) { setError('Correct the fuel-station equipment layout or selected period and read the DSR again before confirming.'); return; } if (periodNeedsConfirmation && !periodConfirmed) { setError('Confirm the DSR month and year before importing.'); return; } if (uncertainCells.length) { setError(`Review the ${uncertainCells.length} highlighted unreadable value${uncertainCells.length === 1 ? '' : 's'} before confirming.`); return; } if (pendingCalibrationReviews.length) { setError('Verify every highlighted dip/volume difference before importing.'); return; } setBusy(true); setError(''); try { if (editingImport) { const result = await api.correctHistoricalSalesImport(editingImport.id, correctionPayload()); setEditingImport(result.record); setRows(result.record.rows); setIssues(result.issues); setCorrectionReason(''); setImports(previous => previous.map(item => item.id === result.record.id ? { ...item, updatedAt: result.record.updatedAt, _count: { corrections: result.record.corrections.length } } : item)); setDraftStatus('Corrections saved. All calculated fields were refreshed; live tank and nozzle balances were not changed.'); } else { const result = await api.createHistoricalSalesImport(await payload()); setImports(previous => [result.record, ...previous.filter(item => item.id !== result.record.id)]); await deleteHistoricalDraftsForImport(stationId, productId, result.record.month).catch(() => undefined); if (fileInputRef.current) fileInputRef.current.value = ''; setSubmittedImport(result.record); setRows([]); setIssues([]); setExtractionWarnings([]); setLayoutIssues([]); setUncertainCells([]); setPeriodNeedsConfirmation(false); setPeriodConfirmed(false); setReaderStatus(''); setDraftId(''); setSourceFingerprint(''); setDraftStatus(''); setFile(null); setApplyCutover(false); } } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : caught instanceof Error ? caught.message : editingImport ? 'Unable to save these corrections.' : 'Unable to import this register.'); } finally { setBusy(false); } }
   return <main className="page historical-import-page">
     <Link className="back-link" to="/stations"><ArrowLeft/> Back to petrol pumps</Link>
     <div className="page-heading"><div><span className="eyebrow">Customer onboarding</span><h1>Import the monthly sales register</h1><p>Record MS and HSD separately. FuelNerve checks the tank, receipt and nozzle chain before adding historical trends.</p></div></div>

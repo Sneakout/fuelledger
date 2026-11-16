@@ -62,6 +62,12 @@ export const saveHistoricalDraft = (draft: HistoricalOcrDraft) => request<IDBVal
 export const deleteHistoricalDraft = (id: string) => request<undefined>('readwrite', store => store.delete(id));
 export const historicalDraftById = (id: string) => request<HistoricalOcrDraft | undefined>('readonly', store => store.get(id));
 
+export async function deleteHistoricalDraftsForImport(stationId: string, productId: string, month: string) {
+  const scopeKey = historicalDraftScope(stationId, productId);
+  const rows = await request<HistoricalOcrDraft[]>('readonly', store => store.getAll());
+  await Promise.all(rows.filter(row => row.scopeKey === scopeKey && row.month === month).map(row => deleteHistoricalDraft(row.id)));
+}
+
 export async function latestHistoricalDraft(stationId: string, productId: string) {
   const scopeKey = historicalDraftScope(stationId, productId);
   const rows = await request<HistoricalOcrDraft[]>('readonly', store => store.getAll());

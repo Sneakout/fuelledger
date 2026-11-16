@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalSalesImportPage } from './HistoricalSalesImportPage';
-import { latestHistoricalDraft } from '../lib/historical-draft-store';
+import { latestHistoricalDraft, saveHistoricalDraft } from '../lib/historical-draft-store';
 
 const { correctHistoricalSalesImport, createHistoricalSalesImport, extractHistoricalSales, historicalSalesImport, historicalSalesImports, validateHistoricalSales, validateHistoricalSalesCorrection } = vi.hoisted(() => ({ correctHistoricalSalesImport: vi.fn(), createHistoricalSalesImport: vi.fn(), extractHistoricalSales: vi.fn(), historicalSalesImport: vi.fn(), historicalSalesImports: vi.fn().mockResolvedValue({ imports: [] }), validateHistoricalSales: vi.fn(), validateHistoricalSalesCorrection: vi.fn() }));
 vi.mock('../components/StationProvider', () => ({ useStation: () => ({ stations: [{ id: 'station-1', name: 'Saleema Petroleum' }], selectedStationId: 'station-1', selectStation: vi.fn() }) }));
@@ -221,6 +221,25 @@ describe('HistoricalSalesImportPage', () => {
     expect(screen.queryByText('Browser draft')).not.toBeInTheDocument();
     expect(screen.getByText('Imported registers')).toBeInTheDocument();
     expect(createHistoricalSalesImport).toHaveBeenCalledOnce();
+  });
+
+  it('removes a stale browser draft when that product month is already imported', async () => {
+    const record = { id: 'import-existing', month: '2026-11', monthStart: '2026-10-31T18:30:00.000Z', sourceFileName: 'Submitted DSR.pdf', cutoverApplied: false, createdAt: '2026-11-16T03:30:00.000Z', updatedAt: '2026-11-16T03:30:00.000Z', product: { name: 'High Speed Diesel', code: 'HSD' }, importedBy: { name: 'Owner' }, _count: { corrections: 0 } };
+    await saveHistoricalDraft({
+      id: 'station-1:product-1:v4:stale', scopeKey: 'station-1:product-1', stationId: 'station-1', productId: 'product-1', sourceFingerprint: 'stale',
+      sourceFileName: 'Old browser draft.pdf', sourceMimeType: 'application/pdf', sourceLastModified: 1, sourceBlob: new Blob(['scan'], { type: 'application/pdf' }), month: '2026-11',
+      rows: [{ date: '2026-11-01', tankReadings: [{ tankId: 'tank-1', openingStock: 7900 }], receiptQuantity: 0, totalStock: 7900, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15000 }], testingQuantity: 0, salesQuantity: 0, sellingPrice: 94 }],
+      extractionWarnings: [], layoutIssues: [], uncertainCells: [], periodNeedsConfirmation: false, periodConfirmed: true, periodSource: 'DOCUMENT', readerStatus: 'Draft ready', applyCutover: false, updatedAt: '2026-11-16T03:35:00.000Z',
+    });
+    historicalSalesImports.mockResolvedValueOnce({ imports: [record] });
+
+    render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+
+    expect(await screen.findByText('Imported registers')).toBeInTheDocument();
+    await waitFor(async () => expect(await latestHistoricalDraft('station-1', 'product-1')).toBeUndefined());
+    expect(screen.queryByText('Review grid')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Saved OCR draft restored/)).not.toBeInTheDocument();
+    expect(screen.getByText('Attach a DSR to begin')).toBeInTheDocument();
   });
 
   it('reopens a submitted register, recalculates edits, and saves an audited correction', async () => {
