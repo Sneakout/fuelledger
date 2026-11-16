@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalSalesImportPage } from './HistoricalSalesImportPage';
 import { latestHistoricalDraft } from '../lib/historical-draft-store';
 
-const { correctHistoricalSalesImport, extractHistoricalSales, historicalSalesImport, historicalSalesImports, validateHistoricalSales, validateHistoricalSalesCorrection } = vi.hoisted(() => ({ correctHistoricalSalesImport: vi.fn(), extractHistoricalSales: vi.fn(), historicalSalesImport: vi.fn(), historicalSalesImports: vi.fn().mockResolvedValue({ imports: [] }), validateHistoricalSales: vi.fn(), validateHistoricalSalesCorrection: vi.fn() }));
+const { correctHistoricalSalesImport, createHistoricalSalesImport, extractHistoricalSales, historicalSalesImport, historicalSalesImports, validateHistoricalSales, validateHistoricalSalesCorrection } = vi.hoisted(() => ({ correctHistoricalSalesImport: vi.fn(), createHistoricalSalesImport: vi.fn(), extractHistoricalSales: vi.fn(), historicalSalesImport: vi.fn(), historicalSalesImports: vi.fn().mockResolvedValue({ imports: [] }), validateHistoricalSales: vi.fn(), validateHistoricalSalesCorrection: vi.fn() }));
 vi.mock('../components/StationProvider', () => ({ useStation: () => ({ stations: [{ id: 'station-1', name: 'Saleema Petroleum' }], selectedStationId: 'station-1', selectStation: vi.fn() }) }));
 vi.mock('../lib/api', () => ({
   ApiRequestError: class extends Error {}, historicalSalesSourceUrl: vi.fn(),
@@ -16,6 +16,7 @@ vi.mock('../lib/api', () => ({
     ] }),
     historicalSalesImports,
     historicalSalesImport,
+    createHistoricalSalesImport,
     subscription: vi.fn().mockResolvedValue({ intelligenceEnabledAt: '2026-01-01T00:00:00.000Z', intelligenceExpiresAt: null }),
     extractHistoricalSales,
     validateHistoricalSales,
@@ -196,6 +197,30 @@ describe('HistoricalSalesImportPage', () => {
       expect(saved?.rows[0]).toMatchObject({ totalStock: 8050.2, salesQuantity: 100, cumulativeSales: 100 });
     });
     expect(extractHistoricalSales).toHaveBeenCalledTimes(1);
+  });
+
+  it('replaces a submitted draft with a confirmation and direct edit action', async () => {
+    const rows = [
+      { date: '2026-11-01', tankReadings: [{ tankId: 'tank-1', openingStock: 7900 }], receiptQuantity: 0, totalStock: 7900, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15000 }], testingQuantity: 0, salesQuantity: 0, sellingPrice: 94 },
+    ];
+    const record = { id: 'import-new', month: '2026-11', monthStart: '2026-10-31T18:30:00.000Z', sourceFileName: 'November DSR.pdf', cutoverApplied: false, createdAt: '2026-11-16T03:30:00.000Z', updatedAt: '2026-11-16T03:30:00.000Z', product: { name: 'High Speed Diesel', code: 'HSD' }, importedBy: { name: 'Owner' }, _count: { corrections: 0 } };
+    extractHistoricalSales.mockResolvedValueOnce({ rows, warnings: [], layoutIssues: [], uncertainCells: [], periodNeedsConfirmation: true, effectiveMonth: '2026-11', periodSource: 'DOCUMENT', confidence: .95, detectedProduct: 'HSD', detectedMonth: 'November 2026', detectedPumpColumns: ['1'], detectedTankColumns: ['1'] });
+    createHistoricalSalesImport.mockResolvedValueOnce({ record, issues: [] });
+    const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    await screen.findByRole('option', { name: /HSD/ });
+    fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['scan'], 'November DSR.pdf', { type: 'application/pdf' })] } });
+    await screen.findByText(/Draft ready/);
+    fireEvent.click(screen.getByRole('checkbox', { name: /Confirm DSR period/ }));
+
+    fireEvent.click(screen.getByRole('button', { name: /Confirm historical import/ }));
+
+    expect(await screen.findByRole('heading', { name: 'Historic DSR updated' })).toBeInTheDocument();
+    expect(screen.getByText(/browser draft has been cleared/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Edit data if required/ })).toBeInTheDocument();
+    expect(screen.queryByText('Review grid')).not.toBeInTheDocument();
+    expect(screen.queryByText('Browser draft')).not.toBeInTheDocument();
+    expect(screen.getByText('Imported registers')).toBeInTheDocument();
+    expect(createHistoricalSalesImport).toHaveBeenCalledOnce();
   });
 
   it('reopens a submitted register, recalculates edits, and saves an audited correction', async () => {

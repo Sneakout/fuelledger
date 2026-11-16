@@ -207,6 +207,16 @@
 .historical-draft-toolbar > span small { color: #61766f; }
 .historical-draft-toolbar > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .historical-draft-toolbar .danger { color: #a33b2d; }
+.historical-import-confirmation { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 18px; margin: 0 0 18px; padding: 22px; overflow: hidden; border: 1px solid #9fcfba; border-radius: 20px; background: linear-gradient(135deg,#e9f8f1 0%,#f9fcfa 62%,#f4f8dc 100%); box-shadow: 0 18px 45px rgba(19,82,63,.12); color: #164f3f; animation: historical-confirm-in .48s cubic-bezier(.2,.8,.2,1) both; }
+.historical-import-confirmation-icon { display: grid; place-items: center; width: 54px; height: 54px; border-radius: 18px; background: #d4f1e3; color: #147458; animation: historical-confirm-icon .6s .12s cubic-bezier(.2,.9,.25,1.25) both; }
+.historical-import-confirmation-icon svg { width: 28px; height: 28px; }
+.historical-import-confirmation h2 { margin: 3px 0 5px; font-size: 24px; }
+.historical-import-confirmation p { margin: 0; color: #315e51; font-weight: 700; }
+.historical-import-confirmation small { display: block; margin-top: 5px; color: #60776f; }
+.historical-import-confirmation-actions { display: flex; flex-direction: column; gap: 8px; min-width: 190px; }
+.historical-import-confirmation-actions button { justify-content: center; }
+@keyframes historical-confirm-in { from { opacity: 0; transform: translateY(18px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes historical-confirm-icon { from { opacity: 0; transform: scale(.55) rotate(-12deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
 .historical-correction-banner { display: flex; align-items: flex-start; gap: 14px; margin: 0 0 16px; padding: 16px 18px; border: 1px solid #b9d8cc; border-radius: 16px; background: linear-gradient(135deg,#edf8f3,#f9fcfa); color: #184c3f; }
 .historical-correction-banner > svg { flex: 0 0 auto; width: 22px; height: 22px; margin-top: 2px; }
 .historical-correction-banner > span { display: grid; flex: 1; gap: 4px; }
@@ -244,4 +254,9 @@
   .historical-period-ack { padding: 14px 0 0; border-left: 0; border-top: 1px solid #e0d6ad; }
   .historical-draft-toolbar { align-items: stretch; flex-direction: column; }
   .historical-draft-toolbar > div { display: grid; }
+  .historical-import-confirmation { grid-template-columns: auto 1fr; align-items: start; }
+  .historical-import-confirmation-actions { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .historical-import-confirmation,.historical-import-confirmation-icon { animation: none; }
 }
