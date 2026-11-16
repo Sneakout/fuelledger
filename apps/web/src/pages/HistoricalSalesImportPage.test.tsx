@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalSalesImportPage } from './HistoricalSalesImportPage';
+import { latestHistoricalDraft } from '../lib/historical-draft-store';
 
 const { correctHistoricalSalesImport, extractHistoricalSales, historicalSalesImport, historicalSalesImports, validateHistoricalSales, validateHistoricalSalesCorrection } = vi.hoisted(() => ({ correctHistoricalSalesImport: vi.fn(), extractHistoricalSales: vi.fn(), historicalSalesImport: vi.fn(), historicalSalesImports: vi.fn().mockResolvedValue({ imports: [] }), validateHistoricalSales: vi.fn(), validateHistoricalSalesCorrection: vi.fn() }));
 vi.mock('../components/StationProvider', () => ({ useStation: () => ({ stations: [{ id: 'station-1', name: 'Saleema Petroleum' }], selectedStationId: 'station-1', selectStation: vi.fn() }) }));
@@ -117,7 +118,7 @@ describe('HistoricalSalesImportPage', () => {
     expect(await screen.findByText('Reading the DSR')).toBeInTheDocument();
     expect(screen.queryByText('Browser draft')).not.toBeInTheDocument();
     expect(screen.queryByText('Attach a DSR to begin')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Refresh calculated volumes/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Refresh calculations/ })).not.toBeInTheDocument();
   });
 
   it('shows validation messages directly beneath the affected date row', async () => {
@@ -169,6 +170,31 @@ describe('HistoricalSalesImportPage', () => {
     expect(screen.getByLabelText('Total stock 2026-10-02')).toHaveValue(13614.54);
     expect(screen.getByLabelText('Total stock 2026-10-02')).toHaveAttribute('readonly');
     expect(screen.getByText(/Official chart: 13,614.54 L · interpolated/)).toBeInTheDocument();
+    expect(extractHistoricalSales).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes every dependent value and immediately updates the saved browser draft', async () => {
+    extractHistoricalSales.mockResolvedValueOnce({ rows: [
+      { date: '2026-11-01', tankReadings: [{ tankId: 'tank-1', openingStock: 7900, dipReading: 83 }], receiptQuantity: 100, totalStock: 8000, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15000 }], testingQuantity: 25, salesQuantity: 0, sellingPrice: 94 },
+      { date: '2026-11-02', tankReadings: [{ tankId: 'tank-1', openingStock: 7000, dipReading: 75 }], receiptQuantity: 0, totalStock: 7000, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15125 }], testingQuantity: 0, salesQuantity: 0, sellingPrice: 94 },
+    ], warnings: [], layoutIssues: [], uncertainCells: [], periodNeedsConfirmation: false, effectiveMonth: '2026-11', periodSource: 'DOCUMENT', confidence: .9, detectedProduct: 'HSD', detectedMonth: 'November 2026', detectedPumpColumns: ['1'], detectedTankColumns: ['1'] });
+    const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    await screen.findByRole('option', { name: /HSD/ });
+    const source = new File(['scan'], 'DSR-refresh.pdf', { type: 'application/pdf', lastModified: 1 });
+    fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [source] } });
+    await screen.findByText(/Draft ready/);
+
+    fireEvent.click(screen.getByRole('button', { name: /Refresh calculations & save draft/ }));
+
+    expect(await screen.findByText(/Calculations refreshed and draft saved/)).toBeInTheDocument();
+    expect(screen.getByLabelText('HSD-1 stock 2026-11-01')).toHaveValue(7950.2);
+    expect(screen.getByLabelText('Total stock 2026-11-01')).toHaveValue(8050.2);
+    expect(screen.getByLabelText('Nozzle sales 2026-11-01')).toHaveValue(100);
+    expect(screen.getByLabelText('Cumulative sales 2026-11-01')).toHaveValue(100);
+    await waitFor(async () => {
+      const saved = await latestHistoricalDraft('station-1', 'product-1');
+      expect(saved?.rows[0]).toMatchObject({ totalStock: 8050.2, salesQuantity: 100, cumulativeSales: 100 });
+    });
     expect(extractHistoricalSales).toHaveBeenCalledTimes(1);
   });
 

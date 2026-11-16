@@ -81,6 +81,8 @@ export function HistoricalSalesImportPage() {
   const documentPeriodSync = useRef(false);
   const restoredDraftScope = useRef('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const draftAutosaveTimer = useRef<number | null>(null);
+  const skipNextDraftAutosave = useRef(false);
   const { stations, selectedStationId, selectStation } = useStation();
   const today = new Date();
   const [stationId, setStationId] = useState(selectedStationId || stations[0]?.id || '');
@@ -147,8 +149,9 @@ export function HistoricalSalesImportPage() {
   }, [uncertainCells, rows.length]);
   useEffect(() => {
     if (!file || !draftId || !sourceFingerprint || !rows.length || busy) return;
+    if (skipNextDraftAutosave.current) { skipNextDraftAutosave.current = false; return; }
     setDraftStatus('Saving draft in this browser…');
-    const timer = window.setTimeout(() => {
+    draftAutosaveTimer.current = window.setTimeout(() => {
       const draft: HistoricalOcrDraft = {
         id: draftId, scopeKey: historicalDraftScope(stationId, productId), stationId, productId, sourceFingerprint,
         sourceFileName: file.name, sourceMimeType: file.type || 'application/pdf', sourceLastModified: file.lastModified, sourceBlob: file,
@@ -156,7 +159,7 @@ export function HistoricalSalesImportPage() {
       };
       void saveHistoricalDraft(draft).then(() => setDraftStatus(`Draft saved locally at ${new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}. Nothing has been submitted.`)).catch(() => setDraftStatus('Browser autosave is unavailable. Keep this page open until you finish.'));
     }, 600);
-    return () => window.clearTimeout(timer);
+    return () => { if (draftAutosaveTimer.current !== null) window.clearTimeout(draftAutosaveTimer.current); draftAutosaveTimer.current = null; };
   }, [file, draftId, sourceFingerprint, rows, extractionWarnings, layoutIssues, uncertainCells, periodNeedsConfirmation, periodConfirmed, periodSource, readerStatus, applyCutover, month, stationId, productId, busy]);
   useEffect(() => {
     if (!routedDocument || routedDocumentHandled.current || !setup || !intelligenceActive) return;
@@ -209,8 +212,10 @@ export function HistoricalSalesImportPage() {
     const calculated = calculateDraftRows(draft.rows, draft.uncertainCells);
     setFile(draftFile(draft)); setSourceFingerprint(draft.sourceFingerprint); setDraftId(draft.id); setRows(calculated.rows); setExtractionWarnings(draft.extractionWarnings); setLayoutIssues(draft.layoutIssues); setUncertainCells(calculated.uncertainCells); setPeriodNeedsConfirmation(draft.periodNeedsConfirmation); setPeriodConfirmed(draft.periodConfirmed); setPeriodSource(draft.periodSource); setReaderStatus(draft.readerStatus); setApplyCutover(draft.applyCutover); setDraftStatus(message); setError('');
   }
-  function refreshCalibratedVolumes() {
-    if (!selected) return;
+  async function refreshDraftCalculations() {
+    if (!selected || !file || !draftId || !sourceFingerprint) return;
+    if (draftAutosaveTimer.current !== null) { window.clearTimeout(draftAutosaveTimer.current); draftAutosaveTimer.current = null; }
+    setDraftStatus('Refreshing all calculated values…');
     const nextRows = structuredClone(rows);
     const calibratedCells = new Set<string>();
     let calibrated = 0;
@@ -226,10 +231,24 @@ export function HistoricalSalesImportPage() {
       calibratedCells.add(cell); calibrated += 1;
     }
     const nextUncertainCells = uncertainCells.filter(cell => !calibratedCells.has(cell));
-    setRows(calculateDraftRows(nextRows, nextUncertainCells).rows);
+    const calculated = calculateDraftRows(nextRows, nextUncertainCells);
+    skipNextDraftAutosave.current = true;
+    setRows(calculated.rows);
     setUncertainCells(nextUncertainCells);
+    setIssues([]);
     setError(invalid ? `${invalid} dip reading${invalid === 1 ? ' is' : 's are'} outside the approved chart range and still need review.` : '');
-    setDraftStatus(`${calibrated} chart-derived volume${calibrated === 1 ? '' : 's'} refreshed locally. OCR was not run again.`);
+    const refreshedAt = new Date();
+    const draft: HistoricalOcrDraft = {
+      id: draftId, scopeKey: historicalDraftScope(stationId, productId), stationId, productId, sourceFingerprint,
+      sourceFileName: file.name, sourceMimeType: file.type || 'application/pdf', sourceLastModified: file.lastModified, sourceBlob: file,
+      month, rows: calculated.rows, extractionWarnings, layoutIssues, uncertainCells: nextUncertainCells, periodNeedsConfirmation, periodConfirmed, periodSource, readerStatus, applyCutover, updatedAt: refreshedAt.toISOString(),
+    };
+    try {
+      await saveHistoricalDraft(draft);
+      setDraftStatus(`Calculations refreshed and draft saved at ${refreshedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}. ${calibrated} chart-derived tank volume${calibrated === 1 ? '' : 's'} updated; review the draft before confirming. OCR was not run again.`);
+    } catch {
+      setDraftStatus(`Calculations refreshed on screen, but the browser draft could not be saved. Keep this page open until you finish.`);
+    }
   }
   function updateDip(rowIndex: number, tank: HistoricalSalesSetup['products'][number]['tanks'][number], dip: number | undefined) {
     const nextRows = structuredClone(rows);
@@ -331,7 +350,7 @@ export function HistoricalSalesImportPage() {
     {uncertainCells.length > 0 && <div className="historical-reader-warnings"><AlertTriangle/><span><b>{uncertainCells.length} unreadable value{uncertainCells.length === 1 ? '' : 's'} need review</b><small>FuelNerve has not assumed these readings are zero. Enter each highlighted value before confirming.</small></span></div>}
     {pendingCalibrationReviews.length > 0 && <div className="historical-reader-warnings calibration-review"><AlertTriangle/><span><b>{pendingCalibrationReviews.length} dip/volume difference{pendingCalibrationReviews.length === 1 ? '' : 's'} need verification</b><small>The official 20 KL UG calibration value is being used. Compare each highlighted item with the physical DSR and confirm it in the grid.</small></span></div>}
     {periodNeedsConfirmation && <div className="historical-period-confirm"><div className="historical-period-choice"><span>Actual DSR month and year</span><div className="historical-period-fields"><label><span>Month</span><select aria-label="Actual DSR month" value={month.slice(5, 7)} onChange={event => changePeriod(`${month.slice(0, 4)}-${event.target.value}`, true)}>{dsrMonths.map((name, index) => <option key={name} value={String(index + 1).padStart(2, '0')}>{name}</option>)}</select></label><label><span>Year</span><select aria-label="Actual DSR year" value={month.slice(0, 4)} onChange={event => changePeriod(`${event.target.value}-${month.slice(5, 7)}`, true)}>{dsrYears.map(year => <option key={year} value={year}>{year}</option>)}</select></label></div><small>Use the period written on the physical document. Changing it keeps the OCR values and moves every draft row to the chosen month.</small></div><label className="historical-period-ack"><input type="checkbox" checked={periodConfirmed} onChange={event => setPeriodConfirmed(event.target.checked)}/><span><b>Confirm DSR period: {month}</b><small>{periodSource === 'DOCUMENT' ? 'Nerve Intelligence suggested this month and year from the physical DSR. Correct it above if OCR was inaccurate, then confirm.' : 'This period was selected manually. Check it against the physical DSR before confirming.'}</small></span></label></div>}
-    {file && rows.length > 0 && !busy && <div className="historical-draft-toolbar"><span><b>Browser draft</b><small>{draftStatus || 'Your OCR draft will save automatically in this browser. Nothing is submitted until you confirm the import.'}</small></span><div><button className="secondary small" type="button" onClick={refreshCalibratedVolumes}><RefreshCw/> Refresh calculated volumes</button><button className="secondary small" type="button" onClick={() => void attachRegister(file, { forceOcr: true })}><Sparkles/> Read source again</button><button className="secondary small danger" type="button" onClick={() => void discardDraft()}><Trash2/> Discard draft</button></div></div>}
+    {file && rows.length > 0 && !busy && <div className="historical-draft-toolbar"><span><b>Browser draft</b><small>{draftStatus || 'Your OCR draft will save automatically in this browser. Nothing is submitted until you confirm the import.'}</small></span><div><button className="secondary small" type="button" onClick={() => void refreshDraftCalculations()}><RefreshCw/> Refresh calculations &amp; save draft</button><button className="secondary small" type="button" onClick={() => void attachRegister(file, { forceOcr: true })}><Sparkles/> Read source again</button><button className="secondary small danger" type="button" onClick={() => void discardDraft()}><Trash2/> Discard draft</button></div></div>}
     <div className="historical-safety"><CheckCircle2/><span><b>Historical only.</b> These rows power sales graphs and intelligence. They do not create cash, tax, customer or supplier entries.</span></div>
     {error && <div className="form-error">{error}</div>}
     {selected && rows.length === 0 && !busy && <section className="historical-grid-empty"><FileUp/><div><span className="eyebrow">No draft yet</span><h2>Attach a DSR to begin</h2><p>Nerve Intelligence will create the review grid from the source. Nothing is copied from current tank or nozzle balances.</p></div><span className="historical-empty-actions"><button className="historical-attach-action" type="button" onClick={() => fileInputRef.current?.click()}><FileUp/> Attach DSR</button><button className="secondary" type="button" onClick={addDay}><Plus/> Enter manually</button></span></section>}
