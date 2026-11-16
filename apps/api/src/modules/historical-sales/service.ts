@@ -43,6 +43,7 @@ export function validateHistoricalRows(rows: HistoricalSalesRowInput[]): Histori
       }
     }
     if (!next) continue;
+    if (row.salesQuantity > 0 && row.sellingPrice <= 0) issues.push({ date: row.date, level: 'ERROR', field: 'sellingPrice', message: 'Enter the retail selling price (RSP) for this date so the sales value can be calculated.' });
     const calculatedSales = calculateHistoricalNozzleSales(row, next);
     if (calculatedSales === undefined) {
       issues.push({ date: next.date, level: 'ERROR', field: 'nozzleReadings', message: 'A nozzle meter reading moves backwards or does not match the configured nozzles.' });
@@ -68,7 +69,7 @@ async function equipment(organizationId: string, stationId: string, productId: s
       } },
     },
   });
-  const product = await prisma.product.findFirst({ where: { id: productId, organizationId, active: true, category: 'FUEL', tankLinked: true, meterLinked: true }, select: { id: true, name: true, code: true, sellingPrice: true } });
+  const product = await prisma.product.findFirst({ where: { id: productId, organizationId, active: true, category: 'FUEL', tankLinked: true, meterLinked: true }, select: { id: true, name: true, code: true, sellingPrice: true, sellingPriceHistory: { orderBy: { effectiveFrom: 'desc' }, select: { price: true, effectiveFrom: true } } } });
   if (!station || !product || !station.configurations[0]) throw new AppError(404, 'HISTORICAL_IMPORT_SETUP_NOT_FOUND', 'Choose a configured fuel station and an active metered fuel product.');
   const configuration = station.configurations[0];
   const nozzles = configuration.dispensers.flatMap(dispenser => dispenser.nozzles.map(nozzle => ({ ...nozzle, dispenserCode: dispenser.code })));
@@ -79,7 +80,7 @@ async function equipment(organizationId: string, stationId: string, productId: s
 export async function historicalImportSetup(organizationId: string, stationId: string) {
   const products = await prisma.product.findMany({
     where: { organizationId, active: true, category: 'FUEL', tankLinked: true, meterLinked: true, tanks: { some: { configuration: { stationId, active: true }, status: 'ACTIVE' } }, nozzles: { some: { dispenser: { configuration: { stationId, active: true } }, status: 'ACTIVE' } } },
-    select: { id: true, name: true, code: true, sellingPrice: true }, orderBy: { code: 'asc' },
+    select: { id: true, name: true, code: true, sellingPrice: true, sellingPriceHistory: { orderBy: { effectiveFrom: 'desc' }, select: { price: true, effectiveFrom: true } } }, orderBy: { code: 'asc' },
   });
   const details = await Promise.all(products.map(product => equipment(organizationId, stationId, product.id)));
   return { products: details.map(({ product, tanks, nozzles }) => ({ product, tanks, nozzles })) };
@@ -134,7 +135,7 @@ function prepareHistoricalRows(setup: Awaited<ReturnType<typeof equipment>>, row
   validateRowsAgainstSetup(setup, rows);
   const derivedRows = deriveHistoricalSalesMetrics([...rows].sort((left, right) => left.date.localeCompare(right.date)));
   const issues = validateHistoricalRows(derivedRows);
-  if (issues.some(issue => issue.level === 'ERROR')) throw new AppError(400, 'HISTORICAL_IMPORT_INVALID', 'Correct the meter readings that move backwards before saving.', issues);
+  if (issues.some(issue => issue.level === 'ERROR')) throw new AppError(400, 'HISTORICAL_IMPORT_INVALID', 'Correct the highlighted historical data before saving.', issues);
   return { rows: derivedRows, issues };
 }
 

@@ -107,12 +107,30 @@ describe('HistoricalSalesImportPage', () => {
     fireEvent.change(screen.getByDisplayValue('15125'), { target: { value: '15150' } });
     expect(screen.getByLabelText('Nozzle sales 2026-11-01')).toHaveValue(125);
     expect(screen.getByLabelText('Sales value 2026-11-01')).toHaveValue(11750);
-    fireEvent.change(screen.getAllByDisplayValue('94')[0]!, { target: { value: '95.5' } });
+    fireEvent.change(screen.getByLabelText('RSP 2026-11-01'), { target: { value: '95.5' } });
     expect(screen.getByLabelText('Sales value 2026-11-01')).toHaveValue(11937.5);
     expect(screen.getByLabelText('Cumulative sales 2026-11-01')).toHaveValue(125);
     expect(screen.getByLabelText('Stock gain or loss 2026-11-01')).toHaveValue(-775);
     fireEvent.change(screen.getByLabelText('HSD-1 stock 2026-11-02'), { target: { value: '6950' } });
     expect(screen.getByLabelText('Stock gain or loss 2026-11-01')).toHaveValue(-825);
+  });
+
+  it('applies one confirmed RSP across the draft and recalculates sales value', async () => {
+    extractHistoricalSales.mockResolvedValueOnce({ rows: [
+      { date: '2026-11-01', tankReadings: [{ tankId: 'tank-1', openingStock: 7900 }], receiptQuantity: 0, totalStock: 7900, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15000 }], testingQuantity: 0, salesQuantity: 0, sellingPrice: 0 },
+      { date: '2026-11-02', tankReadings: [{ tankId: 'tank-1', openingStock: 7800 }], receiptQuantity: 0, totalStock: 7800, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15100 }], testingQuantity: 0, salesQuantity: 0, sellingPrice: 0 },
+    ], warnings: [], layoutIssues: [], uncertainCells: [], periodNeedsConfirmation: false, effectiveMonth: '2026-11', periodSource: 'DOCUMENT', confidence: .9, detectedProduct: 'HSD', detectedMonth: 'November 2026', detectedPumpColumns: ['1'], detectedTankColumns: ['1'] });
+    const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    await screen.findByRole('option', { name: /HSD/ });
+    fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['scan'], 'DSR.pdf', { type: 'application/pdf' })] } });
+    await screen.findByText(/Draft ready/);
+
+    fireEvent.change(screen.getByLabelText('RSP for all days'), { target: { value: '96.5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply RSP' }));
+
+    expect(screen.getByLabelText('Sales value 2026-11-01')).toHaveValue(9650);
+    expect(screen.getByLabelText('RSP 2026-11-01')).toHaveValue(96.5);
+    expect(screen.getByLabelText('RSP 2026-11-02')).toHaveValue(96.5);
   });
 
   it('does not show draft actions or the empty state while OCR is still reading', async () => {

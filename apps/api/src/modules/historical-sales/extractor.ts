@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import { calculateHistoricalNozzleSales, calculateHistoricalStockGainLoss, calculateHistoricalTotalStock, compareDipWithOcrVolume, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
+import { effectivePriceAt } from '../../lib/effective-price.js';
+import { indiaDayRange } from '../../lib/india-time.js';
 import { historicalImportSetup } from './service.js';
 
 const nullableNumber = z.number().finite().nullable();
@@ -319,7 +321,7 @@ export function mapExtractedDsrDraft(draft: ExtractedDsrDraft, setup: SetupProdu
       nozzleReadings,
       testingQuantity: safe(source.testingQuantity) ?? 0,
       salesQuantity: 0,
-      sellingPrice: Number(setup.product.sellingPrice),
+      sellingPrice: Number(effectivePriceAt(setup.product.sellingPrice, setup.product.sellingPriceHistory ?? [], indiaDayRange(date).start)),
       ...(source.note ? { notes: source.note.slice(0, 300) } : {}),
     };
     row.totalStock = calculateHistoricalTotalStock(row);

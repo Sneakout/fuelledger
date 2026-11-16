@@ -28,6 +28,14 @@ describe('historical sales register validation', () => {
     expect(issues).toEqual(expect.arrayContaining([expect.objectContaining({ field: 'salesQuantity', level: 'WARNING' })]));
   });
 
+  it('blocks a completed sales day whose RSP is missing', () => {
+    const first = { ...row('2026-11-01', 1000, 100), sellingPrice: 0 };
+    const issues = validateHistoricalRows([first, row('2026-11-02', 1100, 0)]);
+    expect(issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ date: '2026-11-01', field: 'sellingPrice', level: 'ERROR' }),
+    ]));
+  });
+
   it('derives product sales from all nozzle movements less testing', () => {
     const secondNozzleId = 'cm32345678901234567890123';
     const first = { ...row('2026-11-01', 1000, 999, 10), nozzleReadings: [{ nozzleId, meterReading: 1000 }, { nozzleId: secondNozzleId, meterReading: 2000 }] };
