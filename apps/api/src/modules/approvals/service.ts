@@ -1,5 +1,5 @@
 import { Prisma, type ApprovalStatus } from '@prisma/client';
-import { calculateLandedPurchasePrices, type InventoryAdjustmentInput, type PurchaseInvoiceInput } from '@fuelledger/shared';
+import { calculateLandedPurchasePrices, type InventoryAdjustmentInput, type ProductInput, type PurchaseInvoiceInput } from '@fuelledger/shared';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { bookStockAt } from '../../lib/stock.js';
@@ -173,6 +173,67 @@ export async function requestProductPriceChangeFromInvoice(
   return approvals;
 }
 
+type CatalogChangePayload = {
+  operation: 'CREATE' | 'UPDATE';
+  productId?: string;
+  product: ProductInput;
+  expectedUpdatedAt?: string;
+};
+
+export async function requestProductCatalogChange(
+  organizationId: string,
+  userId: string,
+  stationId: string,
+  requestKey: string,
+  change: { operation: 'CREATE'; product: ProductInput } | { operation: 'UPDATE'; productId: string; product: ProductInput },
+) {
+  const previous = await prisma.approvalRequest.findUnique({ where: { organizationId_requestKey: { organizationId, requestKey } }, include });
+  if (previous) return present(previous);
+  const [station, requester, existing, duplicateCode] = await Promise.all([
+    prisma.station.findFirst({ where: { id: stationId, organizationId, active: true }, select: { id: true, name: true, code: true } }),
+    prisma.user.findFirst({ where: { id: userId, organizationId }, select: { id: true, name: true, role: true } }),
+    change.operation === 'UPDATE' ? prisma.product.findFirst({ where: { id: change.productId, organizationId }, include: { taxCategory: true, customCategory: true } }) : Promise.resolve(null),
+    prisma.product.findFirst({ where: { organizationId, code: change.product.code, ...(change.operation === 'UPDATE' ? { NOT: { id: change.productId } } : {}) }, select: { id: true } }),
+  ]);
+  if (!station || !requester) throw new AppError(404, 'APPROVAL_TARGET_NOT_FOUND', 'The fuel station or requester is no longer available.');
+  if (change.operation === 'UPDATE' && !existing) throw new AppError(404, 'PRODUCT_NOT_FOUND', 'This product is no longer available.');
+  if (duplicateCode) throw new AppError(409, 'PRODUCT_CODE_EXISTS', 'A product already uses this SKU/code.');
+  const [taxCategory, customCategory] = await Promise.all([
+    change.product.taxCategoryId ? prisma.taxCategory.findFirst({ where: { id: change.product.taxCategoryId, organizationId, active: true }, select: { id: true, name: true } }) : Promise.resolve(null),
+    change.product.customCategoryId ? prisma.productCategorySetting.findFirst({ where: { id: change.product.customCategoryId, organizationId, active: true }, select: { id: true, name: true } }) : Promise.resolve(null),
+  ]);
+  if (change.product.taxCategoryId && !taxCategory) throw new AppError(400, 'TAX_CATEGORY_INVALID', 'Choose an active tax category from this organization.');
+  if (change.product.customCategoryId && !customCategory) throw new AppError(400, 'CATEGORY_INVALID', 'Choose an active custom category from this organization.');
+  const payload: CatalogChangePayload = {
+    operation: change.operation,
+    ...(change.operation === 'UPDATE' ? { productId: change.productId, expectedUpdatedAt: existing!.updatedAt.toISOString() } : {}),
+    product: change.product,
+  };
+  const before = existing ? {
+    id: existing.id, name: existing.name, code: existing.code, hsnCode: existing.hsnCode, category: existing.category, unit: existing.unit,
+    purchasePrice: Number(existing.purchasePrice), sellingPrice: Number(existing.sellingPrice), inventoryTracked: existing.inventoryTracked,
+    tankLinked: existing.tankLinked, meterLinked: existing.meterLinked, isService: existing.isService, active: existing.active,
+    taxCategoryId: existing.taxCategoryId, customCategoryId: existing.customCategoryId,
+  } : null;
+  const evidence = {
+    operation: change.operation,
+    product: { name: change.product.name, code: change.product.code, unit: change.product.unit },
+    before,
+    after: change.product,
+    checkedAt: new Date().toISOString(),
+    evidencePath: '/products',
+  };
+  const reason = change.operation === 'CREATE'
+    ? `${requester.name} requested a new product: ${change.product.name} (${change.product.code}).`
+    : `${requester.name} requested changes to ${existing!.name} (${existing!.code}).`;
+  try {
+    return present(await prisma.approvalRequest.create({ data: { organizationId, stationId, actionType: 'PRODUCT_CATALOG_CHANGE', requestKey, requestedById: userId, reason, payload: payload as unknown as Prisma.InputJsonValue, evidence: evidence as unknown as Prisma.InputJsonValue }, include }));
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
+    return present(await prisma.approvalRequest.findUniqueOrThrow({ where: { organizationId_requestKey: { organizationId, requestKey } }, include }));
+  }
+}
+
 function roundPrice(value: number) { return Math.round((value + Number.EPSILON) * 100) / 100; }
 
 type ApprovalDecisionInput = {
@@ -184,6 +245,45 @@ type ApprovalDecisionInput = {
 };
 type PriceChangePayload = { stationId: string; productId: string; invoiceId: string; invoiceNumber: string; proposedPurchasePrice: number; suggestedSellingPrice: number; purchaseEffectiveFrom: string };
 type PriceChangeEvidence = { currentPurchasePrice: number; proposedPurchasePrice: number; currentSellingPrice: number; suggestedSellingPrice: number };
+
+async function executeCatalogChange(tx: Prisma.TransactionClient, organizationId: string, payload: CatalogChangePayload, now: Date) {
+  const input = payload.product;
+  const [taxCategory, customCategory] = await Promise.all([
+    input.taxCategoryId ? tx.taxCategory.findFirst({ where: { id: input.taxCategoryId, organizationId, active: true }, select: { id: true } }) : Promise.resolve(null),
+    input.customCategoryId ? tx.productCategorySetting.findFirst({ where: { id: input.customCategoryId, organizationId, active: true }, select: { id: true } }) : Promise.resolve(null),
+  ]);
+  if (input.taxCategoryId && !taxCategory) throw new AppError(409, 'APPROVAL_EVIDENCE_CHANGED', 'The selected tax category is no longer active. Review a fresh product request.');
+  if (input.customCategoryId && !customCategory) throw new AppError(409, 'APPROVAL_EVIDENCE_CHANGED', 'The selected product category is no longer active. Review a fresh product request.');
+  const duplicate = await tx.product.findFirst({ where: { organizationId, code: input.code, ...(payload.productId ? { NOT: { id: payload.productId } } : {}) }, select: { id: true } });
+  if (duplicate) throw new AppError(409, 'PRODUCT_CODE_EXISTS', 'A product already uses this SKU/code. Review the request before approving.');
+  const { sellingPriceEffectiveFrom, purchasePriceEffectiveFrom, ...values } = input;
+  const sellingFrom = sellingPriceEffectiveFrom ? new Date(sellingPriceEffectiveFrom) : now;
+  const purchaseFrom = purchasePriceEffectiveFrom ? new Date(purchasePriceEffectiveFrom) : sellingFrom;
+  if (payload.operation === 'CREATE') {
+    return tx.product.create({ data: {
+      organizationId, ...values, hsnCode: input.hsnCode || null, customCategoryId: input.customCategoryId ?? null, taxCategoryId: input.taxCategoryId ?? null,
+      purchasePrice: new Prisma.Decimal(input.purchasePrice), sellingPrice: new Prisma.Decimal(input.sellingPrice),
+      sellingPriceHistory: { create: { price: new Prisma.Decimal(input.sellingPrice), effectiveFrom: sellingFrom } },
+      purchasePriceHistory: { create: { price: new Prisma.Decimal(input.purchasePrice), effectiveFrom: purchaseFrom } },
+    }, select: { id: true } });
+  }
+  const productId = payload.productId;
+  if (!productId) throw new AppError(400, 'APPROVAL_PAYLOAD_INVALID', 'This product-change request is incomplete and cannot be approved.');
+  const existing = await tx.product.findFirst({ where: { id: productId, organizationId }, include: { _count: { select: { tanks: true, nozzles: true } } } });
+  if (!existing || existing.updatedAt.toISOString() !== payload.expectedUpdatedAt) throw new AppError(409, 'APPROVAL_EVIDENCE_CHANGED', 'This product changed after the request was created. Review a fresh request before approving.');
+  if (existing._count.tanks && (!input.tankLinked || !input.inventoryTracked)) throw new AppError(409, 'PRODUCT_IN_USE', 'This product is assigned to tanks and must remain inventory- and tank-linked.');
+  if (existing._count.nozzles && (!input.meterLinked || !input.inventoryTracked)) throw new AppError(409, 'PRODUCT_IN_USE', 'This product is assigned to nozzles and must remain inventory- and meter-linked.');
+  const priceChanged = Number(input.sellingPrice) !== Number(existing.sellingPrice);
+  const purchaseChanged = Number(input.purchasePrice) !== Number(existing.purchasePrice);
+  if (priceChanged || sellingPriceEffectiveFrom) await tx.productSellingPrice.upsert({ where: { productId_effectiveFrom: { productId: existing.id, effectiveFrom: sellingFrom } }, update: { price: new Prisma.Decimal(input.sellingPrice) }, create: { productId: existing.id, effectiveFrom: sellingFrom, price: new Prisma.Decimal(input.sellingPrice) } });
+  if (purchaseChanged || purchasePriceEffectiveFrom) await tx.productPurchasePrice.upsert({ where: { productId_effectiveFrom: { productId: existing.id, effectiveFrom: purchaseFrom } }, update: { price: new Prisma.Decimal(input.purchasePrice) }, create: { productId: existing.id, effectiveFrom: purchaseFrom, price: new Prisma.Decimal(input.purchasePrice) } });
+  const [currentSelling, currentPurchase] = await Promise.all([
+    tx.productSellingPrice.findFirst({ where: { productId: existing.id, effectiveFrom: { lte: now } }, orderBy: { effectiveFrom: 'desc' }, select: { price: true } }),
+    tx.productPurchasePrice.findFirst({ where: { productId: existing.id, effectiveFrom: { lte: now } }, orderBy: { effectiveFrom: 'desc' }, select: { price: true } }),
+  ]);
+  await tx.product.update({ where: { id: existing.id }, data: { ...values, hsnCode: input.hsnCode || null, customCategoryId: input.customCategoryId ?? null, taxCategoryId: input.taxCategoryId ?? null, purchasePrice: currentPurchase?.price ?? new Prisma.Decimal(input.purchasePrice), sellingPrice: currentSelling?.price ?? new Prisma.Decimal(input.sellingPrice) } });
+  return { id: existing.id };
+}
 
 export async function decide(organizationId: string, ownerId: string, id: string, input: ApprovalDecisionInput, permittedStationIds?: string[]) {
   try {
@@ -246,6 +346,13 @@ export async function decide(organizationId: string, ownerId: string, id: string
       const changed = await tx.approvalRequest.updateMany({
         where: { id, status: 'PENDING', version: input.version },
         data: { status: 'APPROVED', decidedById: ownerId, decidedAt: now, decisionNote: input.note || null, executedAt: now, executionType: 'PRODUCT_PRICE_CHANGE', executionId: product.id, version: { increment: 1 } },
+      });
+      if (changed.count !== 1) throw new AppError(409, 'APPROVAL_ALREADY_DECIDED', 'This request has already been reviewed.');
+    } else if (row.actionType === 'PRODUCT_CATALOG_CHANGE') {
+      const product = await executeCatalogChange(tx, organizationId, row.payload as unknown as CatalogChangePayload, now);
+      const changed = await tx.approvalRequest.updateMany({
+        where: { id, status: 'PENDING', version: input.version },
+        data: { status: 'APPROVED', decidedById: ownerId, decidedAt: now, decisionNote: input.note || null, executedAt: now, executionType: 'PRODUCT_CATALOG_CHANGE', executionId: product.id, version: { increment: 1 } },
       });
       if (changed.count !== 1) throw new AppError(409, 'APPROVAL_ALREADY_DECIDED', 'This request has already been reviewed.');
     } else {

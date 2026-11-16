@@ -63,6 +63,11 @@ const ProductsPage = lazy(() =>
     default: module.ProductsPage,
   })),
 );
+const ApprovalsPage = lazy(() =>
+  import("./pages/ApprovalsPage").then((module) => ({
+    default: module.ApprovalsPage,
+  })),
+);
 const PurchasesPage = lazy(() =>
   import("./pages/PurchasesPage").then((module) => ({
     default: module.PurchasesPage,
@@ -125,6 +130,7 @@ export default function App() {
           <Route index element={<DashboardPage />} />
           <Route path="stations" element={<StationsPage />} />
           <Route path="products" element={<ProductsPage />} />
+          <Route path="approvals" element={<ApprovalsPage />} />
           <Route path="operations" element={<OperationsPage />} />
           <Route path="sales" element={<SalesPage />} />
           <Route path="sales/history" element={<SalesHistoryPage />} />

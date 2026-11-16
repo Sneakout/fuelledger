@@ -102,6 +102,11 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
     try {
       const form = proposedProduct(line, data.products.map(item => item.code), draft.invoiceDate);
       const result = await api.createProduct(form);
+      if (result.pending) {
+        window.dispatchEvent(new CustomEvent("fuelnerve:approvals-changed"));
+        setError("This new product has been sent to the owner for approval. Complete this invoice after the owner approves it in Approvals.");
+        return;
+      }
       setData(current => current ? { ...current, products: [...current.products, result.product] } : current);
       const nextProducts = [...productIds]; const nextTanks = [...tankIds];
       nextProducts[index] = result.product.id; nextTanks[index] = null;

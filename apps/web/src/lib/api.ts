@@ -296,14 +296,14 @@ export const api = {
     request<{ record: HistoricalSalesImportDetail; issues: HistoricalImportIssue[]; liveBalancesUnchanged: true }>(`/historical-sales/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }),
   catalog: () => request<Catalog>("/products"),
   createProduct: (input: ProductForm) =>
-    request<{ product: CatalogProduct }>("/products", {
+    request<ProductMutationResult>("/products", {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify({ requestId: crypto.randomUUID(), product: input }),
     }),
   updateProduct: (id: string, input: ProductForm) =>
-    request<{ product: CatalogProduct }>(`/products/${id}`, {
+    request<ProductMutationResult>(`/products/${id}`, {
       method: "PUT",
-      body: JSON.stringify(input),
+      body: JSON.stringify({ requestId: crypto.randomUUID(), product: input }),
     }),
   createCategory: (input: { name: string; code: string }) =>
     request<{ category: CatalogCategory }>("/products/categories", {
@@ -335,6 +335,13 @@ export const api = {
   inventoryBootstrap: () => request<InventoryBootstrap>("/inventory/bootstrap"),
   createAdjustment: (input: AdjustmentForm) =>
     request<{ approval: { id: string; status: "PENDING" } }>("/inventory/adjustments", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  approvals: (status?: OwnerApproval["status"]) =>
+    request<{ approvals: OwnerApproval[] }>(`/approvals${status ? `?status=${encodeURIComponent(status)}` : ""}`),
+  decideApproval: (id: string, input: ApprovalDecisionInput) =>
+    request<{ approval: OwnerApproval }>(`/approvals/${encodeURIComponent(id)}/decision`, {
       method: "POST",
       body: JSON.stringify(input),
     }),
@@ -854,6 +861,32 @@ export type Catalog = {
   categories: CatalogCategory[];
   taxCategories: CatalogTaxCategory[];
 };
+export type OwnerApproval = {
+  id: string;
+  actionType: "INVENTORY_ADJUSTMENT" | "PRODUCT_PRICE_CHANGE" | string;
+  status: "PENDING" | "APPROVED" | "REJECTED";
+  reason: string;
+  payload: Record<string, unknown>;
+  evidence: Record<string, unknown>;
+  requestedAt: string;
+  requestedBy: { id: string; name: string; role: string };
+  station: { id: string; name: string; code: string };
+  decidedAt: string | null;
+  decidedBy: { id: string; name: string; role: string } | null;
+  decisionNote: string | null;
+  execution: { type: string | null; id: string; executedAt: string | null } | null;
+  version: number;
+};
+export type ApprovalDecisionInput = {
+  decision: "APPROVE" | "REJECT";
+  note: string;
+  version: number;
+  sellingPrice?: number;
+  sellingPriceEffectiveFrom?: string;
+};
+export type ProductMutationResult =
+  | { product: CatalogProduct; pending?: false; approval?: never }
+  | { pending: true; approval: OwnerApproval; product?: never };
 export type StationSummary = {
   id: string;
   name: string;

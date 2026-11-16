@@ -79,6 +79,7 @@ export function ProductsPage() {
   const [priceEffectiveDate, setPriceEffectiveDate] = useState(today());
   const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [fieldErrors, setFieldErrors] = useState<
     Partial<
       Record<
@@ -191,11 +192,14 @@ export function ProductsPage() {
         : {}),
     };
     try {
-      if (editing) await api.updateProduct(editing, payload);
-      else await api.createProduct(payload);
+      const result = editing ? await api.updateProduct(editing, payload) : await api.createProduct(payload);
       setForm(null);
       setEditing(null);
       setFieldErrors({});
+      if (result.pending) {
+        setNotice("Sent to the owner for approval. The product catalog will change only after the owner approves it.");
+        window.dispatchEvent(new CustomEvent("fuelnerve:approvals-changed"));
+      } else setNotice("");
       load();
     } catch (e) {
       const details =
@@ -256,6 +260,7 @@ export function ProductsPage() {
       ...rest
     } = product;
     setEditing(id);
+    setNotice("");
     setPriceEffectiveDate(today());
     setPriceInputs({
       purchasePrice: String(purchasePrice),
@@ -283,6 +288,7 @@ export function ProductsPage() {
     setPriceEffectiveDate(today());
     setEditing(null);
     setError("");
+    setNotice("");
     setFieldErrors({});
   };
   if (!catalog)
@@ -316,6 +322,7 @@ export function ProductsPage() {
               setPriceInputs({ purchasePrice: "0", sellingPrice: "0" });
               setEditing(null);
               setError("");
+              setNotice("");
               setFieldErrors({});
             }}
           >
@@ -324,6 +331,7 @@ export function ProductsPage() {
         </div>
       </div>
       {error && !form && <div className="form-error">{error}</div>}
+      {notice && !form && <div className="validation-ok">{notice}</div>}
       <section className="catalog-stats">
         <div>
           <strong>{catalog.products.length}</strong>

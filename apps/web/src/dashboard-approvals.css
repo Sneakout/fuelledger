@@ -1,0 +1,97 @@
+.dashboard-approvals {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  gap: 13px;
+  align-items: center;
+  margin: -8px 0 15px;
+  padding: 13px 15px;
+  border: 1px solid #d7e5de;
+  border-radius: 14px;
+  background: #fff;
+}
+
+.dashboard-approvals.waiting {
+  border-color: #edcf92;
+  background: #fffaf0;
+}
+
+.dashboard-approvals-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
+  background: #e5f3eb;
+  color: #1d7658;
+}
+
+.dashboard-approvals.waiting .dashboard-approvals-icon {
+  background: #fff0d4;
+  color: #9b6710;
+}
+
+.dashboard-approvals-icon svg {
+  width: 19px;
+}
+
+.dashboard-approvals div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.dashboard-approvals small {
+  color: #628076;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.dashboard-approvals h2 {
+  margin: 2px 0;
+  font-size: 14px;
+  letter-spacing: -.02em;
+}
+
+.dashboard-approvals p {
+  margin: 0;
+  color: #6d7c75;
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.dashboard-approvals > a {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: #173f35;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 850;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.dashboard-approvals > a svg {
+  width: 13px;
+}
+
+@media (max-width: 700px) {
+  .dashboard-approvals {
+    grid-template-columns: 38px minmax(0, 1fr);
+    margin-top: 0;
+  }
+
+  .dashboard-approvals > a {
+    grid-column: 1 / -1;
+    justify-content: center;
+  }
+
+  .dashboard-approvals-icon {
+    width: 36px;
+    height: 36px;
+  }
+}
