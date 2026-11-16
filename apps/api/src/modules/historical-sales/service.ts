@@ -18,6 +18,20 @@ export function historicalRowSellingPrice(row: HistoricalSalesRowInput, product:
   return n(effectivePriceAt(product.sellingPrice, product.sellingPriceHistory, indiaDayRange(row.date).start));
 }
 
+export function historicalRowsWithSellingPrice(rows: HistoricalSalesRowInput[], product: HistoricalPriceSource) {
+  let carriedPrice = 0;
+  let previousKnownPrice: number | undefined;
+  return [...rows].sort((left, right) => left.date.localeCompare(right.date)).map(row => {
+    const recordedPrice = n(row.sellingPrice);
+    const knownPrice = n(effectivePriceAt(product.sellingPrice, product.sellingPriceHistory, indiaDayRange(row.date).start));
+    const knownPriceChanged = previousKnownPrice !== undefined && knownPrice > 0 && Math.abs(knownPrice - previousKnownPrice) > 0.000001;
+    if (recordedPrice > 0) carriedPrice = recordedPrice;
+    else if (carriedPrice <= 0 || knownPriceChanged) carriedPrice = knownPrice;
+    previousKnownPrice = knownPrice;
+    return carriedPrice > 0 && recordedPrice !== carriedPrice ? { ...row, sellingPrice: carriedPrice } : row;
+  });
+}
+
 export type HistoricalImportIssue = {
   date: string;
   level: 'WARNING' | 'ERROR';
@@ -133,7 +147,7 @@ function validateRowsAgainstSetup(setup: Awaited<ReturnType<typeof equipment>>, 
 function prepareHistoricalRows(setup: Awaited<ReturnType<typeof equipment>>, rows: HistoricalSalesRowInput[], month: string) {
   if (rows.some(row => !row.date.startsWith(`${month}-`))) throw new AppError(400, 'HISTORICAL_IMPORT_PERIOD_INVALID', 'Every row must belong to the saved register month.');
   validateRowsAgainstSetup(setup, rows);
-  const derivedRows = deriveHistoricalSalesMetrics([...rows].sort((left, right) => left.date.localeCompare(right.date)));
+  const derivedRows = deriveHistoricalSalesMetrics(historicalRowsWithSellingPrice(rows, setup.product));
   const issues = validateHistoricalRows(derivedRows);
   if (issues.some(issue => issue.level === 'ERROR')) throw new AppError(400, 'HISTORICAL_IMPORT_INVALID', 'Correct the highlighted historical data before saving.', issues);
   return { rows: derivedRows, issues };

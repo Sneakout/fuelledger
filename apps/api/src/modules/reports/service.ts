@@ -2,7 +2,7 @@ import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 import { AppError } from '../../lib/errors.js';
 import { indiaDate, indiaDayRange, indiaDayStart } from '../../lib/india-time.js';
-import { historicalRowSellingPrice, importRows } from '../historical-sales/service.js';
+import { historicalRowsWithSellingPrice, importRows } from '../historical-sales/service.js';
 
 type ReportFilter = { startDate: string; endDate: string; stationId?: string | undefined; permittedStationIds?: string[] | undefined; asOf?: Date | undefined };
 
@@ -49,11 +49,11 @@ export async function buildSalesHistory(organizationId: string, filter: ReportFi
     });
   }
   let historicalDays = 0;
-  for (const record of historicalImports) for (const row of importRows(record)) {
+  for (const record of historicalImports) for (const row of historicalRowsWithSellingPrice(importRows(record), record.product)) {
     if (row.date < filter.startDate || row.date > filter.endDate) continue;
     const key = `${row.date}:${record.product.id}`;
     if (daily.has(key)) continue;
-    daily.set(key, { key, date: row.date, productId: record.product.id, product: record.product.name, code: record.product.code, unit: record.product.unit, quantity: row.salesQuantity, revenue: row.salesQuantity * historicalRowSellingPrice(row, record.product), transactions: row.salesQuantity > 0 ? 1 : 0, source: 'HISTORICAL_IMPORT' });
+    daily.set(key, { key, date: row.date, productId: record.product.id, product: record.product.name, code: record.product.code, unit: record.product.unit, quantity: row.salesQuantity, revenue: row.salesQuantity * row.sellingPrice, transactions: row.salesQuantity > 0 ? 1 : 0, source: 'HISTORICAL_IMPORT' });
     historicalDays += row.salesQuantity > 0 ? 1 : 0;
   }
   const rows = [...daily.values()].sort((left, right) => left.date.localeCompare(right.date) || left.code.localeCompare(right.code));

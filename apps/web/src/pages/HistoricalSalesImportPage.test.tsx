@@ -133,6 +133,26 @@ describe('HistoricalSalesImportPage', () => {
     expect(screen.getByLabelText('RSP 2026-11-02')).toHaveValue(96.5);
   });
 
+  it('carries a user-entered RSP forward from its effective date', async () => {
+    extractHistoricalSales.mockResolvedValueOnce({ rows: [
+      { date: '2026-11-01', tankReadings: [{ tankId: 'tank-1', openingStock: 7900 }], receiptQuantity: 0, totalStock: 7900, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15000 }], testingQuantity: 0, salesQuantity: 0, sellingPrice: 0 },
+      { date: '2026-11-02', tankReadings: [{ tankId: 'tank-1', openingStock: 7800 }], receiptQuantity: 0, totalStock: 7800, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15100 }], testingQuantity: 0, salesQuantity: 0, sellingPrice: 0 },
+      { date: '2026-11-03', tankReadings: [{ tankId: 'tank-1', openingStock: 7700 }], receiptQuantity: 0, totalStock: 7700, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 15200 }], testingQuantity: 0, salesQuantity: 0, sellingPrice: 0 },
+    ], warnings: [], layoutIssues: [], uncertainCells: [], periodNeedsConfirmation: false, effectiveMonth: '2026-11', periodSource: 'DOCUMENT', confidence: .9, detectedProduct: 'HSD', detectedMonth: 'November 2026', detectedPumpColumns: ['1'], detectedTankColumns: ['1'] });
+    const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    await screen.findByRole('option', { name: /HSD/ });
+    fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['scan'], 'DSR.pdf', { type: 'application/pdf' })] } });
+    await screen.findByText(/Draft ready/);
+
+    fireEvent.change(screen.getByLabelText('RSP 2026-11-01'), { target: { value: '96.5' } });
+
+    expect(screen.getByLabelText('RSP 2026-11-01')).toHaveValue(96.5);
+    expect(screen.getByLabelText('RSP 2026-11-02')).toHaveValue(96.5);
+    expect(screen.getByLabelText('RSP 2026-11-03')).toHaveValue(96.5);
+    expect(screen.getByLabelText('Sales value 2026-11-01')).toHaveValue(9650);
+    expect(screen.getByLabelText('Sales value 2026-11-02')).toHaveValue(9650);
+  });
+
   it('does not show draft actions or the empty state while OCR is still reading', async () => {
     extractHistoricalSales.mockImplementationOnce(() => new Promise(() => undefined));
     const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);

@@ -67,4 +67,22 @@ describe('sales history RSP valuation', () => {
     expect(result.daily).toEqual([expect.objectContaining({ quantity: 100, revenue: 9600, source: 'HISTORICAL_IMPORT' })]);
     expect(result.summary).toEqual({ quantity: 100, revenue: 9600, transactions: 1 });
   });
+
+  it('carries a user-recorded RSP forward until a later explicit change', async () => {
+    db.sale.findMany.mockResolvedValue([]);
+    db.historicalSalesImport.findMany.mockResolvedValue([{
+      rows: [
+        { date: '2026-11-01', tankReadings: [], receiptQuantity: 0, nozzleReadings: [], testingQuantity: 0, salesQuantity: 100, sellingPrice: 96 },
+        { date: '2026-11-02', tankReadings: [], receiptQuantity: 0, nozzleReadings: [], testingQuantity: 0, salesQuantity: 50, sellingPrice: 0 },
+        { date: '2026-11-03', tankReadings: [], receiptQuantity: 0, nozzleReadings: [], testingQuantity: 0, salesQuantity: 25, sellingPrice: 98 },
+        { date: '2026-11-04', tankReadings: [], receiptQuantity: 0, nozzleReadings: [], testingQuantity: 0, salesQuantity: 10, sellingPrice: 0 },
+      ],
+      product: { id: 'hsd', name: 'High Speed Diesel', code: 'HSD', unit: 'LITRE', sellingPrice: new Prisma.Decimal(0), sellingPriceHistory: [] },
+    }]);
+
+    const result = await buildSalesHistory('org', { startDate: '2026-11-01', endDate: '2026-11-04' });
+
+    expect(result.daily.map(row => row.revenue)).toEqual([9600, 4800, 2450, 980]);
+    expect(result.summary.revenue).toBe(17830);
+  });
 });
