@@ -2,7 +2,6 @@ import { Prisma, type HistoricalSalesImport } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { calculateHistoricalNozzleSales, calculateHistoricalStockGainLoss, calculateHistoricalTankSales, deriveHistoricalSalesMetrics, type HistoricalSalesCorrectionInput, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { AppError } from '../../lib/errors.js';
-import { effectivePriceAt } from '../../lib/effective-price.js';
 import { indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
 import { calibrateDip, MASTER_20KL_UG_CALIBRATION } from '@fuelledger/shared';
@@ -12,10 +11,11 @@ const tolerance = 2;
 
 type HistoricalPriceSource = { sellingPrice: Prisma.Decimal; sellingPriceHistory: Array<{ price: Prisma.Decimal; effectiveFrom: Date }> };
 
-export function historicalRowSellingPrice(row: HistoricalSalesRowInput, product: HistoricalPriceSource) {
-  const recordedPrice = n(row.sellingPrice);
-  if (recordedPrice > 0) return recordedPrice;
-  return n(effectivePriceAt(product.sellingPrice, product.sellingPriceHistory, indiaDayRange(row.date).start));
+function positiveSellingPriceAt(product: HistoricalPriceSource, date: string) {
+  const at = indiaDayRange(date).start;
+  const historical = product.sellingPriceHistory.find(entry => entry.effectiveFrom <= at && n(entry.price) > 0);
+  const historicalPrice = n(historical?.price);
+  return historicalPrice > 0 ? historicalPrice : Math.max(0, n(product.sellingPrice));
 }
 
 export function historicalRowsWithSellingPrice(rows: HistoricalSalesRowInput[], product: HistoricalPriceSource) {
@@ -23,7 +23,7 @@ export function historicalRowsWithSellingPrice(rows: HistoricalSalesRowInput[], 
   let previousKnownPrice: number | undefined;
   return [...rows].sort((left, right) => left.date.localeCompare(right.date)).map(row => {
     const recordedPrice = n(row.sellingPrice);
-    const knownPrice = n(effectivePriceAt(product.sellingPrice, product.sellingPriceHistory, indiaDayRange(row.date).start));
+    const knownPrice = positiveSellingPriceAt(product, row.date);
     const knownPriceChanged = previousKnownPrice !== undefined && knownPrice > 0 && Math.abs(knownPrice - previousKnownPrice) > 0.000001;
     if (recordedPrice > 0) carriedPrice = recordedPrice;
     else if (carriedPrice <= 0 || knownPriceChanged) carriedPrice = knownPrice;

@@ -21,6 +21,13 @@ describe('dashboard sales timeline',()=>{
     expect(timeline.get('2026-11-10')).toBe(120000);
   });
 
+  it('uses the current RSP when a historical row and a zero price entry have no usable RSP',()=>{
+    const timeline=dashboardSalesTimeline([], [historicalImport('hsd',[historicalRow('2026-11-10',100,0)],110,[
+      {price:0,effectiveFrom:'2026-11-01T00:00:00.000Z'},
+    ])], '2026-11-09','2026-11-15');
+    expect(timeline.get('2026-11-10')).toBe(11000);
+  });
+
   it('uses live sales as the authority for the same product and day without hiding other products',()=>{
     const live=[
       {occurredAt:new Date('2026-11-10T06:00:00.000Z'),totalAmount:500,productId:'hsd'},

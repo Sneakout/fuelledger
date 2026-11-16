@@ -4,7 +4,7 @@ import { effectivePriceAt } from '../../lib/effective-price.js';
 import { tankBookStocksAt, tankMovementDeltasBetween } from '../../lib/stock.js';
 import { addIndiaDays, indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { buildReport } from '../reports/service.js';
-import { historicalRowSellingPrice, importRows } from '../historical-sales/service.js';
+import { historicalRowsWithSellingPrice, importRows } from '../historical-sales/service.js';
 
 const number=(value:unknown)=>Number(value??0);
 const money=(value:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(value);
@@ -24,9 +24,9 @@ export function dashboardSalesTimeline(liveSales:DashboardTimelineSale[],histori
     liveProductDays.add(`${date}:${sale.productId}`);
     amounts.set(date,(amounts.get(date)??0)+number(sale.totalAmount));
   }
-  for(const record of historicalImports)for(const row of importRows(record)){
+  for(const record of historicalImports)for(const row of historicalRowsWithSellingPrice(importRows(record),record.product)){
     if(row.date<startDate||row.date>endDate||liveProductDays.has(`${row.date}:${record.productId}`))continue;
-    amounts.set(row.date,(amounts.get(row.date)??0)+number(row.salesQuantity)*historicalRowSellingPrice(row,record.product));
+    amounts.set(row.date,(amounts.get(row.date)??0)+number(row.salesQuantity)*row.sellingPrice);
   }
   return amounts;
 }

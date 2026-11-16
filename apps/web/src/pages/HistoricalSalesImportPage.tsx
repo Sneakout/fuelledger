@@ -23,8 +23,9 @@ const base64 = (file: Blob) => new Promise<string>((resolve, reject) => { const 
 
 function datedSellingPrice(product: HistoricalSalesSetup['products'][number]['product'], date: string) {
   const at = new Date(`${date}T00:00:00+05:30`).getTime();
-  const historical = (product.sellingPriceHistory ?? []).find(entry => new Date(entry.effectiveFrom).getTime() <= at);
-  return Number(historical?.price ?? product.sellingPrice);
+  const historical = (product.sellingPriceHistory ?? []).find(entry => new Date(entry.effectiveFrom).getTime() <= at && Number(entry.price) > 0);
+  const historicalPrice = Number(historical?.price ?? 0);
+  return historicalPrice > 0 ? historicalPrice : Math.max(0, Number(product.sellingPrice));
 }
 
 function applyKnownSellingPrices(rows: HistoricalSalesRowInput[], product: HistoricalSalesSetup['products'][number]['product']) {

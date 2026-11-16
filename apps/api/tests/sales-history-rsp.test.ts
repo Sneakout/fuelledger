@@ -68,6 +68,21 @@ describe('sales history RSP valuation', () => {
     expect(result.summary).toEqual({ quantity: 100, revenue: 9600, transactions: 1 });
   });
 
+  it('ignores an invalid zero price-history entry and falls back to the current RSP', async () => {
+    db.sale.findMany.mockResolvedValue([]);
+    db.historicalSalesImport.findMany.mockResolvedValue([{
+      rows: [{ date: '2026-11-12', tankReadings: [], receiptQuantity: 0, nozzleReadings: [], testingQuantity: 0, salesQuantity: 100, sellingPrice: 0 }],
+      product: {
+        id: 'ms', name: 'Motor Spirit', code: 'MS', unit: 'LITRE', sellingPrice: new Prisma.Decimal(110),
+        sellingPriceHistory: [{ price: new Prisma.Decimal(0), effectiveFrom: new Date('2026-11-01T00:00:00.000Z') }],
+      },
+    }]);
+
+    const result = await buildSalesHistory('org', { startDate: '2026-11-12', endDate: '2026-11-12' });
+
+    expect(result.daily).toEqual([expect.objectContaining({ quantity: 100, revenue: 11000 })]);
+  });
+
   it('carries a user-recorded RSP forward until a later explicit change', async () => {
     db.sale.findMany.mockResolvedValue([]);
     db.historicalSalesImport.findMany.mockResolvedValue([{
