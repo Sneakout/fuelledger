@@ -1,10 +1,10 @@
-import type { HistoricalSalesImport } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 import { tankBookStocksAt, tankMovementDeltasBetween } from '../../lib/stock.js';
 import { addIndiaDays, indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { buildReport } from '../reports/service.js';
-import { importRows } from '../historical-sales/service.js';
+import { historicalRowSellingPrice, importRows } from '../historical-sales/service.js';
 
 const number=(value:unknown)=>Number(value??0);
 const money=(value:number)=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',maximumFractionDigits:2}).format(value);
@@ -13,7 +13,7 @@ type RecentPurchaseForAction={id:string;invoiceNumber:string;totalAmount:unknown
 type PendingPriceApprovalForAction={id:string;reason:string;evidence:unknown};
 type DashboardAction={id:string;severity:'HIGH'|'MEDIUM';title:string;detail:string;href:string};
 type DashboardTimelineSale={occurredAt:Date;totalAmount:unknown;productId:string};
-type DashboardHistoricalImport=Pick<HistoricalSalesImport,'productId'|'rows'>;
+type DashboardHistoricalImport={productId:string;rows:Prisma.JsonValue;product:{sellingPrice:Prisma.Decimal;sellingPriceHistory:Array<{price:Prisma.Decimal;effectiveFrom:Date}>}};
 
 export function dashboardSalesTimeline(liveSales:DashboardTimelineSale[],historicalImports:DashboardHistoricalImport[],startDate:string,endDate:string){
   const amounts=new Map<string,number>();
@@ -26,7 +26,7 @@ export function dashboardSalesTimeline(liveSales:DashboardTimelineSale[],histori
   }
   for(const record of historicalImports)for(const row of importRows(record)){
     if(row.date<startDate||row.date>endDate||liveProductDays.has(`${row.date}:${record.productId}`))continue;
-    amounts.set(row.date,(amounts.get(row.date)??0)+number(row.salesQuantity)*number(row.sellingPrice));
+    amounts.set(row.date,(amounts.get(row.date)??0)+number(row.salesQuantity)*historicalRowSellingPrice(row,record.product));
   }
   return amounts;
 }
@@ -55,7 +55,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
   const scopeIds=stationId?[stationId]:permittedStationIds;
   const [recentSales,historicalImports,shifts,reconciliations,tanks,recentPurchases,pendingPriceApprovals]=await Promise.all([
     prisma.sale.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),occurredAt:{gte:previousStart,lt:tomorrow}},select:{occurredAt:true,totalAmount:true,productId:true}}),
-    prisma.historicalSalesImport.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),monthStart:{lt:tomorrow}},select:{productId:true,rows:true}}),
+    prisma.historicalSalesImport.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),monthStart:{lt:tomorrow}},select:{productId:true,rows:true,product:{select:{sellingPrice:true,sellingPriceHistory:{orderBy:{effectiveFrom:'desc'},select:{price:true,effectiveFrom:true}}}}}}),
     prisma.shift.findMany({where:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})},status:{in:['OPEN','RECONCILIATION_REQUIRED']}},select:{id:true,status:true,shiftNumber:true,openedAt:true,closedAt:true,station:{select:{id:true,name:true,code:true}}},orderBy:{openedAt:'desc'}}),
     prisma.shiftReconciliation.findMany({where:{shift:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})}},reconciledAt:{gte:todayRange.start,lt:tomorrow}},include:{collections:{select:{varianceAmount:true}}}}),
     prisma.tank.findMany({

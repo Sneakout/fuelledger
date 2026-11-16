@@ -1,4 +1,5 @@
 import {describe,expect,it} from 'vitest';
+import {Prisma} from '@prisma/client';
 import {dashboardSalesTimeline,purchaseDashboardActions} from '../src/modules/dashboard/service.js';
 
 const historicalRow=(date:string,salesQuantity:number,sellingPrice:number)=>({
@@ -10,10 +11,13 @@ const historicalRow=(date:string,salesQuantity:number,sellingPrice:number)=>({
   salesQuantity,
   sellingPrice,
 });
+const historicalImport=(productId:string,rows:ReturnType<typeof historicalRow>[],sellingPrice=0,history:Array<{price:number;effectiveFrom:string}>=[])=>({
+  productId,rows,product:{sellingPrice:new Prisma.Decimal(sellingPrice),sellingPriceHistory:history.map(row=>({price:new Prisma.Decimal(row.price),effectiveFrom:new Date(row.effectiveFrom)}))},
+});
 
 describe('dashboard sales timeline',()=>{
   it('adds verified historical sales to the seven-day trend',()=>{
-    const timeline=dashboardSalesTimeline([], [{productId:'hsd',rows:[historicalRow('2026-11-10',1250,96)]}], '2026-11-09','2026-11-15');
+    const timeline=dashboardSalesTimeline([], [historicalImport('hsd',[historicalRow('2026-11-10',1250,96)])], '2026-11-09','2026-11-15');
     expect(timeline.get('2026-11-10')).toBe(120000);
   });
 
@@ -23,16 +27,24 @@ describe('dashboard sales timeline',()=>{
       {occurredAt:new Date('2026-11-10T06:30:00.000Z'),totalAmount:200,productId:'lubricant'},
     ];
     const historical=[
-      {productId:'hsd',rows:[historicalRow('2026-11-10',100,96)]},
-      {productId:'ms',rows:[historicalRow('2026-11-10',50,100)]},
+      historicalImport('hsd',[historicalRow('2026-11-10',100,96)]),
+      historicalImport('ms',[historicalRow('2026-11-10',50,100)]),
     ];
     const timeline=dashboardSalesTimeline(live,historical,'2026-11-09','2026-11-15');
     expect(timeline.get('2026-11-10')).toBe(5700);
   });
 
   it('excludes imported rows outside the requested dashboard period',()=>{
-    const timeline=dashboardSalesTimeline([], [{productId:'hsd',rows:[historicalRow('2026-11-08',100,96),historicalRow('2026-11-16',100,96)]}], '2026-11-09','2026-11-15');
+    const timeline=dashboardSalesTimeline([], [historicalImport('hsd',[historicalRow('2026-11-08',100,96),historicalRow('2026-11-16',100,96)])], '2026-11-09','2026-11-15');
     expect([...timeline.entries()]).toEqual([]);
+  });
+
+  it('values imported litres using the selling price effective on that date when the DSR has no RSP',()=>{
+    const timeline=dashboardSalesTimeline([], [historicalImport('hsd',[historicalRow('2026-11-10',1250,0)],110,[
+      {price:96,effectiveFrom:'2026-11-01T00:00:00.000Z'},
+      {price:110,effectiveFrom:'2026-11-15T00:00:00.000Z'},
+    ])], '2026-11-09','2026-11-15');
+    expect(timeline.get('2026-11-10')).toBe(120000);
   });
 });
 

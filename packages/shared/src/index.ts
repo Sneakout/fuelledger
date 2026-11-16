@@ -1205,6 +1205,15 @@ export function calculateHistoricalStockGainLoss(current: HistoricalSalesRowInpu
   return Number((nozzleSales - tankSales).toFixed(3));
 }
 
+/**
+ * Calculates the monetary value of a completed historical sales day.
+ * The row's RSP is the source of truth; the value is derived and is never
+ * accepted independently from OCR or user input.
+ */
+export function calculateHistoricalSalesValue(row: Pick<HistoricalSalesRowInput, 'salesQuantity' | 'sellingPrice'>): number {
+  return Number((row.salesQuantity * row.sellingPrice).toFixed(2));
+}
+
 export function deriveHistoricalNozzleSales(rows: HistoricalSalesRowInput[]): HistoricalSalesRowInput[] {
   return rows.map((row, index) => {
     const next = rows[index + 1];

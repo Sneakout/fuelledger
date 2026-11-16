@@ -2,12 +2,21 @@ import { Prisma, type HistoricalSalesImport } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { calculateHistoricalNozzleSales, calculateHistoricalStockGainLoss, calculateHistoricalTankSales, deriveHistoricalSalesMetrics, type HistoricalSalesCorrectionInput, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { AppError } from '../../lib/errors.js';
+import { effectivePriceAt } from '../../lib/effective-price.js';
 import { indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
 import { calibrateDip, MASTER_20KL_UG_CALIBRATION } from '@fuelledger/shared';
 
 const n = (value: unknown) => Number(value ?? 0);
 const tolerance = 2;
+
+type HistoricalPriceSource = { sellingPrice: Prisma.Decimal; sellingPriceHistory: Array<{ price: Prisma.Decimal; effectiveFrom: Date }> };
+
+export function historicalRowSellingPrice(row: HistoricalSalesRowInput, product: HistoricalPriceSource) {
+  const recordedPrice = n(row.sellingPrice);
+  if (recordedPrice > 0) return recordedPrice;
+  return n(effectivePriceAt(product.sellingPrice, product.sellingPriceHistory, indiaDayRange(row.date).start));
+}
 
 export type HistoricalImportIssue = {
   date: string;

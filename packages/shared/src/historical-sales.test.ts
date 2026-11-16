@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateHistoricalStockGainLoss, calculateHistoricalTankSales, calculateHistoricalTotalStock, deriveHistoricalSalesMetrics, deriveHistoricalTotalStock, type HistoricalSalesRowInput } from './index.js';
+import { calculateHistoricalSalesValue, calculateHistoricalStockGainLoss, calculateHistoricalTankSales, calculateHistoricalTotalStock, deriveHistoricalSalesMetrics, deriveHistoricalTotalStock, type HistoricalSalesRowInput } from './index.js';
 
 const row = (overrides: Partial<HistoricalSalesRowInput> = {}): HistoricalSalesRowInput => ({
   date: '2026-11-01',
@@ -24,6 +24,10 @@ describe('historical total stock', () => {
 });
 
 describe('historical derived sales metrics', () => {
+  it('calculates daily sales value from derived litres and the recorded RSP', () => {
+    expect(calculateHistoricalSalesValue(row({ salesQuantity: 1_234.567, sellingPrice: 94.25 }))).toBe(116_357.94);
+  });
+
   it('uses the following morning readings and returns testing fuel to the tank', () => {
     const nozzle2 = 'cm1234567890123456789014';
     const first = row({

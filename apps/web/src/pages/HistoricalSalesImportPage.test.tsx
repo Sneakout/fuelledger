@@ -100,11 +100,15 @@ describe('HistoricalSalesImportPage', () => {
     fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!, { target: { files: [new File(['scan'], 'DSR.pdf', { type: 'application/pdf' })] } });
     await screen.findByText(/Draft ready/);
     expect(screen.getByLabelText('Nozzle sales 2026-11-01')).toHaveValue(100);
+    expect(screen.getByLabelText('Sales value 2026-11-01')).toHaveValue(9400);
     expect(screen.getByLabelText('Cumulative sales 2026-11-01')).toHaveValue(100);
     expect(screen.getByLabelText('Stock gain or loss 2026-11-01')).toHaveValue(-800);
     expect(screen.queryByText('Sales litres could not be read confidently.')).not.toBeInTheDocument();
     fireEvent.change(screen.getByDisplayValue('15125'), { target: { value: '15150' } });
     expect(screen.getByLabelText('Nozzle sales 2026-11-01')).toHaveValue(125);
+    expect(screen.getByLabelText('Sales value 2026-11-01')).toHaveValue(11750);
+    fireEvent.change(screen.getAllByDisplayValue('94')[0]!, { target: { value: '95.5' } });
+    expect(screen.getByLabelText('Sales value 2026-11-01')).toHaveValue(11937.5);
     expect(screen.getByLabelText('Cumulative sales 2026-11-01')).toHaveValue(125);
     expect(screen.getByLabelText('Stock gain or loss 2026-11-01')).toHaveValue(-775);
     fireEvent.change(screen.getByLabelText('HSD-1 stock 2026-11-02'), { target: { value: '6950' } });
