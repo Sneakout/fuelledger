@@ -5,10 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalSalesImportPage } from './HistoricalSalesImportPage';
 import { latestHistoricalDraft, saveHistoricalDraft } from '../lib/historical-draft-store';
 
-const { correctHistoricalSalesImport, createHistoricalSalesImport, extractHistoricalSales, historicalSalesImport, historicalSalesImports, validateHistoricalSales, validateHistoricalSalesCorrection } = vi.hoisted(() => ({ correctHistoricalSalesImport: vi.fn(), createHistoricalSalesImport: vi.fn(), extractHistoricalSales: vi.fn(), historicalSalesImport: vi.fn(), historicalSalesImports: vi.fn().mockResolvedValue({ imports: [] }), validateHistoricalSales: vi.fn(), validateHistoricalSalesCorrection: vi.fn() }));
+const { MockApiRequestError, correctHistoricalSalesImport, createHistoricalSalesImport, extractHistoricalSales, historicalSalesImport, historicalSalesImports, validateHistoricalSales, validateHistoricalSalesCorrection } = vi.hoisted(() => ({
+  MockApiRequestError: class extends Error {
+    constructor(message: string, public code: string, public requestId?: string, public details?: unknown) { super(message); }
+  },
+  correctHistoricalSalesImport: vi.fn(), createHistoricalSalesImport: vi.fn(), extractHistoricalSales: vi.fn(), historicalSalesImport: vi.fn(), historicalSalesImports: vi.fn().mockResolvedValue({ imports: [] }), validateHistoricalSales: vi.fn(), validateHistoricalSalesCorrection: vi.fn(),
+}));
 vi.mock('../components/StationProvider', () => ({ useStation: () => ({ stations: [{ id: 'station-1', name: 'Saleema Petroleum' }], selectedStationId: 'station-1', selectStation: vi.fn() }) }));
 vi.mock('../lib/api', () => ({
-  ApiRequestError: class extends Error {}, historicalSalesSourceUrl: vi.fn(),
+  ApiRequestError: MockApiRequestError, historicalSalesSourceUrl: vi.fn(),
   api: {
     historicalSalesSetup: vi.fn().mockResolvedValue({ products: [
       { product: { id: 'product-1', code: 'HSD', name: 'High Speed Diesel', sellingPrice: '94' }, tanks: [{ id: 'tank-1', code: 'HSD-1', nominalCapacity: '20000', workingCapacity: '19000', openingStock: '5000', tankType: 'UNDERGROUND' }], nozzles: [{ id: 'nozzle-1', code: 'HSD-1', dispenserCode: 'D-1', openingMeter: '1000' }] },
@@ -304,5 +309,29 @@ describe('HistoricalSalesImportPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Save corrections/ }));
     await waitFor(() => expect(correctHistoricalSalesImport).toHaveBeenCalledWith('import-1', expect.objectContaining({ reason: 'Corrected meter from physical DSR', expectedUpdatedAt: '2026-11-15T10:00:00.000Z', rows: expect.arrayContaining([expect.objectContaining({ salesQuantity: 115 })]) })));
     expect(await screen.findByText(/Corrections saved/)).toBeInTheDocument();
+  });
+
+  it('shows server correction errors on the affected row and highlights the exact field', async () => {
+    const rows = [
+      { date: '2026-11-01', tankReadings: [{ tankId: 'tank-1', openingStock: 8000 }], receiptQuantity: 0, totalStock: 8000, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 1000 }], testingQuantity: 0, salesQuantity: 100, cumulativeSales: 100, sellingPrice: 94 },
+      { date: '2026-11-02', tankReadings: [{ tankId: 'tank-1', openingStock: 7900 }], receiptQuantity: 0, totalStock: 7900, nozzleReadings: [{ nozzleId: 'nozzle-1', meterReading: 1100 }], testingQuantity: 0, salesQuantity: 0, cumulativeSales: 100, sellingPrice: 94 },
+    ];
+    const record = { id: 'import-invalid', stationId: 'station-1', productId: 'product-1', month: '2026-11', monthStart: '2026-10-31T18:30:00.000Z', sourceFileName: 'November DSR.pdf', cutoverApplied: false, createdAt: '2026-11-16T03:30:00.000Z', updatedAt: '2026-11-16T03:30:00.000Z', product: { name: 'High Speed Diesel', code: 'HSD' }, importedBy: { name: 'Owner' }, corrections: [], rows };
+    historicalSalesImports.mockResolvedValueOnce({ imports: [{ ...record, _count: { corrections: 0 } }] });
+    historicalSalesImport.mockResolvedValueOnce({ record });
+    correctHistoricalSalesImport.mockRejectedValueOnce(new MockApiRequestError('Correct the highlighted historical data before saving.', 'HISTORICAL_IMPORT_INVALID', 'request-1', [
+      { date: '2026-11-01', level: 'ERROR', field: 'sellingPrice', message: 'Enter a valid RSP for this date.' },
+    ]));
+
+    render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: /View \/ edit data/ }));
+    await screen.findByText(/Editing submitted register/);
+    fireEvent.change(screen.getByPlaceholderText('What was corrected, and why?'), { target: { value: 'Corrected price from DSR' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save corrections/ }));
+
+    expect(await screen.findByText('Enter a valid RSP for this date.')).toBeInTheDocument();
+    expect(screen.getByText(/1 field needs review/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('RSP 2026-11-01')).toHaveClass('server-needs-review'));
+    expect(screen.getByLabelText('RSP 2026-11-01').closest('tr')).toHaveClass('server-needs-review');
   });
 });

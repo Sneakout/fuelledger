@@ -8,6 +8,41 @@ import { deleteHistoricalDraft, deleteHistoricalDraftsForImport, draftFile, hist
 
 const isoDate = (month: string, day: number) => `${month}-${String(day).padStart(2, '0')}`;
 const reviewCellId = (cell: string) => `historical-review-${cell.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+const validationRowId = (date: string) => `historical-validation-row-${date}`;
+const validationFieldId = (date: string, field: string) => `historical-validation-${date}-${field.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+const isHistoricalImportIssue = (value: unknown): value is HistoricalImportIssue => {
+  if (!value || typeof value !== 'object') return false;
+  const issue = value as Record<string, unknown>;
+  return typeof issue.date === 'string'
+    && (issue.level === 'ERROR' || issue.level === 'WARNING')
+    && typeof issue.field === 'string'
+    && typeof issue.message === 'string';
+};
+const historicalIssuesFromError = (error: unknown) => error instanceof ApiRequestError && Array.isArray(error.details)
+  ? error.details.filter(isHistoricalImportIssue)
+  : [];
+const validationAriaPrefix: Record<string, string> = {
+  totalStock: 'Total stock ',
+  sellingPrice: 'RSP ',
+  salesQuantity: 'Nozzle sales ',
+  cumulativeSales: 'Cumulative sales ',
+  stockGainLoss: 'Stock gain or loss ',
+};
+function validationTargets(date: string, field: string) {
+  const inputs = [...document.querySelectorAll<HTMLInputElement>('.historical-grid input')];
+  const exactPrefix = validationAriaPrefix[field];
+  if (exactPrefix) return inputs.filter(input => input.getAttribute('aria-label') === `${exactPrefix}${date}`);
+  if (field === 'tankReadings') return inputs.filter(input => (input.getAttribute('aria-label')?.endsWith(` stock ${date}`) || input.getAttribute('aria-label')?.endsWith(` dip ${date}`)));
+  const dateInput = inputs.find(input => input.type === 'date' && input.value === date);
+  if (field === 'nozzleReadings' && dateInput) {
+    const row = dateInput.closest('tr');
+    const headers = [...document.querySelectorAll<HTMLTableCellElement>('.historical-grid thead th')];
+    return headers.flatMap((header, index) => header.textContent?.includes('Meter')
+      ? [...(row?.cells[index]?.querySelectorAll<HTMLInputElement>('input') ?? [])]
+      : []);
+  }
+  return dateInput ? [dateInput] : [];
+}
 const daysInMonth = (month: string) => { const [year, value] = month.split('-').map(Number); return new Date(Date.UTC(year!, value!, 0)).getUTCDate(); };
 const dsrMonths = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const dsrYears = Array.from({ length: 80 }, (_, index) => new Date().getFullYear() + 1 - index);
@@ -156,7 +191,7 @@ export function HistoricalSalesImportPage() {
   const selected = useMemo(() => setup?.products.find(item => item.product.id === productId), [setup, productId]);
   const pendingCalibrationReviews = useMemo(() => rows.flatMap(row => row.tankReadings.filter(reading => reading.calibration && !reading.calibration.reviewConfirmed).map(reading => ({ date: row.date, reading, tank: selected?.tanks.find(tank => tank.id === reading.tankId) }))), [rows, selected]);
   const reviewMessagesFor = (row: HistoricalSalesRowInput) => {
-    const messages: Array<{ level: string; message: string; targetId?: string }> = issues.filter(issue => issue.date === row.date).map(issue => ({ level: issue.level, message: issue.message }));
+    const messages: Array<{ level: string; message: string; targetId?: string }> = issues.filter(issue => issue.date === row.date).map(issue => ({ level: issue.level, message: issue.message, targetId: validationFieldId(issue.date, issue.field) }));
     const unreadable = uncertainCells.filter(cell => cell.startsWith(`${row.date}:`));
     unreadable.forEach(cell => {
       const parts = cell.split(':');
@@ -226,7 +261,38 @@ export function HistoricalSalesImportPage() {
     const frame = window.requestAnimationFrame(() => submissionConfirmationRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'center' }));
     return () => window.cancelAnimationFrame(frame);
   }, [submittedImport]);
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelectorAll('.historical-grid tr.server-needs-review').forEach(row => row.classList.remove('server-needs-review'));
+      document.querySelectorAll('.historical-grid input.server-needs-review').forEach(input => input.classList.remove('server-needs-review'));
+      for (const issue of issues.filter(item => item.level === 'ERROR')) {
+        const targets = validationTargets(issue.date, issue.field);
+        const dateInput = [...document.querySelectorAll<HTMLInputElement>('.historical-grid input[type="date"]')].find(input => input.value === issue.date);
+        dateInput?.closest('tr')?.classList.add('server-needs-review');
+        targets.forEach(target => target.classList.add('server-needs-review'));
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [issues, rows]);
   const changeRow = (index: number, change: (row: HistoricalSalesRowInput) => void) => setRows(previous => calculateDraftRows(previous.map((row, rowIndex) => { if (rowIndex !== index) return row; const next = structuredClone(row); change(next); return next; }), uncertainCells).rows);
+  function revealValidationIssues(nextIssues: HistoricalImportIssue[]) {
+    if (!nextIssues.length) return false;
+    setIssues(nextIssues);
+    const errors = nextIssues.filter(issue => issue.level === 'ERROR');
+    const count = errors.length || nextIssues.length;
+    setError(`${count} field${count === 1 ? ' needs' : 's need'} review. The affected values are highlighted below.`);
+    const first = errors[0] ?? nextIssues[0]!;
+    window.requestAnimationFrame(() => {
+      const dateInput = [...document.querySelectorAll<HTMLInputElement>('.historical-grid input[type="date"]')].find(input => input.value === first.date);
+      const target = validationTargets(first.date, first.field)[0] ?? dateInput?.closest('tr') ?? document.getElementById(validationFieldId(first.date, first.field)) ?? document.getElementById(validationRowId(first.date));
+      target?.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+      if (target instanceof HTMLInputElement) target.focus({ preventScroll: true });
+    });
+    return true;
+  }
+  function revealRequestIssues(caught: unknown) {
+    return revealValidationIssues(historicalIssuesFromError(caught));
+  }
   const markReviewed = (cell: string) => {
     const nextUncertainCells = uncertainCells.filter(item => item !== cell);
     setUncertainCells(nextUncertainCells);
@@ -406,8 +472,8 @@ export function HistoricalSalesImportPage() {
       setReaderStatus('Automatic reading stopped. The attached source remains available for manual entry.');
     } finally { setBusy(false); }
   }
-  async function validate() { setBusy(true); setError(''); try { const result = editingImport ? await api.validateHistoricalSalesCorrection(editingImport.id, correctionPayload()) : await api.validateHistoricalSales(await payload()); setIssues(result.issues); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Unable to validate this register.'); } finally { setBusy(false); } }
-  async function save() { if (layoutIssues.length) { setError('Correct the fuel-station equipment layout or selected period and read the DSR again before confirming.'); return; } if (periodNeedsConfirmation && !periodConfirmed) { setError('Confirm the DSR month and year before importing.'); return; } if (uncertainCells.length) { setError(`Review the ${uncertainCells.length} highlighted unreadable value${uncertainCells.length === 1 ? '' : 's'} before confirming.`); return; } if (pendingCalibrationReviews.length) { setError('Verify every highlighted dip/volume difference before importing.'); return; } setBusy(true); setError(''); try { if (editingImport) { const result = await api.correctHistoricalSalesImport(editingImport.id, correctionPayload()); setEditingImport(result.record); setRows(result.record.rows); setIssues(result.issues); setCorrectionReason(''); setImports(previous => previous.map(item => item.id === result.record.id ? { ...item, updatedAt: result.record.updatedAt, _count: { corrections: result.record.corrections.length } } : item)); setDraftStatus('Corrections saved. All calculated fields were refreshed; live tank and nozzle balances were not changed.'); } else { const result = await api.createHistoricalSalesImport(await payload()); setImports(previous => [result.record, ...previous.filter(item => item.id !== result.record.id)]); await deleteHistoricalDraftsForImport(stationId, productId, result.record.month).catch(() => undefined); if (fileInputRef.current) fileInputRef.current.value = ''; setSubmittedImport(result.record); setRows([]); setIssues([]); setExtractionWarnings([]); setLayoutIssues([]); setUncertainCells([]); setPeriodNeedsConfirmation(false); setPeriodConfirmed(false); setReaderStatus(''); setDraftId(''); setSourceFingerprint(''); setDraftStatus(''); setFile(null); setApplyCutover(false); } } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : caught instanceof Error ? caught.message : editingImport ? 'Unable to save these corrections.' : 'Unable to import this register.'); } finally { setBusy(false); } }
+  async function validate() { setBusy(true); setError(''); try { const result = editingImport ? await api.validateHistoricalSalesCorrection(editingImport.id, correctionPayload()) : await api.validateHistoricalSales(await payload()); setIssues(result.issues); if (result.issues.length) revealValidationIssues(result.issues); } catch (caught) { if (!revealRequestIssues(caught)) setError(caught instanceof Error ? caught.message : 'Unable to validate this register.'); } finally { setBusy(false); } }
+  async function save() { if (layoutIssues.length) { setError('Correct the fuel-station equipment layout or selected period and read the DSR again before confirming.'); return; } if (periodNeedsConfirmation && !periodConfirmed) { setError('Confirm the DSR month and year before importing.'); return; } if (uncertainCells.length) { setError(`Review the ${uncertainCells.length} highlighted unreadable value${uncertainCells.length === 1 ? '' : 's'} before confirming.`); return; } if (pendingCalibrationReviews.length) { setError('Verify every highlighted dip/volume difference before importing.'); return; } setBusy(true); setError(''); try { if (editingImport) { const result = await api.correctHistoricalSalesImport(editingImport.id, correctionPayload()); setEditingImport(result.record); setRows(result.record.rows); setIssues(result.issues); setCorrectionReason(''); setImports(previous => previous.map(item => item.id === result.record.id ? { ...item, updatedAt: result.record.updatedAt, _count: { corrections: result.record.corrections.length } } : item)); setDraftStatus('Corrections saved. All calculated fields were refreshed; live tank and nozzle balances were not changed.'); } else { const result = await api.createHistoricalSalesImport(await payload()); setImports(previous => [result.record, ...previous.filter(item => item.id !== result.record.id)]); await deleteHistoricalDraftsForImport(stationId, productId, result.record.month).catch(() => undefined); if (fileInputRef.current) fileInputRef.current.value = ''; setSubmittedImport(result.record); setRows([]); setIssues([]); setExtractionWarnings([]); setLayoutIssues([]); setUncertainCells([]); setPeriodNeedsConfirmation(false); setPeriodConfirmed(false); setReaderStatus(''); setDraftId(''); setSourceFingerprint(''); setDraftStatus(''); setFile(null); setApplyCutover(false); } } catch (caught) { if (!revealRequestIssues(caught)) setError(caught instanceof ApiRequestError ? caught.message : caught instanceof Error ? caught.message : editingImport ? 'Unable to save these corrections.' : 'Unable to import this register.'); } finally { setBusy(false); } }
   return <main className="page historical-import-page">
     <Link className="back-link" to="/stations"><ArrowLeft/> Back to petrol pumps</Link>
     <div className="page-heading"><div><span className="eyebrow">Customer onboarding</span><h1>Import the monthly sales register</h1><p>Record MS and HSD separately. FuelNerve checks the tank, receipt and nozzle chain before adding historical trends.</p></div></div>

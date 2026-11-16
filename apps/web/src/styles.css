@@ -194,6 +194,14 @@
   color: #7c390c;
   font-weight: 800;
 }
+.historical-grid tr.server-needs-review>td{background:#fffaf0}
+.historical-grid input.server-needs-review{
+  border:3px solid #c84932;
+  background:#fff0ec;
+  box-shadow:0 0 0 4px rgba(200,73,50,.18);
+  color:#8f3023;
+  font-weight:800;
+}
 .historical-grid .historical-derived-cell input{background:#edf8f3;color:#145d49;font-weight:750;cursor:default}
 .historical-grid input.needs-review::placeholder { color: #a34713; opacity: 1; font-weight: 800; }
 .historical-grid td:has(>input.needs-review) { background: #fff8e8; }
