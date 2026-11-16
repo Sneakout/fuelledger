@@ -1,9 +1,14 @@
-import { ArrowRight, ArrowUpRight, BadgeCheck, BanknoteArrowDown, Bot, Boxes, Check, ChevronDown, CircleDot, CircleHelp, Gauge, Layers3, MessageSquareText, Phone, ReceiptText, ShieldCheck, Sparkles, TrendingUp, TriangleAlert, UsersRound } from "lucide-react";
+import { Activity, ArrowRight, ArrowUpRight, BadgeCheck, BanknoteArrowDown, Bot, Boxes, CalendarDays, Check, ChevronDown, CircleDot, CircleHelp, Clock3, Gauge, Layers3, MessageSquareText, Phone, ReceiptText, ShieldCheck, Sparkles, TrendingUp, TriangleAlert, UsersRound } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "../components/AuthProvider";
-import { api, type SubscriptionStatus } from "../lib/api";
+import { useStation } from "../components/StationProvider";
+import { api, type NerveAgentsResponse, type SubscriptionStatus } from "../lib/api";
 
 const money = (value: number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(value);
+const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "Not scheduled";
+const billingLabels: Record<string, string> = { MONTHLY: "Monthly", YEARLY: "Yearly", LIFETIME: "Lifetime", FOUNDING_YEARLY: "Founding yearly" };
+const billingLabel = (value?: SubscriptionStatus["subscriptionBillingPeriod"]) => billingLabels[value || ""] || "Managed plan";
 const groups = [
   { name: "Run your fuel station", rows: ["Shifts, nozzle readings & attendant assignments", "Tank stock, deliveries, dips & testing", "Cash, UPI & card reconciliation", "Lubricant inventory & sales", "Non-fuel revenue (NFR) · retail products & services"] },
   { name: "Keep your accounts clear", rows: ["Customers, credit & fleet accounts", "Supplier invoices & payments", "Expenses, staff salaries & profit reports", "Stock & collection difference visibility", "Staff permissions, audit history & data exports"] },
@@ -27,12 +32,15 @@ const faqs = [
 
 export function SubscriptionPage() {
   const { user } = useAuth();
+  const { selectedStationId, selectedStation } = useStation();
   const [status, setStatus] = useState<SubscriptionStatus | null>(null);
+  const [agentStatus, setAgentStatus] = useState<NerveAgentsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [annual, setAnnual] = useState(true);
   const [coreBilling, setCoreBilling] = useState<"monthly" | "yearly" | "lifetime">("yearly");
+  const [comparisonOpen, setComparisonOpen] = useState(false);
   useEffect(() => {
     if (user?.role !== "OWNER") return;
     let active = true;
@@ -42,32 +50,41 @@ export function SubscriptionPage() {
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [user?.id, user?.role, attempt]);
+  const intelligenceActive = Boolean(status?.intelligenceEnabledAt && (!status.intelligenceExpiresAt || new Date(status.intelligenceExpiresAt) > new Date()));
+  useEffect(() => {
+    if (!intelligenceActive || !selectedStationId) { setAgentStatus(null); return; }
+    let active = true;
+    void api.nerveAgents(selectedStationId).then((value) => { if (active) setAgentStatus(value); }).catch(() => { if (active) setAgentStatus(null); });
+    return () => { active = false; };
+  }, [intelligenceActive, selectedStationId]);
   if (user?.role !== "OWNER") return <main className="page"><div className="form-error">Only the owner can manage the subscription.</div></main>;
   const lifetime = Boolean(status?.lifetimeAccessPaidAt);
-  const intelligenceActive = Boolean(status?.intelligenceEnabledAt && (!status.intelligenceExpiresAt || new Date(status.intelligenceExpiresAt) > new Date()));
   const stateLabel = loading ? "Checking your plan…" : error ? "Plan status unavailable" : intelligenceActive ? "Core + FuelNerve Intelligence · Active" : lifetime ? "Core · Lifetime active" : status?.setupFeePaidAt ? "Core · Setup paid" : "Core · Awaiting activation";
   const paidAt = status?.lifetimeAccessPaidAt || status?.setupFeePaidAt;
   return <main className="page subscription-page">
-    <section className="sp-hero">
+    <section className={`sp-hero${intelligenceActive ? " sp-hero-active" : ""}`}>
       <div className="sp-orbit" aria-hidden="true"><Sparkles /></div>
-      <span className="sp-kicker">YOUR SUBSCRIPTION</span>
-      <h1>Your fuel station.<br /><span>Six agents watching the details.</span></h1>
-      <p>FuelNerve Intelligence turns trusted station records into daily reviews, early warnings and clear actions for the owner.</p>
-      <a href="#plan-comparison" className="sp-hero-link">Compare your plans <ArrowRight size={17} /></a>
+      <span className="sp-kicker">{intelligenceActive ? "SUBSCRIPTION ACTIVE" : "YOUR SUBSCRIPTION"}</span>
+      <h1>{intelligenceActive ? <>Core connected.<br /><span>FuelNerve Intelligence active.</span></> : <>Your fuel station.<br /><span>Six agents watching the details.</span></>}</h1>
+      <p>{intelligenceActive ? `${selectedStation?.name || "Your fuel station"} has full Core access plus owner intelligence, evidence-backed alerts and approval workflows.` : "FuelNerve Intelligence turns trusted station records into daily reviews, early warnings and clear actions for the owner."}</p>
+      {intelligenceActive ? <Link to="/insights" className="sp-hero-link">Open Nerve Intelligence <ArrowRight size={17} /></Link> : <a href="#plan-comparison" className="sp-hero-link">Compare your plans <ArrowRight size={17} /></a>}
     </section>
 
     <section className="sp-account" aria-label="Current subscription" aria-live="polite">
       <span className="sp-icon"><ShieldCheck /></span>
       <div><small>YOUR CURRENT ACCESS</small><h2>{stateLabel}</h2>
-        <p>{loading ? "Retrieving your subscription details." : error ? "We couldn’t load your access details. Please try again." : paidAt ? `Payment confirmed ${new Date(paidAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}.` : "Contact our team to set up your fuel station."}</p>
+        <p>{loading ? "Retrieving your subscription details." : error ? "We couldn’t load your access details. Please try again." : intelligenceActive ? "Core operations and FuelNerve Intelligence are available for this account." : paidAt ? `Payment confirmed ${dateLabel(paidAt)}.` : "Contact our team to set up your fuel station."}</p>
       </div>
       {error ? <button type="button" className="sp-button sp-secondary" onClick={() => setAttempt((value) => value + 1)}>Retry</button> : <a className="sp-button sp-secondary" href="tel:+918977506454"><Phone size={16} /> Plan support</a>}
     </section>
 
+    {intelligenceActive && status && <ActiveSubscriptionControl status={status} agentStatus={agentStatus} stationName={selectedStation?.name || "Your fuel station"} />}
+
     <section id="plan-comparison" className="sp-comparison">
-      <header className="sp-section-heading"><div><span className="sp-kicker">ONE FOUNDATION. TWO WAYS FORWARD.</span><h2>Choose your level of insight</h2><p>All prices are per fuel station, excluding applicable GST.</p></div>
-        <div className="sp-billing"><span>Intelligence billing</span><div role="group" aria-label="FuelNerve Intelligence billing period"><button type="button" aria-pressed={!annual} onClick={() => setAnnual(false)}>Monthly</button><button type="button" aria-pressed={annual} onClick={() => setAnnual(true)}>Yearly</button></div></div>
+      <header className="sp-section-heading"><div><span className="sp-kicker">{intelligenceActive ? "PLAN OPTIONS" : "ONE FOUNDATION. TWO WAYS FORWARD."}</span><h2>{intelligenceActive ? "Your plan and alternatives" : "Choose your level of insight"}</h2><p>{intelligenceActive ? "Your active plan remains unchanged unless you contact FuelNerve support." : "All prices are per fuel station, excluding applicable GST."}</p></div>
+        {intelligenceActive ? <button type="button" className="sp-button sp-secondary" aria-expanded={comparisonOpen} onClick={() => setComparisonOpen((value) => !value)}>{comparisonOpen ? "Hide comparison" : "Compare plans"} <ChevronDown className={comparisonOpen ? "sp-rotate" : ""} size={16} /></button> : <div className="sp-billing"><span>Intelligence billing</span><div role="group" aria-label="FuelNerve Intelligence billing period"><button type="button" aria-pressed={!annual} onClick={() => setAnnual(false)}>Monthly</button><button type="button" aria-pressed={annual} onClick={() => setAnnual(true)}>Yearly</button></div></div>}
       </header>
+      {(!intelligenceActive || comparisonOpen) && <>
       <div className="sp-table-scroll" role="region" aria-label="Plan comparison, scroll horizontally on smaller screens" tabIndex={0}>
         <table className="sp-table">
           <caption className="sp-sr-only">Core and Core plus FuelNerve Intelligence features and prices. FuelNerve Intelligence features are early access.</caption>
@@ -79,9 +96,10 @@ export function SubscriptionPage() {
         </table>
       </div>
       <div className="sp-table-note"><ShieldCheck size={18} /><span>Accurate stock, essential difference checks and account permissions belong in every plan.</span></div>
+      </>}
     </section>
 
-    <section className="sp-intelligence-story" aria-labelledby="intelligence-story-title">
+    {!intelligenceActive && <section className="sp-intelligence-story" aria-labelledby="intelligence-story-title">
       <div className="sp-intelligence-story-copy">
         <span className="sp-kicker"><Sparkles size={14} /> OWNER INTELLIGENCE</span>
         <h2 id="intelligence-story-title">Know the story<br /><span>behind the numbers.</span></h2>
@@ -101,20 +119,47 @@ export function SubscriptionPage() {
         <div className="sp-brief-signal"><span><CircleDot /></span><p><b>MS Tank 1 is trending low.</b> Plan the next replenishment before tomorrow evening.</p></div>
         <footer><span>3 signals reviewed</span><b>Open daily brief <ArrowRight /></b></footer>
       </article>
-    </section>
+    </section>}
 
     <section className="sp-agent-section">
-      <header><span className="sp-kicker"><Bot size={15} /> YOUR AGENT TEAM</span><h2>Always reviewing. Ready when you ask.</h2><p>Each agent has one clear job and works from the records already inside your fuel station account.</p><span>Agent capabilities are in phased early access.</span></header>
-      <div className="sp-agent-grid">{agents.map(({ icon: Icon, name, copy }, index) => <article key={name}><div className="sp-agent-top"><span className="sp-agent-icon"><Icon /></span><em>0{index + 1}</em></div><h3>{name}<small> Agent</small></h3><p>{copy}</p><div className="sp-agent-state"><i /> Early access</div></article>)}</div>
+      <header><span className="sp-kicker"><Bot size={15} /> {intelligenceActive ? "YOUR ACTIVE INTELLIGENCE" : "YOUR AGENT TEAM"}</span><h2>{intelligenceActive ? "Specialists focused on your fuel station." : "Always reviewing. Ready when you ask."}</h2><p>Each capability has one clear job and works from the records already inside your fuel station account.</p><span>{intelligenceActive ? agentStatus ? `${agentStatus.summary.agents} specialist agents reported in the latest review.` : "Live agent status is available in Nerve Intelligence." : "Agent capabilities are in phased early access."}</span></header>
+      <div className="sp-agent-grid">{agents.map(({ icon: Icon, name, copy }, index) => <article key={name}><div className="sp-agent-top"><span className="sp-agent-icon"><Icon /></span><em>0{index + 1}</em></div><h3>{name}<small> Agent</small></h3><p>{copy}</p><div className="sp-agent-state"><i /> {intelligenceActive ? "Active access" : "Early access"}</div></article>)}</div>
       <div className="sp-agent-flow"><span><BanknoteArrowDown /> Trusted station records</span><ArrowRight /><span><Bot /> Specialist agents review</span><ArrowRight /><span><BadgeCheck /> Owner gets clear actions</span></div>
+      {intelligenceActive && <Link className="sp-agent-action" to="/insights">Open Nerve Intelligence <ArrowRight size={16} /></Link>}
     </section>
 
-    <section className="sp-preview-section">
+    {!intelligenceActive && <section className="sp-preview-section">
       <div className="sp-preview-copy"><span className="sp-kicker"><Sparkles size={15} /> FUELNERVE INTELLIGENCE</span><h2>Ask the business.<br />See the evidence.</h2><p>Ask a plain-language question, review the explanation and open the supporting shift, invoice, tank or customer records.</p><span className="sp-preview-tag">Illustrative preview · Early access</span></div>
       <article className="sp-preview-card"><header><span className="sp-icon"><MessageSquareText /></span><div><b>Owner Assistant</b><small>A clearer view of your fuel station</small></div></header><div className="sp-question">Why is today’s collection lower than sales?</div><p>Some sales may be on customer credit or fleet accounts. Review that split alongside cash, UPI and card collections before treating the difference as a shortage.</p><div className="sp-source-tags"><span>Shift collections</span><span>Customer balances</span></div><small className="sp-example-note">Example explanation. No live account data is shown here.</small></article>
-    </section>
+    </section>}
 
-    <section className="sp-founding"><Sparkles /><div><small>FOUNDING FUEL STATION OFFER</small><h3>{money(11999)} for your first year of Core + FuelNerve Intelligence</h3><p>For the first 50 fuel stations, subject to availability. Renews at {money(14999)}/year. GST additional.</p></div><a href="tel:+918977506454">Check availability <ArrowRight size={17} /></a></section>
+    {!intelligenceActive && <section className="sp-founding"><Sparkles /><div><small>FOUNDING FUEL STATION OFFER</small><h3>{money(11999)} for your first year of Core + FuelNerve Intelligence</h3><p>For the first 50 fuel stations, subject to availability. Renews at {money(14999)}/year. GST additional.</p></div><a href="tel:+918977506454">Check availability <ArrowRight size={17} /></a></section>}
     <section className="sp-faq"><div><span className="sp-kicker">THE DETAILS, MADE SIMPLE</span><h2>Good to know</h2><p>Clear terms before you choose.</p><a href="tel:+918977506454"><CircleHelp size={17} /> Talk to us · 89775 06454</a></div><div>{faqs.map(([question, answer]) => <details key={question}><summary>{question}<ChevronDown size={17} /></summary><p>{answer}</p></details>)}</div></section>
   </main>;
+}
+
+function ActiveSubscriptionControl({ status, agentStatus, stationName }: { status: SubscriptionStatus; agentStatus: NerveAgentsResponse | null; stationName: string }) {
+  const price = status.subscriptionPricePaise ? money(status.subscriptionPricePaise / 100) : "Managed plan";
+  const accessEnd = status.subscriptionExpiresAt || status.intelligenceExpiresAt;
+  return <section className="sp-active-control" aria-labelledby="active-plan-title">
+    <header>
+      <div><span className="sp-kicker"><Activity size={14} /> LIVE SUBSCRIPTION</span><h2 id="active-plan-title">Your access at a glance</h2><p>{stationName} is connected and protected by Core + FuelNerve Intelligence.</p></div>
+      <span className="sp-live-pill"><i /> Active</span>
+    </header>
+    <div className="sp-active-grid">
+      <article><span><ShieldCheck /></span><small>ACTIVE PLAN</small><strong>Core + Intelligence</strong><p>Full station operations and owner intelligence.</p></article>
+      <article><span><CalendarDays /></span><small>BILLING</small><strong>{price}</strong><p>{billingLabel(status.subscriptionBillingPeriod)} access · GST as applicable</p></article>
+      <article><span><Clock3 /></span><small>ACTIVE SINCE</small><strong>{dateLabel(status.subscriptionActivatedAt || status.intelligenceEnabledAt)}</strong><p>{accessEnd ? `Access through ${dateLabel(accessEnd)}` : "No scheduled access end"}</p></article>
+    </div>
+    <div className="sp-intelligence-value">
+      <div><span className="sp-kicker"><Sparkles size={14} /> CURRENT INTELLIGENCE STATUS</span><h3>{agentStatus ? "Your latest agent review is ready." : "Your intelligence workspace is ready."}</h3><p>{agentStatus ? "These counts come from the latest verified FuelNerve review for this station." : "Open Nerve Intelligence to review evidence-backed signals, alerts and approvals."}</p></div>
+      <dl>
+        <div><dt>Agents reporting</dt><dd>{agentStatus?.summary.agents ?? "—"}</dd></div>
+        <div><dt>Findings</dt><dd>{agentStatus?.summary.findings ?? "—"}</dd></div>
+        <div><dt>Urgent</dt><dd>{agentStatus?.summary.urgent ?? "—"}</dd></div>
+        <div><dt>Evidence</dt><dd>{agentStatus?.safety.evidenceVerified ? "Verified" : "Open to review"}</dd></div>
+      </dl>
+    </div>
+    <div className="sp-active-actions"><Link className="sp-button sp-primary" to="/insights">Open Nerve Intelligence <ArrowRight size={16} /></Link><a className="sp-button sp-secondary" href="tel:+918977506454"><Phone size={16} /> Subscription support</a></div>
+  </section>;
 }
