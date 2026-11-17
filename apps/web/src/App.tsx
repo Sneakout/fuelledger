@@ -106,6 +106,8 @@ const StationsPage = lazy(() =>
   })),
 );
 
+const AccountPage = lazy(() => import("./pages/AccountPage").then(module => ({ default: module.AccountPage })));
+
 function LoadingScreen({ message = "Loading…" }: { message?: string }) {
   return (
     <div className="loading">
@@ -145,6 +147,7 @@ export default function App() {
           <Route path="accounting" element={<AccountingPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="reports/downloads" element={<DownloadReportsPage />} />
+          <Route path="account" element={<AccountPage />} />
           <Route path="staff" element={<StaffPage />} />
           <Route path="help" element={<HelpPage />} />
           <Route path="notifications" element={<NotificationsPage />} />

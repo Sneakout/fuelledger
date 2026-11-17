@@ -9,7 +9,7 @@ import { OfflineSyncStatus } from './OfflineSyncStatus';
 import { OwnerApprovalReminder, usePendingApprovals } from './OwnerApprovalReminder';
 import './app-shell.css';
 
-type Access = 'intelligence' | 'owner' | 'liveOwner' | 'admin';
+type Access = 'intelligence' | 'owner' | 'liveOwner' | 'liveAccount' | 'admin';
 type Destination = { label: string; to: string; access?: Access };
 type Section = { label: string; icon: typeof Fuel; links: Destination[]; access?: Access; mobile?: boolean };
 
@@ -33,7 +33,7 @@ const sections: Section[] = [
   { label: 'Settings', icon: Settings, links: [
     { label: 'Fuel stations & equipment', to: '/stations' }, { label: 'Staff & access', to: '/staff', access: 'owner' },
     { label: 'WhatsApp alerts', to: '/notifications', access: 'liveOwner' }, { label: 'Subscription', to: '/subscription', access: 'owner' },
-    { label: 'Help', to: '/help' }, { label: 'Growth Desk', to: '/demo-leads', access: 'admin' },
+    { label: 'My account', to: '/account', access: 'liveAccount' }, { label: 'Help', to: '/help' }, { label: 'Growth Desk', to: '/demo-leads', access: 'admin' },
   ] },
 ];
 
@@ -82,7 +82,7 @@ export function AppShell() {
   const liveOwner = owner && !user?.demoExpiresAt;
   const intelligence = useIntelligenceAccess(liveOwner ? user?.id : undefined);
   const pendingApprovals = usePendingApprovals(liveOwner ? user?.id : undefined);
-  const access: Record<Access, boolean> = { owner, liveOwner, intelligence, admin: Boolean(user?.isPlatformAdmin) };
+  const access: Record<Access, boolean> = { owner, liveOwner, liveAccount: Boolean(user && !user.demoExpiresAt), intelligence, admin: Boolean(user?.isPlatformAdmin) };
   const visible = sections.filter(section => !section.access || access[section.access]);
   const current = visible.find(section => section.links.some(link => contains(pathname, link.to))
     || (section.access === 'intelligence' && pathname === '/intelligence-agents'));
@@ -156,7 +156,7 @@ export function AppShell() {
     {open && <button className="backdrop shell-backdrop" aria-hidden="true" tabIndex={-1} onClick={closeMenu} />}
     <div className="workspace">
       <header className="topbar">
-        <div className="shell-greeting"><small>{user?.demoExpiresAt ? 'Interactive product tour' : 'Welcome back'}</small><strong>{user?.name}</strong></div>
+        <div className="shell-greeting"><small>{user?.demoExpiresAt ? 'Interactive product tour' : 'Welcome back'}</small><strong>{access.liveAccount ? <Link className="shell-account-link" to="/account" aria-label="My account">{user?.name}</Link> : user?.name}</strong></div>
         <OfflineSyncStatus demo={Boolean(user?.demoExpiresAt)} />
         {liveOwner && <NavLink to="/approvals" className="shell-approvals">
           <ShieldCheck size={17} aria-hidden="true" /> Approvals

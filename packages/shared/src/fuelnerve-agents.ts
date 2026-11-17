@@ -30,7 +30,7 @@ export const intelligenceWhatsAppAgents = {
 } as const;
 
 export function allowsOwnerWhatsApp(type: string, recordType: string, intelligenceActive: boolean) {
-  if (type === "SYSTEM_TEST") return true;
+  if (type === "SYSTEM_TEST" || type === "OWNER_WELCOME") return true;
   if (!intelligenceActive) return type === "DAILY_SUMMARY" && recordType === "CORE_DAILY_SUMMARY";
   return type !== "CUSTOMER_CREDIT_REMINDER" && Object.hasOwn(intelligenceWhatsAppAgents, type);
 }

@@ -94,3 +94,6 @@
 .service-ticket-list > header p { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
 @media (max-width: 1100px) { .rollout-fields { grid-template-columns: 1fr; } }
 @media (max-width: 410px) { .rollout-category-grid { grid-template-columns: 1fr; } }
+
+.admin-whatsapp-action { flex-wrap: wrap; }
+.admin-whatsapp-preview { white-space: pre-wrap; overflow-wrap: anywhere; }

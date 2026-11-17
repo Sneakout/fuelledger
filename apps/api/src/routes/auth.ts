@@ -5,6 +5,7 @@ import {
   googleAuthSchema,
   loginSchema,
   signupSchema,
+  updateAccountProfileSchema,
 } from "@fuelledger/shared";
 import { AppError } from "../lib/errors.js";
 import {
@@ -15,6 +16,7 @@ import {
   signup,
   startDemo,
   revokeSession,
+  updateAccountProfile,
 } from "../modules/auth/service.js";
 import {
   assertNotThrottled,
@@ -108,19 +110,39 @@ authRouter.get("/me", async (req, res) => {
   if (!token) throw new AppError(401, "UNAUTHENTICATED", "Please sign in.");
   res.json({ user: await currentUser(token) });
 });
+authRouter.patch("/me", async (req, res) => {
+  const token = req.cookies[sessionCookie] as string | undefined;
+  if (!token) throw new AppError(401, "UNAUTHENTICATED", "Please sign in.");
+  const user = await currentUser(token);
+  if (user.demoExpiresAt || user.mustChangePassword) {
+    throw new AppError(403, "PROFILE_UNAVAILABLE", "Profile editing is unavailable for this session.");
+  }
+  const parsed = updateAccountProfileSchema.safeParse(req.body);
+  if (!parsed.success) throw new AppError(400, "VALIDATION_ERROR", "Enter a name between 2 and 100 characters.");
+  res.json({ user: await updateAccountProfile(user.id, parsed.data.name) });
+});
 authRouter.post("/change-password", async (req, res) => {
   const token = req.cookies[sessionCookie] as string | undefined;
   if (!token) throw new AppError(401, "UNAUTHENTICATED", "Please sign in.");
   const user = await currentUser(token);
+  if (user.demoExpiresAt) throw new AppError(403, "PASSWORD_UNAVAILABLE", "Password changes are unavailable in the demo.");
   const parsed = changePasswordSchema.safeParse(req.body);
   if (!parsed.success)
     throw new AppError(
       400,
       "VALIDATION_ERROR",
-      "Choose a stronger password.",
+      parsed.error.issues[0]?.message ?? "Check the passwords entered.",
       parsed.error.flatten(),
     );
-  await changePassword(user.id, parsed.data);
+  const key = throttleKey("change-password", user.id, req.ip ?? "unknown");
+  await assertNotThrottled(key);
+  try {
+    await changePassword(user.id, parsed.data);
+  } catch (error) {
+    if (error instanceof AppError && error.code === "CURRENT_PASSWORD_REQUIRED") await recordFailure(key);
+    throw error;
+  }
+  await clearThrottle(key);
   res.json({ ok: true });
 });
 authRouter.post("/logout", async (req, res) => {

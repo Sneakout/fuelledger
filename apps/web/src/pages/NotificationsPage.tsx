@@ -7,7 +7,7 @@ import { ApiRequestError, api, type NotificationBootstrap, type NotificationDeli
 const labels: Record<string, string> = {
   LOW_STOCK: 'Low stock', SHIFT_CLOSED_SUMMARY: 'Shift summary', PURCHASE_RECEIPT_SUMMARY: 'Receipt summary',
   DAILY_SUMMARY: 'Daily operating summary', OVERDUE_CUSTOMER: 'Customer credit report',
-  CUSTOMER_CREDIT_REMINDER: 'Customer payment reminder', SYSTEM_TEST: 'Test message',
+  CUSTOMER_CREDIT_REMINDER: 'Customer payment reminder', SYSTEM_TEST: 'Test message', OWNER_WELCOME: 'Owner welcome',
 };
 export const whatsappStatus = (status: NotificationDelivery['status']) => ({
   READ: 'Read', DELIVERED: 'Delivered', ACCEPTED: 'Accepted by WhatsApp', SENT: 'Accepted by WhatsApp',

@@ -244,6 +244,10 @@ export const api = {
       body: JSON.stringify(input),
     }),
   me: () => request<{ user: User }>("/auth/me"),
+  updateAccountProfile: (name: string) => request<{ user: User }>("/auth/me", {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  }),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
   changePassword: (input: ChangePasswordInput) =>
     request<{ ok: boolean }>("/auth/change-password", {
@@ -577,8 +581,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
-  testCustomerWhatsApp: (id: string) =>
-    request<{ delivery: { status: "QUEUED" | "FAILED" | "SKIPPED"; reason?: string } }>(`/platform/customers/${id}/notifications/test`, { method: "POST" }),
+  testCustomerWhatsApp: (id: string, welcome = false) =>
+    request<{ delivery: { status: "QUEUED" | "FAILED" | "SKIPPED"; reason?: string } }>(`/platform/customers/${id}/notifications/test`, { method: "POST", body: JSON.stringify({ welcome }) }),
   whatsappRollout: () => request<WhatsAppRolloutSnapshot>("/platform/whatsapp-rollout"),
   saveWhatsAppRollout: (policy: WhatsAppRolloutPolicy) =>
     request<{ policy: WhatsAppRolloutPolicy }>("/platform/whatsapp-rollout", { method: "PUT", body: JSON.stringify(policy) }),

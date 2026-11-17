@@ -6,7 +6,7 @@ import { prisma } from '../../lib/prisma.js';
 
 export const stages = ['SHADOW', 'INTERNAL', 'PILOT', 'EXPANDED'] as const;
 export const categories = ['LOW_STOCK', 'SHIFT_CLOSED_SUMMARY', 'PURCHASE_RECEIPT_SUMMARY',
-  'OVERDUE_CUSTOMER', 'DAILY_SUMMARY', 'CUSTOMER_CREDIT_REMINDER', 'SYSTEM_TEST'] as const;
+  'OVERDUE_CUSTOMER', 'DAILY_SUMMARY', 'CUSTOMER_CREDIT_REMINDER', 'SYSTEM_TEST', 'OWNER_WELCOME'] as const;
 const key = 'global';
 const auditDetails = (value: unknown) => value as Prisma.InputJsonValue;
 export const rolloutInput = z.object({

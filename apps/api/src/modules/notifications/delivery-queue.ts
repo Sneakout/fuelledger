@@ -9,9 +9,10 @@ import { readDailyOperatingFacts, readReceiptMessageFacts, readShiftMessageFacts
 import { coreDailyMessage, receiptMessage, shiftMessage, stockLevel, stockAlertMessage, isRecentReceipt } from './agent-messages.js';
 import { readCustomerReminder, recentCustomerReminder } from './customer-reminder-facts.js';
 import { checkLiveRollout, messageFingerprint, readRollout, rolloutHold } from './whatsapp-rollout.js';
-import { buildWhatsAppTemplate, operationalBodies } from './whatsapp-template.js';
+import { buildWhatsAppTemplate, operationalBodies, buildWelcomeMessage, welcomeTemplate } from './whatsapp-template.js';
 
 const templates: Partial<Record<OwnerNotificationType, string>> = {
+  OWNER_WELCOME: welcomeTemplate.name,
   LOW_STOCK: 'fuelnerve_stock_level_v1',
   SHIFT_CLOSED_SUMMARY: 'fuelnerve_shift_closed_v1',
   PURCHASE_RECEIPT_SUMMARY: 'fuelnerve_purchase_receipt_v1',
@@ -24,7 +25,7 @@ const maxAttempts = 4;
 const leaseMs = 120_000;
 const normalize = (number: string | null | undefined) => (number ?? '').replace(/^\+/, '');
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-type Guard = { sourceId?: string; quantity?: number; status: string; snapshot?: string; version?: string; actorId?: string; scheduledHour?: number };
+type Guard = { sourceId?: string; quantity?: number; status: string; snapshot?: string; version?: string; actorId?: string; scheduledHour?: number; welcome?: { ownerName: string; stationName: string } };
 
 export async function creditDeliverySnapshot(organizationId: string, asOf: Date) {
   const facts = (await readCustomerCreditFacts({ organizationId }, asOf)).filter(row => row.outstanding > 0);
@@ -35,15 +36,15 @@ export async function creditDeliverySnapshot(organizationId: string, asOf: Date)
 export async function queueOwnerWhatsApp(input: {
   organizationId: string; stationId?: string; customerId?: string; type: OwnerNotificationType; eventKey: string;
   destination?: string | null; optedIn: boolean; categoryEnabled?: boolean; recordType: string; message: string; guard: Guard;
-}) {
+}, db: Prisma.TransactionClient = prisma) {
   const destination = normalize(input.destination);
   const dedupeKey = `wa:${digest([input.organizationId, input.stationId ?? null, input.type, input.eventKey, destination])}`;
   const suppressionReason = input.categoryEnabled === false ? 'category_disabled'
     : !input.optedIn ? 'owner_not_opted_in' : !/^\d{8,15}$/.test(destination) ? 'recipient_missing_or_invalid' : null;
   // Legacy delivery rows used the source event key directly.
-  const legacy = await prisma.ownerNotificationDelivery.findFirst({ where: { dedupeKey: input.eventKey, organizationId: input.organizationId } });
+  const legacy = await db.ownerNotificationDelivery.findFirst({ where: { dedupeKey: input.eventKey, organizationId: input.organizationId } });
   if (legacy) return legacy;
-  await prisma.ownerNotificationDelivery.createMany({
+  await db.ownerNotificationDelivery.createMany({
     skipDuplicates: true,
     data: {
       organizationId: input.organizationId, stationId: input.stationId ?? null, customerId: input.customerId ?? null, type: input.type,
@@ -51,7 +52,7 @@ export async function queueOwnerWhatsApp(input: {
       guard: input.guard as Prisma.InputJsonValue, status: suppressionReason ? 'SUPPRESSED' : 'PENDING', suppressionReason,
     },
   });
-  return prisma.ownerNotificationDelivery.findUniqueOrThrow({ where: { dedupeKey } });
+  return db.ownerNotificationDelivery.findUniqueOrThrow({ where: { dedupeKey } });
 }
 
 async function relevance(job: OwnerNotificationDelivery, now: Date) {
@@ -82,13 +83,21 @@ async function approval(name: string, expectedBody: string) {
   url.search = new URLSearchParams({ name, fields: 'name,language,category,status,components' }).toString();
   const response = await fetch(url, { headers: auth(), signal: AbortSignal.timeout(6_000) });
   if (!response.ok) throw new Error('Template approval could not be verified.');
-  const result = await response.json() as { data?: Array<{ name: string; language: string; category: string; status: string; components?: Array<{ type: string; text?: string }> }> };
+  const result = await response.json() as { data?: Array<{ name: string; language: string; category: string; status: string; components?: Array<{ type: string; text?: string; buttons?: Array<{ type: string; text: string; url?: string }> }> }> };
   const matching = result.data?.filter(row => row.name === name && row.language === operationalLanguage && row.category === 'UTILITY') ?? [];
   const approved = matching.find(row => row.status === 'APPROVED');
   if (approved) {
     const components = approved.components ?? [];
     const actual = components[0]?.text?.replace(/\s+/g, ' ').trim();
-    return components.length === 1 && components[0]?.type === 'BODY' && actual === expectedBody ? 'approved' : 'changed';
+    const bodyMatches = components[0]?.type === 'BODY' && actual === expectedBody.replace(/\s+/g, ' ').trim();
+    if (name === welcomeTemplate.name) {
+      const buttons = components[1]?.buttons;
+      const button = buttons?.[0];
+      return bodyMatches && components.length === 2 && components[1]?.type === 'BUTTONS' && buttons?.length === 1
+        && button?.type === welcomeTemplate.button.type && button.text === welcomeTemplate.button.text && button.url === welcomeTemplate.button.url
+        ? 'approved' : 'changed';
+    }
+    return bodyMatches && components.length === 1 ? 'approved' : 'changed';
   }
   if (matching.some(row => ['PENDING', 'IN_APPEAL', 'PAUSED'].includes(row.status))) return 'waiting';
   return 'unavailable';
@@ -139,7 +148,9 @@ export async function drainWhatsAppQueue(now = new Date(), options: { previewOnl
       if (Date.now() - job.createdAt.getTime() >= 24 * 60 * 60_000) { await suppress('message_expired'); continue; }
       const template = test ? env.WHATSAPP_TEMPLATE_NAME : templates[job.type];
       if (!template) { await suppress('template_missing'); continue; }
-      const staticBody = operationalBodies[template];
+      const welcome = job.type === 'OWNER_WELCOME' ? (job.guard as Guard | null)?.welcome : undefined;
+      if (job.type === 'OWNER_WELCOME' && !welcome) { await suppress('source_changed'); continue; }
+      const staticBody = welcome ? welcomeTemplate.body : operationalBodies[template];
       const policy = await readRollout();
       const policyHold = rolloutHold(policy, job.organizationId, job.type)
         ?? (options.previewOnly ? 'preview_only' : !env.WHATSAPP_DELIVERY_ENABLED ? 'deployment_delivery_disabled' : null);
@@ -182,7 +193,7 @@ export async function drainWhatsAppQueue(now = new Date(), options: { previewOnl
           const currentMessage = facts && isRecentReceipt(facts.receivedAt, fresh) ? receiptMessage(facts, env.APP_URL) : null;
           if (!currentMessage) { await suppress('source_changed'); continue; }
           message = currentMessage;
-        } else {
+        } else if (!welcome) {
           if (!(await relevance(job, fresh))) { await suppress('source_changed'); continue; }
           if (job.type === 'DAILY_SUMMARY') {
             const date = indiaDate(job.createdAt);
@@ -193,10 +204,11 @@ export async function drainWhatsAppQueue(now = new Date(), options: { previewOnl
       }
       const body = message.replace(/\s+/g, ' ').trim();
       if (body.length > 900 && (!test || env.WHATSAPP_TEMPLATE_STYLE === 'ALERT_BODY')) { await suppress('message_too_long'); continue; }
-      const payloadTemplate = buildWhatsAppTemplate(template, test ? env.WHATSAPP_TEMPLATE_LANGUAGE : operationalLanguage,
+      const customizedWelcome = welcome && buildWelcomeMessage(welcome.ownerName, welcome.stationName);
+      const payloadTemplate = customizedWelcome?.template ?? buildWhatsAppTemplate(template, test ? env.WHATSAPP_TEMPLATE_LANGUAGE : operationalLanguage,
         test ? env.WHATSAPP_TEMPLATE_STYLE : 'ALERT_BODY', body);
-      const previewBody = staticBody ? staticBody.replace('{{1}}', () => body) : test && env.WHATSAPP_TEMPLATE_STYLE === 'NO_PARAMETERS' ? '' : body;
-      const previewHash = messageFingerprint(job.destination, env.WHATSAPP_PHONE_NUMBER_ID, { payloadTemplate, staticBody });
+      const previewBody = customizedWelcome ? `${customizedWelcome.body}\n\nButton: ${welcomeTemplate.button.text} · ${welcomeTemplate.button.url}` : staticBody ? staticBody.replace('{{1}}', () => body) : test && env.WHATSAPP_TEMPLATE_STYLE === 'NO_PARAMETERS' ? '' : body;
+      const previewHash = messageFingerprint(job.destination, env.WHATSAPP_PHONE_NUMBER_ID, { payloadTemplate, staticBody, ...(welcome ? { button: welcomeTemplate.button } : {}) });
       const hold = async (reason: string) => {
         totals.deferred += (await write({ status: 'PENDING', callbackKey: null, rolloutHold: reason,
           previewBody, previewTemplate: template, previewHash, previewAt: new Date(),

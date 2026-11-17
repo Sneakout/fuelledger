@@ -101,3 +101,12 @@
 @media (prefers-reduced-motion: reduce) {
   .shell .sidebar { transition: none; }
 }
+
+.shell .shell-account-link {
+  color: inherit;
+  text-decoration: none;
+}
+.shell .shell-account-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

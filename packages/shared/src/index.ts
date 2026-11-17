@@ -198,12 +198,18 @@ export const managerInputSchema = z.object({
     .regex(/[0-9]/, "Include a number"),
   stationId: z.string().cuid(),
 });
-export const changePasswordSchema = z.object({
+export const updateAccountProfileSchema = z.strictObject({
+  name: z.string().trim().min(2, "Enter at least 2 characters for your name.").max(100),
+});
+
+export const changePasswordSchema = z.strictObject({
+  currentPassword: z.string().min(1).max(1024).optional(),
   password: z
     .string()
     .min(8, "Password must be at least 8 characters")
     .regex(/[A-Z]/, "Include an uppercase letter")
-    .regex(/[0-9]/, "Include a number"),
+    .regex(/[0-9]/, "Include a number")
+    .refine(value => new TextEncoder().encode(value).length <= 72, "Password must be at most 72 bytes."),
 });
 export type ManagerInput = z.infer<typeof managerInputSchema>;
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;

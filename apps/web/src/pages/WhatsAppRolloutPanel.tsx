@@ -8,6 +8,7 @@ const labels = {
   LOW_STOCK: 'Low stock', SHIFT_CLOSED_SUMMARY: 'Shift summaries', PURCHASE_RECEIPT_SUMMARY: 'Receipt summaries',
   OVERDUE_CUSTOMER: 'Owner credit report', DAILY_SUMMARY: 'Core daily summary', CUSTOMER_CREDIT_REMINDER: 'Customer reminders',
   SYSTEM_TEST: 'Transport tests',
+  OWNER_WELCOME: 'Owner welcome',
 };
 
 export function WhatsAppRolloutPanel({ customers }: { customers: PlatformCustomer[] }) {

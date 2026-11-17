@@ -341,17 +341,31 @@ export async function currentUser(token: string): Promise<User> {
   return present(record, demoExpiresAt);
 }
 
-export async function changePassword(
-  userId: string,
-  input: ChangePasswordInput,
-) {
-  await prisma.user.update({
-    where: { id: userId },
-    data: {
-      passwordHash: await bcrypt.hash(input.password, 12),
-      mustChangePassword: false,
-    },
+export async function updateAccountProfile(userId: string, name: string): Promise<User> {
+  return present(await prisma.user.update({
+    where: { id: userId, active: true, loginEnabled: true },
+    data: { name },
+    include: userInclude,
+  }));
+}
+
+export async function changePassword(userId: string, input: ChangePasswordInput) {
+  const record = await prisma.user.findFirst({
+    where: { id: userId, active: true, loginEnabled: true },
+    select: { passwordHash: true, mustChangePassword: true },
   });
+  if (!record) throw new AppError(401, "UNAUTHENTICATED", "User is unavailable.");
+  if (!record.mustChangePassword || input.currentPassword !== undefined) {
+    if (!input.currentPassword || !(await bcrypt.compare(input.currentPassword, record.passwordHash))) {
+      throw new AppError(403, "CURRENT_PASSWORD_REQUIRED", "Enter your correct current password.");
+    }
+  }
+
+  const updated = await prisma.user.updateMany({
+    where: { id: userId, active: true, loginEnabled: true, passwordHash: record.passwordHash, mustChangePassword: record.mustChangePassword },
+    data: { passwordHash: await bcrypt.hash(input.password, 12), mustChangePassword: false },
+  });
+  if (!updated.count) throw new AppError(409, "PASSWORD_CHANGED", "Your account changed. Sign in again and retry.");
 }
 
 export async function revokeSession(token: string) {

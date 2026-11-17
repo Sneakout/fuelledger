@@ -107,7 +107,7 @@ notificationsRouter.put('/', async (req, res) => {
   if (parsed.data.whatsappNumber !== (current.whatsappNumber ?? '') && parsed.data.whatsappOptedIn && req.body.confirmNewNumber !== true) {
     throw new AppError(400, 'OWNER_CONSENT_REQUIRED', 'Confirm consent for the new WhatsApp number.');
   }
-  res.json({ settings: await updateSettings(user.organization.id, parsed.data) });
+  res.json({ settings: await updateSettings(user.organization.id, parsed.data, user.name) });
 });
 
 notificationsRouter.post('/test', async (req, res) => {

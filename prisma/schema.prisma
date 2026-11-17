@@ -121,6 +121,7 @@ enum OwnerNotificationType {
   CATALOG_CHANGE
   MARKET_PRICE_OUTLOOK
   SYSTEM_TEST
+  OWNER_WELCOME
 }
 
 enum NotificationDeliveryStatus {
@@ -165,6 +166,7 @@ model Organization {
   subscriptionPlan           String?                     @map("subscription_plan")
   subscriptionBillingPeriod  String?                     @map("subscription_billing_period")
   subscriptionPricePaise     Int?                        @map("subscription_price_paise")
+  whatsappWelcomePending    Boolean                     @default(true) @map("whatsapp_welcome_pending")
   subscriptionActivatedAt    DateTime?                   @map("subscription_activated_at")
   subscriptionExpiresAt      DateTime?                   @map("subscription_expires_at")
   createdAt                  DateTime                    @default(now()) @map("created_at")

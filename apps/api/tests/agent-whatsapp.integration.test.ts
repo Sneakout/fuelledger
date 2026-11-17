@@ -20,9 +20,11 @@ import { customerReminderDraft } from '../src/modules/notifications/agent-messag
 import { readCustomerCreditFacts } from '../src/modules/notifications/message-facts.js';
 
 import { drainWhatsAppQueue, queueOwnerWhatsApp, retryWhatsAppDelivery } from '../src/modules/notifications/delivery-queue.js';
-import { operationalBodies } from '../src/modules/notifications/whatsapp-template.js';
+import { operationalBodies, welcomeTemplate } from '../src/modules/notifications/whatsapp-template.js';
 import { approveRolloutPreview, pauseRollout, readRollout, updateRollout } from '../src/modules/notifications/whatsapp-rollout.js';
 import { processWhatsAppWebhook, verifyWebhookSignature } from '../src/modules/notifications/whatsapp-webhook.js';
+
+import { sendWelcomeTest, updateSettings } from '../src/modules/notifications/service.js';
 
 const ownerCategories = ['LOW_STOCK', 'SHIFT_CLOSED_SUMMARY', 'PURCHASE_RECEIPT_SUMMARY', 'DAILY_SUMMARY', 'OVERDUE_CUSTOMER', 'SYSTEM_TEST'];
 const providerTemplate = (name: string, status = 'APPROVED') => ({
@@ -44,6 +46,69 @@ async function deliverWithReviewedFixtures() {
 const suite = process.env.AGENT_MESSAGE_TEST_DATABASE_URL ? describe : describe.skip;
 suite('WhatsApp coordination on isolated PostgreSQL', () => {
   afterAll(async () => { vi.unstubAllGlobals(); await prisma.$disconnect(); });
+
+  it('queues one welcome after opt-in and sends an identical approved welcome test', async () => {
+    const org = await prisma.organization.create({ data: { name: 'Welcome fixture' } });
+    const owner = await prisma.user.create({ data: {
+      organizationId: org.id, name: 'Nanda Owner', email: `${org.id}@example.test`, passwordHash: 'test', role: 'OWNER',
+    } });
+    const station = await prisma.station.create({ data: {
+      organizationId: org.id, name: 'Fixture Petrol Pump', code: 'TEST',
+      addressLine1: 'Test', city: 'Test', state: 'Test', postalCode: '000000',
+    } });
+    const input = {
+      whatsappNumber: '919000000007', whatsappOptedIn: false, densityMissingEnabled: false, lowStockEnabled: false,
+      shiftVarianceEnabled: false, unclosedShiftEnabled: false, dailySummaryEnabled: false, overdueCustomerEnabled: false,
+      lowStockPercent: 20, varianceThreshold: 100, stockVarianceTolerance: 50, dailySummaryHour: 20,
+    };
+    const jobs = () => prisma.ownerNotificationDelivery.findMany({ where: { organizationId: org.id, type: 'OWNER_WELCOME' } });
+    await updateSettings(org.id, input, owner.name);
+    expect(await jobs()).toHaveLength(0);
+    const optedIn = { ...input, whatsappOptedIn: true };
+    await updateSettings(org.id, optedIn, owner.name);
+    await updateSettings(org.id, optedIn, owner.name);
+    expect(await jobs()).toHaveLength(1);
+    const test = await sendWelcomeTest(org.id);
+    expect(test.status).toBe('QUEUED');
+
+    const send = vi.fn(async (_payload: unknown) => Response.json({ messages: [{ id: randomUUID() }] }));
+    vi.stubGlobal('fetch', async (url: string | URL, init?: RequestInit) => {
+      if (new URL(url).pathname.endsWith('/message_templates')) {
+        return Response.json({ data: [{
+          name: welcomeTemplate.name, status: 'APPROVED', language: 'en', category: 'UTILITY',
+          components: [{ type: 'BODY', text: welcomeTemplate.body }, { type: 'BUTTONS', buttons: [welcomeTemplate.button] }],
+        }] });
+      }
+      return send(JSON.parse(String(init?.body)));
+    });
+    await prisma.whatsAppRollout.update({ where: { id: 'global' }, data: {
+      stage: 'INTERNAL', paused: true, organizationIds: [org.id], enabledCategories: ['OWNER_WELCOME'],
+    } });
+    try {
+      await drainWhatsAppQueue(new Date(), { previewOnly: true });
+      expect(send).not.toHaveBeenCalled();
+      const previews = await jobs();
+      expect(previews).toHaveLength(2);
+      for (const job of previews) {
+        expect(job.previewBody).toContain('*Welcome to FuelNerve, Nanda!*');
+        expect(job.previewBody).toContain('Fixture Petrol Pump');
+        expect(job.previewBody).toContain('Open FuelNerve · https://fuel.mindvector.tech/');
+        await approveRolloutPreview(org.id, job.id, job.previewHash!, owner.id);
+      }
+      await prisma.whatsAppRollout.update({ where: { id: 'global' }, data: { paused: false } });
+      await drainWhatsAppQueue();
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(send.mock.calls[0]?.[0]).toMatchObject({
+        to: input.whatsappNumber, template: { name: welcomeTemplate.name, components: [{ type: 'body', parameters: [
+          { type: 'text', text: 'Nanda' }, { type: 'text', text: station.name },
+        ] }] },
+      });
+      expect((await jobs()).every(job => job.status === 'ACCEPTED')).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+      await pauseRollout(owner.id);
+    }
+  });
 
   it('sends each verified message once, resolves low stock after a receipt and withdraws a paid reminder', async () => {
     let templateStatus = 'PENDING';

@@ -5,7 +5,7 @@ import { isPlatformAdminEmail } from "../config/env.js";
 import { AppError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
 import { authenticate } from "../middleware/authenticate.js";
-import { presentNotificationSettings, sendTestNotification } from "../modules/notifications/service.js";
+import { presentNotificationSettings, sendTestNotification, sendWelcomeTest } from "../modules/notifications/service.js";
 import { drainAgentMessages } from "../modules/notifications/agent-dispatch.js";
 import { drainReviewJobs, scheduleDailyReviews } from "../modules/nerve/review-worker.js";
 import { prepareNotificationPreviews, runScheduledNotifications } from "../modules/notifications/service.js";
@@ -166,7 +166,7 @@ platformRouter.post("/customers/:id/notifications/test", async (req, res) => {
   requirePlatformAdmin(req.user!.email);
   const customer = await prisma.organization.findUnique({ where: { id: req.params.id! }, select: { id: true } });
   if (!customer) throw new AppError(404, "CUSTOMER_NOT_FOUND", "This customer account was not found.");
-  res.json({ delivery: await sendTestNotification(customer.id) });
+  res.json({ delivery: await (req.body?.welcome === true ? sendWelcomeTest(customer.id) : sendTestNotification(customer.id)) });
 });
 platformRouter.get("/customers/:id/notifications/deliveries", async (req, res) => {
   requirePlatformAdmin(req.user!.email);

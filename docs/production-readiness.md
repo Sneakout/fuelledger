@@ -127,6 +127,22 @@ Example variable: Sample Fuel Station · Demo Fleet · ₹4,250.00 overdue as of
 
 Verify Meta approval and the signed delivery webhook before enabling production dispatch. Start with an owner-reviewed test to an opted-in test recipient. Use Growth Desk to confirm the delivery result before enabling any customer schedule.
 
+## Owner welcome on WhatsApp
+
+Create the English Utility template `fuelnerve_owner_welcome_v1` in WhatsApp Manager. Use numbered body variables with example values `Nanda` and `My Petrol Pump`. Keep the formatting and wording below, and add one fixed **Visit website** button labeled **Open FuelNerve** with URL `https://fuel.mindvector.tech/`.
+
+```text
+*Welcome to FuelNerve, {{1}}!*
+
+Your account for *{{2}}* is ready. Open FuelNerve to review your fuel station setup and get started with shifts, sales, and tank stock.
+
+To choose which updates you receive here, go to *Settings → WhatsApp alerts*.
+```
+
+The first saved WhatsApp opt-in on a newly created organization queues one welcome. The sender uses the owner's first name and the oldest active fuel station, with the organization name as a fallback. Existing organizations are excluded from automatic welcomes.
+
+To verify the same template on an existing opted-in test account, select **Prepare welcome preview** on its Growth Desk card. Keep **Internal test** scoped to that account with **Owner welcome** as the only enabled category. Generate previews while paused, review and approve the intended welcome, then unpause to dispatch. The worker verifies the approved Meta template, its button, and the saved recipient. Confirm delivery and pause again after testing.
+
 ## Controlled WhatsApp rollout
 
 Deploy the additive migrations with **Shadow** selected as the initial database policy. The independent deployment switch `WHATSAPP_DELIVERY_ENABLED` defaults to `false` and applies to transport tests as well. Shadow previews can be generated with this switch off. Once live account setup is verified, set the deployment switch to `true` and keep the database policy paused until the intended stage and category are selected.

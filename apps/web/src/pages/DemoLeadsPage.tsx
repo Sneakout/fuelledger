@@ -37,10 +37,10 @@ function CustomerWhatsAppSettings({ customer }: { customer: PlatformCustomer }) 
       setMessage(error instanceof ApiRequestError ? error.message : "Could not queue a safe retry.");
     } finally { setRetrying(null); }
   }
-  async function test() {
+  async function test(welcome = false) {
     setTesting(true); setMessage("");
     try {
-      const result = await api.testCustomerWhatsApp(customer.id);
+      const result = await api.testCustomerWhatsApp(customer.id, welcome);
       setMessage(result.delivery.status === "QUEUED" ? "Test message queued. Check delivery history for its status." : result.delivery.reason ?? "Test message was not queued");
       await refreshDeliveries();
     } catch (error) {
@@ -51,7 +51,13 @@ function CustomerWhatsAppSettings({ customer }: { customer: PlatformCustomer }) 
     <summary><MessageCircleMore/><span><b>WhatsApp alerts</b><small>{settings.whatsappOptedIn && settings.whatsappNumber ? `Active · +${settings.whatsappNumber}` : "Not active"}</small></span></summary>
     <div className="admin-whatsapp-body">
       <p>Owners manage WhatsApp preferences in their account.</p>
-      <div className="admin-whatsapp-action">{settings.whatsappOptedIn && settings.whatsappNumber && <button className="secondary small" disabled={testing} onClick={() => void test()}><MessageCircleMore size={14}/>{testing ? "Queuing…" : "Prepare test preview"}</button>}{message && <small>{message}</small>}</div>
+      <div className="admin-whatsapp-action">
+        {settings.whatsappOptedIn && settings.whatsappNumber && <>
+          <button type="button" className="secondary small" disabled={testing} onClick={() => void test()}><MessageCircleMore size={14}/>Prepare test preview</button>
+          <button type="button" className="secondary small" disabled={testing} onClick={() => void test(true)}><MessageCircleMore size={14}/>Prepare welcome preview</button>
+        </>}
+        {(testing || message) && <small role="status">{testing ? "Queuing preview…" : message}</small>}
+      </div>
       <div>
         <button type="button" className="secondary small" onClick={() => void refreshDeliveries()}>Refresh delivery history</button>
         {deliveries.map(delivery => <div key={delivery.id}>
@@ -62,7 +68,7 @@ function CustomerWhatsAppSettings({ customer }: { customer: PlatformCustomer }) 
           {delivery.previewTemplate && <details open={delivery.status === "PENDING"}>
             <summary>Message preview · recipient ending {delivery.recipientEnding}</summary>
             <p>{delivery.previewTemplate}{delivery.sourceId ? ` · Source record ${delivery.sourceId}` : ""}</p>
-            <p style={{ overflowWrap: "anywhere" }}>{delivery.previewBody || "Uses the configured test template with no inserted text."}</p>
+            <p className="admin-whatsapp-preview">{delivery.previewBody || "Uses the configured test template with no inserted text."}</p>
             {delivery.status === "PENDING" && delivery.previewHash && (delivery.previewHash === delivery.approvedPreviewHash
               ? <small>Preview approved</small>
               : <button type="button" className="secondary small" disabled={retrying !== null} onClick={() => void approve(delivery)}>Approve preview</button>)}

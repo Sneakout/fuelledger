@@ -18,3 +18,20 @@ export const operationalBodies: Record<string, string> = {
   fuelnerve_customer_payment_reminder_v1: 'Payment reminder for your fuel account. Our records show an overdue balance. {{1}} If you have already paid or believe the balance is incorrect, please contact your fuel station.',
   fuelnerve_daily_operations_v1: 'FuelNerve daily operations report for your fuel station. This is the daily summary of recorded fuel sales, collections and tank stock. {{1}} Review the station dashboard in FuelNerve for the underlying records.',
 };
+
+export const welcomeTemplate = {
+  name: 'fuelnerve_owner_welcome_v1',
+  language: 'en',
+  body: '*Welcome to FuelNerve, {{1}}!*\n\nYour account for *{{2}}* is ready. Open FuelNerve to review your fuel station setup and get started with shifts, sales, and tank stock.\n\nTo choose which updates you receive here, go to *Settings → WhatsApp alerts*.',
+  button: { type: 'URL', text: 'Open FuelNerve', url: 'https://fuel.mindvector.tech/' },
+} as const;
+
+export function buildWelcomeMessage(ownerName: string, stationName: string) {
+  const firstName = ownerName.trim().split(/\s+/)[0] || 'there';
+  const station = stationName.replace(/\s+/g, ' ').trim();
+  const parameters = [firstName, station].map(text => ({ type: 'text', text }));
+  return {
+    body: welcomeTemplate.body.replace(/{{([12])}}/g, (_, index: string) => parameters[Number(index) - 1]!.text),
+    template: { name: welcomeTemplate.name, language: { code: welcomeTemplate.language }, components: [{ type: 'body', parameters }] },
+  };
+}

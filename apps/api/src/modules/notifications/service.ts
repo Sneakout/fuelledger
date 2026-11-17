@@ -1,3 +1,4 @@
+import { buildWelcomeMessage } from './whatsapp-template.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ownerNotificationPacketSchema, type OwnerNotificationPacket, type OwnerNotificationSettingsInput } from '@fuelledger/shared';
 import { allowsOwnerWhatsApp, findFuelNerveAgent, hasActiveIntelligence, intelligenceWhatsAppAgents } from '@fuelledger/shared';
@@ -70,7 +71,7 @@ export async function getSettings(organizationId: string) {
   return presentNotificationSettings(await prisma.ownerNotificationSettings.findUnique({ where: { organizationId } }));
 }
 
-export async function updateSettings(organizationId: string, input: OwnerNotificationSettingsInput) {
+export async function updateSettings(organizationId: string, input: OwnerNotificationSettingsInput, ownerName: string) {
   const data = {
     whatsappNumber: input.whatsappNumber || null,
     whatsappOptedIn: input.whatsappOptedIn,
@@ -90,7 +91,19 @@ export async function updateSettings(organizationId: string, input: OwnerNotific
     ...(input.customerReminderScheduled !== undefined ? { customerReminderScheduled: input.customerReminderScheduled } : {}),
     ...(input.customerReminderHour !== undefined ? { customerReminderHour: input.customerReminderHour } : {}),
   };
-  const settings = await prisma.ownerNotificationSettings.upsert({ where: { organizationId }, create: { organizationId, ...data }, update: data });
+  const settings = await prisma.$transaction(async tx => {
+    const saved = await tx.ownerNotificationSettings.upsert({ where: { organizationId }, create: { organizationId, ...data }, update: data });
+    if (!saved.whatsappOptedIn || !saved.whatsappNumber) return saved;
+
+    const welcome = await tx.organization.updateMany({
+      where: { id: organizationId, whatsappWelcomePending: true },
+      data: { whatsappWelcomePending: false },
+    });
+    if (welcome.count) {
+      await queueWelcome(organizationId, ownerName, saved.whatsappNumber, `owner-welcome:${organizationId}`, tx);
+    }
+    return saved;
+  });
   return presentNotificationSettings(settings);
 }
 
@@ -113,6 +126,7 @@ function alertPresentation(input: AlertInput, packet: OwnerNotificationPacket) {
     CREDIT_SALE: ['A new customer credit supply was recorded', '/customers'],
     CATALOG_CHANGE: ['A manager added a purchase record', '/purchases'],
     SYSTEM_TEST: ['FuelNerve alert test', '/notifications'],
+    OWNER_WELCOME: ['Welcome to FuelNerve', '/notifications'],
     CUSTOMER_CREDIT_REMINDER: ['Customer payment reminder', '/customers'],
   } as const;
   const [title, path] = byType[input.type];
@@ -386,6 +400,38 @@ export async function registerPushDevice(organizationId: string, userId: string,
 
 export async function unregisterPushDevice(organizationId: string, userId: string, token: string) {
   await prisma.ownerPushDevice.updateMany({ where: { organizationId, userId, token }, data: { active: false } });
+}
+
+async function queueWelcome(organizationId: string, ownerName: string, destination: string, eventKey: string, db: Prisma.TransactionClient = prisma) {
+  const organization = await db.organization.findUniqueOrThrow({
+    where: { id: organizationId },
+    select: {
+      name: true,
+      stations: { where: { active: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], take: 1, select: { name: true } },
+    },
+  });
+  const stationName = organization.stations[0]?.name ?? organization.name;
+  return queueOwnerWhatsApp({
+    organizationId, type: 'OWNER_WELCOME', eventKey, destination, optedIn: true,
+    recordType: 'OWNER_WELCOME', message: buildWelcomeMessage(ownerName, stationName).body,
+    guard: { status: 'WELCOME', welcome: { ownerName, stationName } },
+  }, db);
+}
+
+export async function sendWelcomeTest(organizationId: string): Promise<DeliveryResult> {
+  const settings = await getSettings(organizationId);
+  if (!settings.whatsappOptedIn || !settings.whatsappNumber) {
+    throw new AppError(400, 'WHATSAPP_OPT_IN_REQUIRED', 'Save an opted-in WhatsApp number before preparing a welcome test.');
+  }
+  const owner = await prisma.user.findFirst({
+    where: { organizationId, role: 'OWNER', active: true, loginEnabled: true },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { name: true },
+  });
+  if (!owner) throw new AppError(409, 'OWNER_UNAVAILABLE', 'This account has no active owner.');
+  const delivery = await queueWelcome(organizationId, owner.name, settings.whatsappNumber, `welcome-test:${organizationId}:${Math.floor(Date.now() / 60_000)}`);
+  return delivery.status === 'SUPPRESSED'
+    ? { status: 'SKIPPED', reason: delivery.suppressionReason ?? 'suppressed' }
+    : { status: 'QUEUED', id: delivery.id };
 }
 
 export async function sendTestNotification(organizationId: string) {
