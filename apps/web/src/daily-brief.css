@@ -57,10 +57,6 @@
 .brief-review { padding: 10px 0; border-top: 1px solid #e5ece7; }
 .brief-review .brief-records { margin-bottom: 5px; }
 .brief-resolved { animation: brief-reveal 180ms ease-out both; }
-.brief-ask { display: flex; align-items: end; gap: 12px; }
-.brief-ask label { flex: 1; }
-.brief-answer { margin-top: 12px; padding: 12px; border-radius: 10px; background: #f1f7f3; }
-.brief-answer h3 { display: flex; align-items: center; gap: 6px; }
 .brief-refreshing { animation: brief-spin 1s linear infinite; }
 @keyframes brief-spin { to { transform: rotate(360deg); } }
 @keyframes brief-reveal { from { opacity: .7; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
@@ -70,8 +66,6 @@
   .brief-records a { min-height: 44px; }
   .brief-columns, .brief-metrics { grid-template-columns: 1fr; }
   .brief-finding-head, .brief-row { flex-wrap: wrap; }
-  .brief-ask { flex-wrap: wrap; }
-  .brief-ask label { flex-basis: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .daily-brief *, .daily-brief *::before, .daily-brief *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }

@@ -1,7 +1,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { IntelligenceAgentsPage, looksLikeDsr } from "./IntelligenceAgentsPage";
+import { looksLikeDsr } from "../components/AskNerveChat";
+import { IntelligenceAgentsPage } from "./IntelligenceAgentsPage";
 
 vi.mock("../components/StationProvider", () => ({ useStation: () => ({ selectedStationId: "station-a", selectedStation: { name: "Station A" } }) }));
 vi.mock("../components/AuthProvider", () => ({ useAuth: () => ({ user: { id: "owner-a", name: "Owner", role: "OWNER" } }) }));

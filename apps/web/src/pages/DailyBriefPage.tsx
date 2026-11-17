@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowRight, Bell, Check, ChevronDown, CircleAlert, RefreshCw, Send, Sparkles } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { ArrowRight, Bell, Check, ChevronDown, CircleAlert, RefreshCw } from 'lucide-react';
 import { Link, Navigate } from 'react-router-dom';
+import { AskNerveChat } from '../components/AskNerveChat';
 import { useAuth } from '../components/AuthProvider';
 import { useStation } from '../components/StationProvider';
-import { api, ApiRequestError, type AskFuelNerveResponse, type BriefFinding, type BriefRecordLink, type DailyBriefWorkspaceResponse } from '../lib/api';
+import { api, ApiRequestError, type BriefFinding, type BriefRecordLink, type DailyBriefWorkspaceResponse } from '../lib/api';
 import { formatIndiaCalendarDate } from '../lib/india-time';
 import '../daily-brief.css';
 
@@ -42,7 +43,7 @@ export function DailyBriefPage() {
   const { user } = useAuth();
   const { selectedStationId, stations, selectStation, loading } = useStation();
   if (user?.role !== 'OWNER') return <Navigate to="/" replace />;
-  return <main className="page daily-brief">{selectedStationId
+  return <main className="page daily-brief nerve-chat-page">{selectedStationId
     ? <Workspace key={selectedStationId} stationId={selectedStationId} stationNames={stations} selectStation={selectStation} />
     : <div className="brief-section"><h1>Daily Brief</h1><p>{loading ? 'Loading fuel stations…' : 'Set up a fuel station to open its Daily Brief.'}</p></div>}</main>;
 }
@@ -106,11 +107,16 @@ function Workspace({ stationId, stationNames, selectStation }: {
   const gaps = data?.coverage.gaps ?? [];
   const limited = Boolean(data && (gaps.length || data.coverage.incompleteShifts || data.coverage.collectionsIncomplete || data.coverage.stockUnavailable || data.coverage.noSales));
 
+  const priorityTopic = data?.coverage.incompleteShifts ? 'shifts'
+    : data?.upcoming.replenishment.length ? 'stock'
+    : data?.upcoming.customers.length ? 'customers'
+    : data?.upcoming.suppliers.length ? 'suppliers'
+    : undefined;
+
   return <>
     <header className="brief-hero"><div><p className="eyebrow brief-meta">FuelNerve Intelligence</p><h1>Daily Brief</h1>
       {data && <><p className="brief-station-date">{data.station.name} · {day(data.date)}</p><small>Records checked {time(data.checkedAt)} IST</small></>}
     </div><div className="brief-controls">
-      {data && !data.demo && <a className="secondary" href="#brief-ask"><Sparkles size={16} />Ask FuelNerve</a>}
       <label><span>Fuel station</span><select value={stationId} onChange={event => selectStation(event.target.value)}>{stationNames.map(station => <option value={station.id} key={station.id}>{station.name}</option>)}</select></label>
       <button type="button" className="secondary" disabled={refreshing || Boolean(busy)} onClick={() => void refresh()}><RefreshCw size={16} className={refreshing ? 'brief-refreshing' : ''} />{refreshing ? 'Checking records…' : 'Refresh'}</button>
     </div></header>
@@ -184,36 +190,7 @@ function Workspace({ stationId, stationNames, selectStation }: {
       <Section id="brief-resolved" title="Resolved">
         {data.resolved.length ? data.resolved.map(item => <article className="brief-row brief-resolved" key={item.id}><div><b>{item.title}</b><p>{item.detail}</p><small>Closed {time(item.closedAt)} IST</small></div><Link to={item.path}>View record <ArrowRight size={14}/></Link></article>) : <p>No recorded closures in the last seven days.</p>}
       </Section>
-      <AskBrief key={data.date} data={data} />
     </div>}
+    {data && !data.demo && <AskNerveChat key={data.date} stationId={stationId} stationName={data.station.name} asOf={data.checkedAt} priorityTopic={priorityTopic} onRecordsChanged={() => void refresh()} />}
   </>;
-}
-
-function AskBrief({ data }: { data: DailyBriefWorkspaceResponse }) {
-  const [question, setQuestion] = useState('');
-  const [result, setResult] = useState<AskFuelNerveResponse>();
-  const [asking, setAsking] = useState(false);
-  const [error, setError] = useState('');
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (asking || question.trim().length < 3) return;
-    setAsking(true); setError(''); setResult(undefined);
-    try { setResult(await api.askFuelNerve({ requestId: crypto.randomUUID(), stationId: data.station.id, asOf: data.checkedAt, question: question.trim() })); }
-    catch (caught) { setError(errorText(caught, 'FuelNerve could not answer this question.')); }
-    finally { setAsking(false); }
-  }
-  return <Section id="brief-ask" title="Ask FuelNerve">
-    <p>Ask about {data.station.name} using records checked {time(data.checkedAt)} IST.</p>
-    {!data.demo && <form className="brief-ask" onSubmit={event => void submit(event)}>
-      <label className="field"><span>Your question</span><input value={question} onChange={event => setQuestion(event.target.value)} maxLength={300} placeholder="Which balances need attention?" /></label>
-      <button className="primary small" disabled={asking || question.trim().length < 3}><Send size={16} /> {asking ? 'Checking records…' : 'Ask'}</button>
-    </form>}
-    {data.demo && <p>Ask is available from an active Intelligence account.</p>}
-    {error && <p className="form-error" role="alert">{error}</p>}
-    {result && <article className="brief-answer" aria-live="polite"><h3><Sparkles size={17} />{result.answer.title}</h3>
-      <p>{result.answer.explanation}</p><p>{result.answer.action}</p>
-      {result.missingInformation?.map(item => <p key={item}>{item}</p>)}
-      {result.answer.facts.map(fact => <article className="brief-review" key={fact.id}><b>{fact.label} · {fact.value}</b><p>{fact.context}</p><Evidence records={[{ label: fact.evidenceLabel, path: fact.evidencePath }]} /></article>)}
-    </article>}
-  </Section>;
 }
