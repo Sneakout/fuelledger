@@ -156,18 +156,145 @@
 }
 
 .nerve-team{margin-bottom:20px;padding:18px;border:1px solid #d9e6e0;border-radius:19px;background:linear-gradient(140deg,#f9fcfa,#edf6f1)}
-.nerve-ask-bar{position:relative;margin-bottom:20px;padding:17px 18px;border:1px solid #d9e6e0;border-radius:18px;background:#fff;box-shadow:0 8px 24px #173f350a}
-.nerve-ask-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:12px;color:var(--nerve-ink)}
-.nerve-ask-heading>div{display:flex;align-items:center;gap:9px}
-.nerve-ask-heading>div>svg{width:30px;height:30px;padding:7px;border-radius:9px;background:var(--nerve-lime);color:#294a28}
-.nerve-ask-heading>div>span{display:flex;flex-direction:column;gap:2px}
-.nerve-ask-heading strong{font-size:16px}
-.nerve-ask-heading small{color:#70827a;font-size:13px}
-.nerve-ask-heading>span{display:flex;align-items:center;gap:5px;color:#547469;font-size:12px;font-weight:700}
-.nerve-ask-heading>span svg{width:13px}
-.nerve-ask-bar>form{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;padding:6px;border:1px solid #cfded7;border-radius:14px;background:#f9fbfa}
+.page.nerve-chat-page { padding-bottom: 90px; }
+
+.nerve-chat-launcher {
+  --nerve-chat-bottom: 24px;
+  position: fixed;
+  z-index: 10;
+  inset-inline-end: 24px;
+  bottom: var(--nerve-chat-bottom);
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 52px;
+  padding: 0 18px;
+  border: 1px solid #c8e357;
+  border-radius: 999px;
+  background: var(--nerve-lime);
+  color: var(--nerve-ink);
+  font-size: 14px;
+  font-weight: 800;
+  box-shadow: 0 8px 24px #173f3533;
+  transition: transform .18s ease, background .18s ease;
+}
+.nerve-chat-launcher:hover { transform: translateY(-2px); background: #e4fa91; }
+.nerve-chat-launcher svg { width: 19px; }
+
+.nerve-chat-dialog {
+  position: fixed;
+  inset: auto 24px 24px auto;
+  width: min(600px, calc(100% - 48px));
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: transparent;
+  color: var(--nerve-ink);
+}
+.nerve-chat-dialog::backdrop { background: #102f2859; }
+body:has(.nerve-chat-dialog[open]) { overflow: hidden; }
+
+.nerve-ask-bar {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: min(610px, calc(100dvh - 48px));
+  border: 1px solid #ccdcd4;
+  border-radius: 21px;
+  background: #f5f9f7;
+  box-shadow: 0 18px 60px #102f2840;
+}
+.nerve-chat-dialog[open] > .nerve-ask-bar {
+  transform-origin: bottom right;
+  animation: nerve-chat-open .24s cubic-bezier(.2,.75,.25,1) both;
+}
+@keyframes nerve-chat-open {
+  from { opacity: 0; transform: translateY(14px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.nerve-ask-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 15px 17px;
+  border-radius: 20px 20px 0 0;
+  background: var(--forest);
+  color: #fff;
+}
+.nerve-ask-heading > svg {
+  width: 38px;
+  height: 38px;
+  padding: 9px;
+  border-radius: 11px;
+  background: var(--nerve-lime);
+  color: var(--nerve-ink);
+}
+.nerve-ask-heading h2 { margin: 0; font-size: 18px; line-height: 1.2; }
+.nerve-ask-heading p { margin: 4px 0 0; color: #d0e4db; font-size: 13px; overflow-wrap: anywhere; }
+.nerve-ask-heading button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid #ffffff3b;
+  border-radius: 11px;
+  background: #ffffff12;
+  color: #fff;
+}
+.nerve-ask-heading button:hover { background: #ffffff25; }
+.nerve-ask-heading button svg { width: 19px; }
+.nerve-chat-content { overflow: auto; overscroll-behavior: contain; padding: 16px; }
+.nerve-chat-welcome,
+.nerve-chat-question {
+  width: fit-content;
+  max-width: 90%;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: #e7f2ed;
+  color: var(--nerve-ink);
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.nerve-chat-question { margin-inline-start: auto; background: var(--forest); color: #fff; }
+.nerve-ask-bar .ask-answer { background: #fff; }
+.nerve-ask-bar .ask-answer h3 { font-size: 16px; }
+.nerve-ask-bar .ask-answer > p,
+.nerve-ask-bar .ask-answer footer,
+.nerve-ask-bar .ask-error { font-size: 14px; }
+.nerve-ask-bar .ask-answer small,
+.nerve-ask-bar .ask-answer em { font-size: 12px; }
+.nerve-ask-bar .ask-answer strong { font-size: 14px; }
+
+@media (max-width: 760px) {
+  .nerve-chat-launcher {
+    --nerve-chat-bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+    inset-inline-end: 12px;
+  }
+  .nerve-chat-dialog {
+    inset: auto 8px calc(var(--nerve-chat-keyboard-inset, 0px) + max(8px, env(safe-area-inset-bottom))) 8px;
+    width: auto;
+  }
+  .nerve-ask-bar { height: min(660px, calc(var(--nerve-chat-visible-height, 100dvh) - 24px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nerve-chat-launcher { transition: none; }
+  .nerve-chat-launcher:hover { transform: none; }
+  .nerve-chat-dialog[open] > .nerve-ask-bar,
+  .nerve-chat-dialog .nerve-dsr-route,
+  .nerve-chat-dialog .nerve-dsr-route > svg,
+  .nerve-chat-dialog .nerve-dsr-scan i { animation: none; }
+}
+
+.nerve-ask-bar>form{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:8px;margin:0 12px 12px;padding:6px;border:1px solid #cfded7;border-radius:14px;background:#f9fbfa}
 .nerve-ask-bar>form:focus-within{border-color:#5b9b84;box-shadow:0 0 0 3px #337a6015}
-.nerve-ask-bar>form>input{min-width:0;height:42px;border:0;outline:0;background:transparent;color:#203b32;font-size:15px}
+.page .nerve-chat-dialog .nerve-ask-bar>form>input[type="text"]{min-width:0;height:42px;border:0;outline:0;background:transparent;color:#203b32;font-size:16px;box-shadow:none;padding:0 4px}
 .nerve-ask-bar>form>input::placeholder{color:#87978f}
 .nerve-attach{position:relative}
 .nerve-add-button{display:grid;place-items:center;width:42px;height:42px;border:1px solid #d5e2dc;border-radius:10px;background:#fff;color:#256e56}
@@ -753,10 +880,6 @@ a.nerve-agent-card:hover{transform:translateY(-1px);border-color:#a9c9ba;box-sha
 @media(max-width:620px){
   .today-heading h1{font-size:31px}
   .nerve-team{padding:18px}
-  .nerve-ask-bar{padding:15px}
-  .nerve-ask-heading{align-items:flex-start}
-  .nerve-ask-heading>span{display:none}
-  .nerve-ask-heading small{font-size:12px;line-height:1.4}
   .nerve-send-button{width:42px;padding:0}
   .nerve-send-button span{display:none}
   .nerve-attach-menu{width:min(285px,calc(100vw - 72px))}

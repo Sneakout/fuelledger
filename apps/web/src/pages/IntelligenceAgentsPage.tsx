@@ -118,16 +118,15 @@ export function IntelligenceAgentsPage() {
     {(investigatingKey || investigationError || investigation) && <InvestigationDialog agent={investigation?.agent ?? investigationAgent} result={investigation} stationId={selectedStationId} loading={Boolean(investigatingKey)} error={investigationError} onClose={closeInvestigation}/>}
   </main>;
 
-  return <main className="page nerve-page">
+  return <main className="page nerve-page nerve-chat-page">
     <header className="today-heading"><div><span className="eyebrow">{`${dayGreeting()}, ${user?.name.split(" ")[0] ?? "there"}`}</span><h1>Nerve Intelligence</h1><p>Six specialists review <strong>{selectedStation?.name ?? "the selected station"}</strong> and bring forward what needs your attention.</p></div>{data && <span className="today-updated"><Clock3/> Last review {relativeTime(data.generatedAt)}</span>}</header>
 
     {data && <section className="nerve-team" aria-label={`Nerve Intelligence specialists for ${selectedStation?.name ?? "the selected station"}`}><div className="nerve-team-heading"><div><span className="eyebrow">Your specialist team</span><h2>Six agents, one clear owner view</h2><p>Each agent watches a specific part of the business. The Nerve Assistant connects their findings.</p></div><span>{reviewedAgentCount} reviewed · {team.length - reviewedAgentCount} awaiting review</span></div><div className="nerve-team-grid">{team.map(agent => <AgentTeamCard key={agent.agentKey} agent={agent}/>)}</div></section>}
 
-    <AskNerveBar stationId={selectedStationId} stationName={selectedStation?.name} isDemo={Boolean(user?.demoExpiresAt)} onRecordsChanged={() => void load()}/>
-
     {error && <section className="nerve-unavailable"><MessageCircleQuestion/><div><h2>Nerve Intelligence is temporarily unavailable</h2><p>{error}</p><small>FuelNerve continues working normally.</small></div><button className="secondary" onClick={() => void load()}><RefreshCw/> Try again</button></section>}
     {loading && <div className="loading-inline nerve-loading"><span/><p>Checking the latest records…</p></div>}
     {data?.stale && <div className="nerve-stale"><Clock3/> These reviews are more than 24 hours old. Open an agent to see its latest saved findings.</div>}
+    <AskNerveChat key={selectedStationId} stationId={selectedStationId} stationName={selectedStation?.name} isDemo={Boolean(user?.demoExpiresAt)} onRecordsChanged={() => void load()}/>
   </main>;
 }
 
@@ -173,10 +172,39 @@ type LocalInvoice = {
   submitted?: { id: string; invoiceNumber: string };
 };
 
-function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { stationId: string | null; stationName?: string | undefined; isDemo: boolean; onRecordsChanged: () => void }) {
+function AskNerveChat({ stationId, stationName, isDemo, onRecordsChanged }: { stationId: string | null; stationName?: string | undefined; isDemo: boolean; onRecordsChanged: () => void }) {
   const navigate = useNavigate();
   const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<AskFuelNerveResponse | null>(null);
+  const [reply, setReply] = useState<{ question: string; answer: AskFuelNerveResponse } | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const launcher = useRef<HTMLButtonElement>(null);
+  const chat = useRef<HTMLDialogElement>(null);
+  const composer = useRef<HTMLInputElement>(null);
+  const submittedQuestion = useRef<HTMLParagraphElement>(null);
+  const dsrRouteTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const dialog = chat.current;
+    if (!chatOpen || !viewport || !dialog) return;
+
+    const updateViewport = () => {
+      const bottomInset = Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop);
+      dialog.style.setProperty("--nerve-chat-keyboard-inset", `${bottomInset}px`);
+      dialog.style.setProperty("--nerve-chat-visible-height", `${viewport.height}px`);
+    };
+    updateViewport();
+    viewport.addEventListener("resize", updateViewport);
+    viewport.addEventListener("scroll", updateViewport);
+    return () => {
+      viewport.removeEventListener("resize", updateViewport);
+      viewport.removeEventListener("scroll", updateViewport);
+    };
+  }, [chatOpen]);
+
+  useEffect(() => {
+    if (chatOpen && reply) submittedQuestion.current?.scrollIntoView?.({ block: "start" });
+  }, [chatOpen, reply]);
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState("");
   const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
@@ -203,12 +231,8 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, [attachmentMenuOpen]);
 
-  useEffect(() => {
-    for (const controller of invoiceChecks.current.values()) controller.abort();
-    invoiceChecks.current.clear();
-    setAnswer(null); setError(""); setInvoices([]); setReviewingId(null); setPreviewingId(null); setSubmittingId(null);
-  }, [stationId]);
   useEffect(() => () => {
+    window.clearTimeout(dsrRouteTimer.current);
     for (const controller of invoiceChecks.current.values()) controller.abort();
     invoiceChecks.current.clear();
   }, []);
@@ -234,19 +258,19 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
 
   const processInvoices = async (items: LocalInvoice[]) => {
     const routeDsr = (item: LocalInvoice, text: string, classifiedProduct?: "HSD" | "MS" | "UNKNOWN") => {
+      if (!invoiceChecks.current.has(item.id) || dsrRouteTimer.current !== undefined) return;
       if (item.file.size > 5 * 1024 * 1024) {
         setInvoices(current => current.map(invoice => invoice.id === item.id ? { ...invoice, status: "error", progressLabel: "This DSR is larger than 5 MB. Compress it and try again." } : invoice));
-        return true;
+        return;
       }
       invoiceChecks.current.get(item.id)?.abort();
       invoiceChecks.current.delete(item.id);
       setDsrRecognition({ fileName: item.file.name, status: "recognised" });
       setInvoices(current => current.filter(invoice => invoice.id !== item.id));
-      window.setTimeout(() => {
+      dsrRouteTimer.current = window.setTimeout(() => {
         setDsrRecognition({ fileName: item.file.name, status: "routing" });
         navigate("/sales/history/import", { state: { intelligenceDocument: { kind: "DSR", file: item.file, stationId, productCode: classifiedProduct && classifiedProduct !== "UNKNOWN" ? classifiedProduct : detectDsrProduct(text) } } });
       }, 650);
-      return true;
     };
     const classifyAmbiguous = async (item: LocalInvoice) => {
       if (item.file.size > 5 * 1024 * 1024 || !['application/pdf', 'image/jpeg', 'image/png'].includes(item.file.type || mimeFromFileName(item.file.name))) return { kind: 'UNKNOWN' as const, confidence: 0, productCode: 'UNKNOWN' as const };
@@ -375,7 +399,9 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
     if (!stationId || value.length < 3 || asking) return;
     setAsking(true); setError("");
     try {
-      setAnswer(await api.askFuelNerve({ requestId: crypto.randomUUID(), question: value, stationId }));
+      const answer = await api.askFuelNerve({ requestId: crypto.randomUUID(), question: value, stationId });
+      setReply({ question: value, answer });
+      setQuestion(current => current.trim() === value ? "" : current);
     } catch (caught) {
       setError(caught instanceof ApiRequestError ? caught.message : "Nerve Intelligence could not answer right now.");
     } finally { setAsking(false); }
@@ -385,56 +411,97 @@ function AskNerveBar({ stationId, stationName, isDemo, onRecordsChanged }: { sta
   const previewingInvoice = invoices.find(invoice => invoice.id === previewingId && invoice.draft && invoice.reviewed);
   const submittingInvoice = invoices.find(invoice => invoice.id === submittingId && invoice.draft && invoice.reviewed && !invoice.submitted);
 
-  return <section className="nerve-ask-bar" aria-label="Ask Nerve Intelligence">
-    <div className="nerve-ask-heading"><div><Sparkles/><span><strong>Ask Nerve Intelligence</strong><small>Ask about {stationName ?? "this station"}, or upload a document for automatic routing.</small></span></div><span><ShieldCheck/> No records change without your confirmation</span></div>
-    {dsrRecognition && <div className="nerve-dsr-route" role="status" aria-live="polite"><span className="nerve-dsr-scan"><FileText/><i/><i/><i/></span><div><small>Nerve Intelligence recognised</small><strong>Daily sales register</strong><p>{dsrRecognition.fileName} · {dsrRecognition.status === "recognised" ? "Preparing the historical register workspace…" : "Opening the review grid…"}</p></div><ArrowRight/></div>}
-    {invoices.length > 0 && <div className="nerve-local-invoices" aria-label="Invoices selected on this device" aria-live="polite">
-      {invoices.map(invoice => { const duplicate = invoice.draft ? findDuplicateInvoiceForDraft(invoice.draft, purchaseRecords.suppliers, purchaseRecords.invoices) : undefined; return <div key={invoice.id} className={invoice.status}><InvoiceStatusIcon status={invoice.status}/><span><strong>{invoice.file.name}</strong><small>{invoiceStatusText(invoice)}</small></span><button type="button" aria-label={`Remove ${invoice.file.name}`} onClick={() => { invoiceChecks.current.get(invoice.id)?.abort(); invoiceChecks.current.delete(invoice.id); setInvoices(current => current.filter(item => item.id !== invoice.id)); }}><X/></button>{invoice.parsed && invoice.draft && <InvoiceDetails invoice={invoice.parsed} draft={invoice.draft} stationName={stationName} catalogProducts={catalogProducts} duplicate={duplicate} reviewed={Boolean(invoice.reviewed)} submitted={invoice.submitted} onReview={() => setReviewingId(invoice.id)} onPreview={() => setPreviewingId(invoice.id)}/>} {invoice.extractedText && <details className="nerve-text-preview"><summary>View the text read from this document</summary><p>{invoice.extractedText.slice(0, 1_200)}{invoice.extractedText.length > 1_200 ? "…" : ""}</p></details>}</div>; })}
-    </div>}
-    <form onSubmit={ask}>
-      <div className="nerve-attach" ref={attachmentMenu}>
-        <button type="button" className="nerve-add-button" aria-label="Add invoice" aria-expanded={attachmentMenuOpen} onClick={() => setAttachmentMenuOpen(open => !open)}><Plus/></button>
-        {attachmentMenuOpen && <div className="nerve-attach-menu" role="menu"><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><Paperclip/><span><strong>Upload invoices or DSRs</strong><small>Automatic document recognition · PDF, JPEG, PNG or WebP</small></span></button></div>}
-        <input ref={fileInput} type="file" hidden multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={event => chooseInvoices(event.target.files)}/>
-      </div>
-      <input aria-label="Ask Nerve Intelligence" value={question} onChange={event => setQuestion(event.target.value)} placeholder="Ask what needs your attention…"/>
-      <button type="submit" className="nerve-send-button" disabled={!stationId || question.trim().length < 3 || asking}>{asking ? <RefreshCw className="spinning"/> : <Send/>}<span>{asking ? "Checking" : "Ask"}</span></button>
-    </form>
-    {error && <p className="ask-error" role="alert">{error}</p>}
-    {answer && <div className="ask-answer"><header><Sparkles/><div><small>{answer.answerMode === "AI_EXPLAINED" ? "Nerve Intelligence" : "Verified answer"}</small><h3>{answer.answer.title}</h3></div></header><p>{answer.answer.explanation}</p>{answer.answer.facts.length > 0 && <div className="ask-facts">{answer.answer.facts.slice(0, 3).map(fact => <div key={fact.id}><span><small>{fact.label}</small><strong>{fact.value}</strong><em>{fact.context}</em></span></div>)}</div>}<footer>{answer.answer.action}</footer></div>}
-    {reviewingInvoice?.draft && <EditableInvoiceReviewDialog
-      fileName={reviewingInvoice.file.name}
-      initialDraft={reviewingInvoice.draft}
-      onCancel={() => setReviewingId(null)}
-      onKeep={draft => {
-        setInvoices(current => current.map(invoice => invoice.id === reviewingInvoice.id ? { ...invoice, draft, reviewed: true } : invoice));
-        setReviewingId(null);
-      }}
-    />}
-    {previewingInvoice?.draft && <InvoiceChangePreviewDialog
-      fileName={previewingInvoice.file.name}
-      draft={previewingInvoice.draft}
-      stationName={stationName ?? "the selected fuel station"}
-      isDemo={isDemo}
-      catalogProducts={catalogProducts}
-      onBack={() => { setPreviewingId(null); setReviewingId(previewingInvoice.id); }}
-      onClose={() => setPreviewingId(null)}
-      {...(importEnabled && assessInvoiceStation(previewingInvoice.draft.consigneeName, stationName).status === "MATCH" ? { onContinue: () => { setPreviewingId(null); setSubmittingId(previewingInvoice.id); } } : {})}
-    />}
-    {submittingInvoice?.draft && stationId && <ConfirmedPurchaseDialog
-      draft={submittingInvoice.draft}
-      stationId={stationId}
-      stationName={stationName ?? "the selected fuel station"}
-      isDemo={isDemo}
-      onBack={() => { setSubmittingId(null); setPreviewingId(submittingInvoice.id); }}
-      onClose={() => setSubmittingId(null)}
-      onSubmitted={(created, priceApprovals) => {
-        setInvoices(current => current.map(invoice => invoice.id === submittingInvoice.id ? { ...invoice, submitted: { id: created.id, invoiceNumber: created.invoiceNumber } } : invoice));
-        setPurchaseRecords(current => ({ ...current, invoices: current.invoices.some(invoice => invoice.id === created.id) ? current.invoices : [created, ...current.invoices] }));
-        if (priceApprovals.length > 0) onRecordsChanged();
-      }}
-    />}
-  </section>;
+  const openChat = () => {
+    chat.current?.showModal();
+    setChatOpen(true);
+    if (window.matchMedia?.("(pointer: fine)").matches) composer.current?.focus();
+  };
+
+  const closeChat = () => {
+    chat.current?.close();
+    setChatOpen(false);
+    setAttachmentMenuOpen(false);
+    launcher.current?.focus();
+  };
+
+  const documentReviewOpen = Boolean(reviewingInvoice || previewingInvoice || submittingInvoice);
+  const answer = reply?.answer;
+
+  return <>
+    <button ref={launcher} type="button" className="nerve-chat-launcher" aria-haspopup="dialog" aria-controls="nerve-chat" aria-expanded={chatOpen} onClick={openChat}>
+      <Sparkles aria-hidden="true" /> Ask Nerve Intelligence
+    </button>
+    <dialog ref={chat} id="nerve-chat" className="nerve-chat-dialog" aria-modal="true" aria-labelledby="nerve-chat-title" onCancel={event => {
+      event.preventDefault();
+      if (!documentReviewOpen) closeChat();
+    }} onKeyDown={event => {
+      if (event.key === "Escape" && attachmentMenuOpen) {
+        event.preventDefault();
+        setAttachmentMenuOpen(false);
+        attachmentMenu.current?.querySelector("button")?.focus();
+      }
+    }}>
+      <section className="nerve-ask-bar" inert={documentReviewOpen}>
+        <header className="nerve-ask-heading">
+          <Sparkles aria-hidden="true" />
+          <div><h2 id="nerve-chat-title">Ask Nerve Intelligence</h2><p>{stationName ?? "Selected fuel station"}</p></div>
+          <button type="button" aria-label="Close chat" onClick={closeChat}><X aria-hidden="true" /></button>
+        </header>
+        <div className="nerve-chat-content">
+          {!reply && !asking && !invoices.length && !dsrRecognition && <p className="nerve-chat-welcome">Ask about your fuel station or attach an invoice or daily sales register.</p>}
+          {dsrRecognition && <div className="nerve-dsr-route" role="status" aria-live="polite"><span className="nerve-dsr-scan"><FileText/><i/><i/><i/></span><div><small>Nerve Intelligence recognised</small><strong>Daily sales register</strong><p>{dsrRecognition.fileName} · {dsrRecognition.status === "recognised" ? "Preparing the historical register workspace…" : "Opening the review grid…"}</p></div><ArrowRight/></div>}
+          {invoices.length > 0 && <div className="nerve-local-invoices" aria-label="Invoices selected on this device" aria-live="polite">
+            {invoices.map(invoice => { const duplicate = invoice.draft ? findDuplicateInvoiceForDraft(invoice.draft, purchaseRecords.suppliers, purchaseRecords.invoices) : undefined; return <div key={invoice.id} className={invoice.status}><InvoiceStatusIcon status={invoice.status}/><span><strong>{invoice.file.name}</strong><small>{invoiceStatusText(invoice)}</small></span><button type="button" aria-label={`Remove ${invoice.file.name}`} onClick={() => { invoiceChecks.current.get(invoice.id)?.abort(); invoiceChecks.current.delete(invoice.id); setInvoices(current => current.filter(item => item.id !== invoice.id)); }}><X/></button>{invoice.parsed && invoice.draft && <InvoiceDetails invoice={invoice.parsed} draft={invoice.draft} stationName={stationName} catalogProducts={catalogProducts} duplicate={duplicate} reviewed={Boolean(invoice.reviewed)} submitted={invoice.submitted} onReview={() => setReviewingId(invoice.id)} onPreview={() => setPreviewingId(invoice.id)}/>} {invoice.extractedText && <details className="nerve-text-preview"><summary>View the text read from this document</summary><p>{invoice.extractedText.slice(0, 1_200)}{invoice.extractedText.length > 1_200 ? "…" : ""}</p></details>}</div>; })}
+          </div>}
+          {error && <p className="ask-error" role="alert">{error}</p>}
+          {reply && <p className="nerve-chat-question" ref={submittedQuestion}>{reply.question}</p>}
+          {answer && <div className="ask-answer" aria-live="polite"><header><Sparkles/><div><small>{answer.answerMode === "AI_EXPLAINED" ? "Nerve Intelligence" : "Verified answer"}</small><h3>{answer.answer.title}</h3></div></header><p>{answer.answer.explanation}</p>{answer.answer.facts.length > 0 && <div className="ask-facts">{answer.answer.facts.slice(0, 3).map(fact => <div key={fact.id}><span><small>{fact.label}</small><strong>{fact.value}</strong><em>{fact.context}</em></span></div>)}</div>}<footer>{answer.answer.action}</footer></div>}
+          {asking && <p className="nerve-chat-welcome" role="status">Checking your fuel station records…</p>}
+        </div>
+        <form onSubmit={ask}>
+          <div className="nerve-attach" ref={attachmentMenu}>
+            <button type="button" className="nerve-add-button" aria-label="Add invoice" aria-expanded={attachmentMenuOpen} onClick={() => setAttachmentMenuOpen(open => !open)}><Plus/></button>
+            {attachmentMenuOpen && <div className="nerve-attach-menu" role="menu"><button type="button" role="menuitem" onClick={() => fileInput.current?.click()}><Paperclip/><span><strong>Upload invoices or DSRs</strong><small>Automatic document recognition · PDF, JPEG, PNG or WebP</small></span></button></div>}
+            <input ref={fileInput} type="file" hidden multiple accept="application/pdf,image/jpeg,image/png,image/webp" onChange={event => chooseInvoices(event.target.files)}/>
+          </div>
+          <input ref={composer} type="text" aria-label="Ask Nerve Intelligence" value={question} onChange={event => setQuestion(event.target.value)} placeholder="Ask what needs your attention…"/>
+          <button type="submit" className="nerve-send-button" aria-label={asking ? "Checking" : "Ask"} disabled={!stationId || question.trim().length < 3 || asking}>{asking ? <RefreshCw className="spinning"/> : <Send/>}<span>{asking ? "Checking" : "Ask"}</span></button>
+        </form>
+      </section>
+      {reviewingInvoice?.draft && <EditableInvoiceReviewDialog
+        fileName={reviewingInvoice.file.name}
+        initialDraft={reviewingInvoice.draft}
+        onCancel={() => setReviewingId(null)}
+        onKeep={draft => {
+          setInvoices(current => current.map(invoice => invoice.id === reviewingInvoice.id ? { ...invoice, draft, reviewed: true } : invoice));
+          setReviewingId(null);
+        }}
+      />}
+      {previewingInvoice?.draft && <InvoiceChangePreviewDialog
+        fileName={previewingInvoice.file.name}
+        draft={previewingInvoice.draft}
+        stationName={stationName ?? "the selected fuel station"}
+        isDemo={isDemo}
+        catalogProducts={catalogProducts}
+        onBack={() => { setPreviewingId(null); setReviewingId(previewingInvoice.id); }}
+        onClose={() => setPreviewingId(null)}
+        {...(importEnabled && assessInvoiceStation(previewingInvoice.draft.consigneeName, stationName).status === "MATCH" ? { onContinue: () => { setPreviewingId(null); setSubmittingId(previewingInvoice.id); } } : {})}
+      />}
+      {submittingInvoice?.draft && stationId && <ConfirmedPurchaseDialog
+        draft={submittingInvoice.draft}
+        stationId={stationId}
+        stationName={stationName ?? "the selected fuel station"}
+        isDemo={isDemo}
+        onBack={() => { setSubmittingId(null); setPreviewingId(submittingInvoice.id); }}
+        onClose={() => setSubmittingId(null)}
+        onSubmitted={(created, priceApprovals) => {
+          setInvoices(current => current.map(invoice => invoice.id === submittingInvoice.id ? { ...invoice, submitted: { id: created.id, invoiceNumber: created.invoiceNumber } } : invoice));
+          setPurchaseRecords(current => ({ ...current, invoices: current.invoices.some(invoice => invoice.id === created.id) ? current.invoices : [created, ...current.invoices] }));
+          if (priceApprovals.length > 0) onRecordsChanged();
+        }}
+      />}
+    </dialog>
+  </>;
 }
 
 function fileSize(bytes: number) {
