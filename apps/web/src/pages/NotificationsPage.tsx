@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BellRing, Check, MessageCircleMore, RefreshCw, TriangleAlert } from 'lucide-react';
+import { ArrowRight, BellRing, Check, MessageCircleMore, RefreshCw, TriangleAlert } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../components/AuthProvider';
 import { ApiRequestError, api, type NotificationBootstrap, type NotificationDelivery, type NotificationSettings } from '../lib/api';
@@ -61,7 +61,7 @@ export function NotificationsPage() {
   const edit = <K extends keyof NotificationSettings>(key: K, value: NotificationSettings[K]) =>
     setSettings(current => current ? { ...current, [key]: value } : current);
   const choice = (key: 'whatsappOptedIn' | 'dailySummaryEnabled' | 'lowStockEnabled' | 'shiftSummaryEnabled' | 'receiptSummaryEnabled' | 'overdueCustomerEnabled' | 'customerReminderScheduled', title: string, detail?: string) =>
-    <label className="notification-rule"><span><BellRing /></span><div><b>{title}</b>{detail && <small>{detail}</small>}</div><input type="checkbox" checked={settings[key]} onChange={event => edit(key, event.target.checked)} /><i /></label>;
+    <label className="notification-rule"><span className="notification-rule-icon" aria-hidden="true"><BellRing /></span><span className="notification-rule-copy"><b>{title}</b>{detail && <small>{detail}</small>}</span><input type="checkbox" checked={settings[key]} onChange={event => edit(key, event.target.checked)} /><i /></label>;
 
   async function act(run: () => Promise<void>) {
     setBusy(true); setError(''); setNotice('');
@@ -106,7 +106,7 @@ export function NotificationsPage() {
         <p>Review and approve individual reminders from the customer profile. Customers must consent before receiving reminders.</p>
         {choice('customerReminderScheduled', 'Send scheduled reminders', 'Automatically remind eligible customers with verified overdue balances. A customer receives at most one reminder every seven days.')}
         {settings.customerReminderScheduled && <TimePicker label="Scheduled reminder time" value={settings.customerReminderHour} onChange={hour => edit('customerReminderHour', hour)} />}
-        <Link to="/customers">Open customer accounts</Link>
+        <Link className="notification-action" to="/customers">Open customer accounts <ArrowRight size={16} aria-hidden="true" /></Link>
       </aside>}
     </section>
     <div className="editor-footer">

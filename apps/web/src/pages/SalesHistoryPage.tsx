@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import { Activity, ArrowLeft, CalendarDays, FileUp, Gauge, Info, RefreshCw, TrendingUp } from 'lucide-react';
+import { Activity, ArrowLeft, FileUp, Gauge, Info, RefreshCw, TrendingUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useStation } from '../components/StationProvider';
 import { api, ApiRequestError, type SalesHistory } from '../lib/api';
 import { addIndiaDays, formatIndiaCalendarDate, indiaDate } from '../lib/india-time';
+import '../sales-history.css';
 
 type Fuel = 'MS' | 'HSD';
 type Day = { date: string; MS: { litres: number; revenue: number; transactions: number }; HSD: { litres: number; revenue: number; transactions: number } };
@@ -64,14 +65,48 @@ export function SalesHistoryPage() {
   const dayChange = previousRevenue > 0 ? (selectedRevenue - previousRevenue) / previousRevenue * 100 : null;
   const preset = (count: number) => { setEndDate(today); setStartDate(addIndiaDays(today, -(count - 1))); };
   return <main className="page sales-history-page">
-    <Link className="back-link" to="/"><ArrowLeft/> Back to dashboard</Link>
-    <div className="page-heading"><div><span className="eyebrow">Historical fuel sales</span><h1>MS and HSD sales over time</h1><p>Compare daily litres and sales value using India business dates.</p></div><Link className="primary small" to="/sales/history/import"><FileUp/> Import past register</Link></div>
-    <section className="sales-history-filter"><div className="sales-history-presets"><button onClick={() => preset(7)}>7 days</button><button onClick={() => preset(30)}>30 days</button><button onClick={() => preset(90)}>90 days</button></div><div className="sales-history-fields"><CalendarDays/><label>From<input type="date" value={startDate} max={endDate} onChange={event => setStartDate(event.target.value)}/></label><label>To<input type="date" value={endDate} min={startDate} max={today} onChange={event => setEndDate(event.target.value)}/></label><label>Fuel station<select value={stationId} onChange={event => { setStationId(event.target.value); selectStation(event.target.value); }}><option value="">All permitted fuel stations</option>{stations.map(station => <option key={station.id} value={station.id}>{station.name}</option>)}</select></label><button className="primary small" onClick={() => void load()} disabled={loading}><RefreshCw/> {loading ? 'Loading…' : 'Refresh'}</button></div></section>
-    {error && <div className="form-error">{error}</div>}
+    <header className="sales-history-hero">
+      <div>
+        <Link className="back-link" to="/"><ArrowLeft aria-hidden="true"/> Dashboard</Link>
+        <h1>Fuel sales history</h1>
+        <p>Track daily MS and HSD volumes and sales value.</p>
+      </div>
+      <Link className="primary small" to="/sales/history/import"><FileUp aria-hidden="true"/> Import past register</Link>
+    </header>
+    <section className="sales-history-filter" aria-label="Sales history filters">
+      <div className="sales-history-presets" role="group" aria-label="Quick date ranges">
+        {[7, 30, 90].map(count => (
+          <button key={count} type="button" aria-pressed={endDate === today && startDate === addIndiaDays(today, 1 - count)} onClick={() => preset(count)}>
+            {count} days
+          </button>
+        ))}
+      </div>
+      <div className="sales-history-fields">
+        <label>From<input type="date" value={startDate} max={endDate} onChange={event => setStartDate(event.target.value)}/></label>
+        <label>To<input type="date" value={endDate} min={startDate} max={today} onChange={event => setEndDate(event.target.value)}/></label>
+        <label>Fuel station<select value={stationId} onChange={event => { setStationId(event.target.value); selectStation(event.target.value); }}>
+          <option value="">All permitted fuel stations</option>
+          {stations.map(station => <option key={station.id} value={station.id}>{station.name}</option>)}
+        </select></label>
+        <button type="button" className="secondary small" onClick={() => void load()} disabled={loading}><RefreshCw aria-hidden="true"/> {loading ? 'Loading…' : 'Refresh'}</button>
+      </div>
+    </section>
+    {error && <div className="form-error" role="alert">{error}</div>}
     {loading && !data ? <div className="loading"><span/><p>Preparing fuel sales trends…</p></div> : <>
-      <section className="fuel-history-summary"><article className="ms"><span>MS</span><div><small>Total volume</small><b>{litres(totals.MS.litres)}</b></div><div><small>Sales value</small><b>{money(totals.MS.revenue)}</b></div><div><small>Average realised rate</small><b>{rate(totals.MS.revenue,totals.MS.litres)}</b></div></article><article className="hsd"><span>HSD</span><div><small>Total volume</small><b>{litres(totals.HSD.litres)}</b></div><div><small>Sales value</small><b>{money(totals.HSD.revenue)}</b></div><div><small>Average realised rate</small><b>{rate(totals.HSD.revenue,totals.HSD.litres)}</b></div></article></section>
+      <section className="fuel-history-summary" aria-label="Fuel totals for the selected period">
+        {(['MS', 'HSD'] as const).map(kind => (
+          <article key={kind} className={kind.toLowerCase()}>
+            <h2>{kind}</h2>
+            <dl>
+              <div><dt>Total volume</dt><dd>{litres(totals[kind].litres)}</dd></div>
+              <div><dt>Sales value</dt><dd>{money(totals[kind].revenue)}</dd></div>
+              <div><dt>Avg. realised rate</dt><dd>{rate(totals[kind].revenue, totals[kind].litres)}</dd></div>
+            </dl>
+          </article>
+        ))}
+      </section>
       <section className="fuel-history-insights"><article><Activity/><span><small>Active sales days</small><b>{context.active.length} of {days.length}</b><em>Days with recorded MS or HSD sales</em></span></article><article><TrendingUp/><span><small>Best sales day</small><b>{context.best?money(context.best.MS.revenue+context.best.HSD.revenue):'—'}</b><em>{context.best?formatIndiaCalendarDate(context.best.date,{weekday:'short',day:'numeric',month:'short'}):'No recorded sales'}</em></span></article><article><Gauge/><span><small>Average active-day volume</small><b>{litres(context.averageVolume)}</b><em>MS and HSD combined</em></span></article><article className="mix"><span><small>Volume mix</small><b>MS {percent(context.msShare)} · HSD {percent(context.hsdShare)}</b><i><u style={{width:`${context.msShare}%`}}/><u style={{width:`${context.hsdShare}%`}}/></i></span></article></section>
-      {context.firstRecorded&&context.firstRecorded>startDate&&<div className="fuel-data-note"><Info/><span><b>Recorded sales begin on {formatIndiaCalendarDate(context.firstRecorded,{day:'numeric',month:'long',year:'numeric'})}.</b> Dates before this have no recorded MS or HSD transactions; they should not automatically be treated as confirmed zero-sales days.</span></div>}
+      {context.firstRecorded&&context.firstRecorded>startDate&&<div className="fuel-data-note"><Info/><span><b>Recorded sales begin on {formatIndiaCalendarDate(context.firstRecorded,{day:'numeric',month:'long',year:'numeric'})}.</b> Sales before that date are unverified.</span></div>}
       {selectedDay&&<section className="fuel-hover-summary" aria-live="polite"><header><span><small>Selected date</small><b>{formatIndiaCalendarDate(selectedDay.date,{weekday:'long',day:'numeric',month:'long',year:'numeric'})}</b></span><em className={dayChange===null?'neutral':dayChange>=0?'up':'down'}>{dayChange===null?'No prior-day comparison':`${dayChange>=0?'+':''}${percent(dayChange)} vs previous day`}</em></header><div>
         <span className="ms"><small>MS performance</small><span className="fuel-day-value-pair"><span><em>Litres sold</em><b>{litres(selectedDay.MS.litres)}</b></span><span><em>Sales value</em><b>{money(selectedDay.MS.revenue)}</b></span></span><em className="fuel-rsp-note">RSP {rate(selectedDay.MS.revenue,selectedDay.MS.litres)} · {selectedDay.MS.transactions} sale{selectedDay.MS.transactions===1?'':'s'}</em></span>
         <span className="hsd"><small>HSD performance</small><span className="fuel-day-value-pair"><span><em>Litres sold</em><b>{litres(selectedDay.HSD.litres)}</b></span><span><em>Sales value</em><b>{money(selectedDay.HSD.revenue)}</b></span></span><em className="fuel-rsp-note">RSP {rate(selectedDay.HSD.revenue,selectedDay.HSD.litres)} · {selectedDay.HSD.transactions} sale{selectedDay.HSD.transactions===1?'':'s'}</em></span>
@@ -79,13 +114,37 @@ export function SalesHistoryPage() {
         <span><small>Total sales value</small><b>{money(selectedRevenue)}</b><em>Litres sold × recorded RSP</em></span>
       </div></section>}
       <section className="fuel-chart-grid"><TrendChart title="Daily volume" subtitle="Litres sold" days={days} metric="litres" selectedIndex={selectedIndex} onHover={setHoverIndex}/><TrendChart title="Daily sales value" subtitle="Rupees at recorded RSP" days={days} metric="revenue" selectedIndex={selectedIndex} onHover={setHoverIndex}/></section>
-      <section className="fuel-day-list"><header><div><span className="eyebrow">Date-wise details</span><h2>Every day in the selected period</h2></div><b>{formatIndiaCalendarDate(startDate,{day:'numeric',month:'short'})} – {formatIndiaCalendarDate(endDate,{day:'numeric',month:'short',year:'numeric'})}</b></header><div className="fuel-day-head"><span>Date</span><span>MS litres</span><span>MS sales</span><span>HSD litres</span><span>HSD sales</span><span>Total sales</span></div>{[...days].reverse().map(day => <div className="fuel-day-row" key={day.date}><span><b>{formatIndiaCalendarDate(day.date,{weekday:'short'})}</b><small>{formatIndiaCalendarDate(day.date,{day:'numeric',month:'short',year:'numeric'})}</small></span><span>{litres(day.MS.litres)}</span><span>{money(day.MS.revenue)}</span><span>{litres(day.HSD.litres)}</span><span>{money(day.HSD.revenue)}</span><strong>{money(day.MS.revenue + day.HSD.revenue)}</strong></div>)}</section>
+      <section className="fuel-day-list">
+        <header>
+          <h2 id="fuel-day-list-heading">Daily sales breakdown</h2>
+          <b>{formatIndiaCalendarDate(startDate, { day: 'numeric', month: 'short' })} – {formatIndiaCalendarDate(endDate, { day: 'numeric', month: 'short', year: 'numeric' })}</b>
+        </header>
+        <div className="fuel-day-table-wrap" role="region" tabIndex={0} aria-labelledby="fuel-day-list-heading">
+          <table>
+            <thead>
+              <tr>{['Date', 'MS litres', 'MS sales', 'HSD litres', 'HSD sales', 'Total sales'].map(label => <th key={label} scope="col">{label}</th>)}</tr>
+            </thead>
+            <tbody>
+              {[...days].reverse().map(day => (
+                <tr key={day.date}>
+                  <th scope="row"><time dateTime={day.date}>{formatIndiaCalendarDate(day.date, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}</time></th>
+                  <td>{litres(day.MS.litres)}</td>
+                  <td>{money(day.MS.revenue)}</td>
+                  <td>{litres(day.HSD.litres)}</td>
+                  <td>{money(day.HSD.revenue)}</td>
+                  <td><strong>{money(day.MS.revenue + day.HSD.revenue)}</strong></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </>}
   </main>;
 }
 
 function TrendChart({ title, subtitle, days, metric, selectedIndex, onHover }: { title: string; subtitle: string; days: Day[]; metric: 'litres' | 'revenue'; selectedIndex: number; onHover(index: number): void }) {
-  const width = 900, height = 250, padX = 70, padTop = 20, padBottom = 34;
+  const width = 600, height = 230, padX = 60, padTop = 20, padBottom = 32;
   const values = days.flatMap(day => [day.MS[metric], day.HSD[metric]]), high = Math.max(...values, 1);
   const x = (index: number) => days.length <= 1 ? width / 2 : padX + index * ((width - padX * 2) / (days.length - 1));
   const y = (value: number) => padTop + (height - padTop - padBottom) * (1 - value / high);
@@ -94,5 +153,5 @@ function TrendChart({ title, subtitle, days, metric, selectedIndex, onHover }: {
   const move = (event: PointerEvent<SVGSVGElement>) => { if (!days.length) return; const bounds=event.currentTarget.getBoundingClientRect();const viewX=(event.clientX-bounds.left)/Math.max(bounds.width,1)*width;const index=days.length<=1?0:Math.round((viewX-padX)/(width-padX*2)*(days.length-1));onHover(Math.min(days.length-1,Math.max(0,index))); };
   const keys = (event: KeyboardEvent<SVGSVGElement>) => { if(event.key==='ArrowLeft'){event.preventDefault();onHover(Math.max(0,selectedIndex-1));}if(event.key==='ArrowRight'){event.preventDefault();onHover(Math.min(days.length-1,selectedIndex+1));} };
   const compact=(value:number)=>metric==='litres'?`${new Intl.NumberFormat('en-IN',{notation:'compact',maximumFractionDigits:1}).format(value)} L`:new Intl.NumberFormat('en-IN',{notation:'compact',style:'currency',currency:'INR',maximumFractionDigits:1}).format(value);
-  return <article className="fuel-trend-card"><header><div><span className="eyebrow">{subtitle}</span><h2>{title}</h2></div><div className="fuel-legend"><span className="ms">MS</span><span className="hsd">HSD</span></div></header><p className="fuel-chart-hint">Move across the graph for exact daily values. Use ← and → when focused.</p><div className="fuel-svg-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} for MS and HSD`} tabIndex={0} onPointerMove={move} onKeyDown={keys}>{[0,.5,1].map(part=><g key={part}><line x1={padX} y1={y(high*part)} x2={width-padX} y2={y(high*part)} className="grid-line"/><text x={padX-7} y={y(high*part)+4} textAnchor="end" className="axis-label">{compact(high*part)}</text></g>)}<path d={path('MS')} className="ms-line"/><path d={path('HSD')} className="hsd-line"/>{days.length>0&&<line x1={x(selectedIndex)} y1={padTop} x2={x(selectedIndex)} y2={height-padBottom} className="hover-line"/>}{days.map((day,index) => <g key={day.date} data-selected={index===selectedIndex}><circle cx={x(index)} cy={y(day.MS[metric])} r={index===selectedIndex?'7':'4'} className="ms-dot"><title>{day.date}: MS {metric === 'litres' ? litres(day.MS.litres) : money(day.MS.revenue)}</title></circle><circle cx={x(index)} cy={y(day.HSD[metric])} r={index===selectedIndex?'7':'4'} className="hsd-dot"><title>{day.date}: HSD {metric === 'litres' ? litres(day.HSD.litres) : money(day.HSD.revenue)}</title></circle>{(index % labelEvery === 0 || index === days.length - 1) && <text x={x(index)} y={height-10} textAnchor="middle">{formatIndiaCalendarDate(day.date,{day:'numeric',month:'short'})}</text>}</g>)}</svg></div></article>;
+  return <article className="fuel-trend-card"><header><div><span className="eyebrow">{subtitle}</span><h2>{title}</h2></div><div className="fuel-legend"><span className="ms">MS</span><span className="hsd">HSD</span></div></header><p className="fuel-chart-hint">Move across the graph for exact daily values. Use ← and → when focused.</p><div className="fuel-svg-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${title} for MS and HSD`} tabIndex={0} onPointerMove={move} onKeyDown={keys}>{[0,.5,1].map(part=><g key={part}><line x1={padX} y1={y(high*part)} x2={width-padX} y2={y(high*part)} className="grid-line"/><text x={padX-7} y={y(high*part)+4} textAnchor="end" className="axis-label">{compact(high*part)}</text></g>)}<path d={path('MS')} className="ms-line"/><path d={path('HSD')} className="hsd-line"/>{days.length>0&&<line x1={x(selectedIndex)} y1={padTop} x2={x(selectedIndex)} y2={height-padBottom} className="hover-line"/>}{days.map((day,index) => <g key={day.date} data-selected={index===selectedIndex}><circle cx={x(index)} cy={y(day.MS[metric])} r={index===selectedIndex?'7':'4'} className="ms-dot"><title>{day.date}: MS {metric === 'litres' ? litres(day.MS.litres) : money(day.MS.revenue)}</title></circle><circle cx={x(index)} cy={y(day.HSD[metric])} r={index===selectedIndex?'7':'4'} className="hsd-dot"><title>{day.date}: HSD {metric === 'litres' ? litres(day.HSD.litres) : money(day.HSD.revenue)}</title></circle>{(index === days.length - 1 || (index % labelEvery === 0 && days.length - 1 - index >= labelEvery)) && <text x={x(index)} y={height-10} textAnchor="middle">{formatIndiaCalendarDate(day.date,{day:'numeric',month:'short'})}</text>}</g>)}</svg></div></article>;
 }

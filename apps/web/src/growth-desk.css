@@ -29,3 +29,68 @@
 @media(max-width:650px){.activation-checks fieldset>div,.activation-plan>div,.activation-confirmations,.admin-whatsapp-body,.admin-alert-choices,.admin-whatsapp-thresholds{grid-template-columns:1fr!important}.leads-stats.three{grid-template-columns:1fr}}
 .plan-status.active{background:#cef756;color:#173f35}
 .subscription-contact.active{display:flex;align-items:center;justify-content:center;background:#def5e8;color:#17684f;border-radius:12px;font-weight:800}
+
+.whatsapp-rollout.leads-list { margin-block: 16px; }
+.whatsapp-rollout > header { align-items: center; flex-wrap: wrap; }
+.rollout-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: var(--mint);
+  color: var(--green);
+  font-size: 12px;
+  font-weight: 750;
+}
+.rollout-status[data-paused="true"] { background: #fff4df; color: #795318; }
+.rollout-body { padding-top: 16px; }
+.rollout-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  align-items: start;
+  gap: 16px;
+}
+.rollout-accounts { display: grid; gap: 14px; min-width: 0; }
+.rollout-fields fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fbf9;
+}
+.rollout-fields legend { padding-inline: 5px; color: var(--forest); font-size: 13px; font-weight: 800; }
+.rollout-account-list { display: grid; gap: 6px; max-height: 180px; overflow-y: auto; }
+.rollout-category-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.rollout-empty { margin: 0; padding: 6px 2px; color: var(--muted); font-size: 13px; }
+.rollout-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--forest);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.rollout-check:has(input:checked) { border-color: #a2cbba; background: var(--mint); }
+.rollout-check input { flex: none; width: 16px; height: 16px; margin: 0; accent-color: var(--green); }
+.rollout-save, .rollout-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 14px; }
+.rollout-save { justify-content: space-between; }
+.rollout-actions { padding-top: 14px; border-top: 1px solid var(--line); }
+.whatsapp-rollout :is(.primary, .secondary) { min-height: 40px; gap: 7px; margin: 0; }
+.whatsapp-rollout .secondary:disabled { cursor: default; opacity: .5; }
+.whatsapp-rollout :is(button, input, select, summary):focus-visible { outline: 2px solid var(--green); outline-offset: 3px; }
+.rollout-body > details { margin-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+.rollout-body > details > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-block: 10px; color: var(--forest); font-weight: 750; cursor: pointer; list-style: none; }
+.rollout-body > details > summary::-webkit-details-marker { display: none; }
+.rollout-body > details[open] > summary svg { transform: rotate(180deg); }
+.service-ticket-list > header p { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+@media (max-width: 1100px) { .rollout-fields { grid-template-columns: 1fr; } }
+@media (max-width: 410px) { .rollout-category-grid { grid-template-columns: 1fr; } }

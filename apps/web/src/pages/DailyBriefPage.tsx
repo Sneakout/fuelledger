@@ -18,7 +18,7 @@ function Section({ id, title, children }: { id: string; title: string; children:
 
 function Evidence({ records }: { records: BriefRecordLink[] }) {
   return records.length > 0 && <div className="brief-records">{records.map((item, index) =>
-    <Link key={`${item.path}:${index}`} to={item.path} aria-label={`View record: ${item.label}`}>View record <ArrowRight size={14} /><span>{item.label}</span></Link>
+    <Link key={`${item.path}:${index}`} to={item.path} aria-label={`View record: ${item.label}`}><span>{item.label}</span><ArrowRight size={14} aria-hidden="true" /></Link>
   )}</div>;
 }
 
@@ -107,8 +107,8 @@ function Workspace({ stationId, stationNames, selectStation }: {
   const limited = Boolean(data && (gaps.length || data.coverage.incompleteShifts || data.coverage.collectionsIncomplete || data.coverage.stockUnavailable || data.coverage.noSales));
 
   return <>
-    <header className="brief-hero"><div><p className="brief-meta">FuelNerve Intelligence</p><h1>Daily Brief</h1>
-      {data && <><p>{data.station.name} · {day(data.date)}</p><small>Records checked {time(data.checkedAt)} IST</small></>}
+    <header className="brief-hero"><div><p className="eyebrow brief-meta">FuelNerve Intelligence</p><h1>Daily Brief</h1>
+      {data && <><p className="brief-station-date">{data.station.name} · {day(data.date)}</p><small>Records checked {time(data.checkedAt)} IST</small></>}
     </div><div className="brief-controls">
       {data && !data.demo && <a className="secondary" href="#brief-ask"><Sparkles size={16} />Ask FuelNerve</a>}
       <label><span>Fuel station</span><select value={stationId} onChange={event => selectStation(event.target.value)}>{stationNames.map(station => <option value={station.id} key={station.id}>{station.name}</option>)}</select></label>

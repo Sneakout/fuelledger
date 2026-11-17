@@ -1,11 +1,15 @@
 .daily-brief { max-width: 1220px; margin-inline: auto; }
-.brief-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: clamp(22px, 4vw, 44px); border-radius: 22px; color: #eef8f2; background: linear-gradient(125deg, #113b31, #245d4d); }
-.brief-hero h1 { margin: 4px 0 8px; font-size: clamp(34px, 5vw, 56px); line-height: 1.02; color: white; }
+.brief-hero { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 24px; padding: clamp(22px, 4vw, 44px); border-radius: 22px; color: #eef8f2; background: linear-gradient(125deg, #113b31, #245d4d); }
+.brief-hero h1 { margin: 4px 0 8px; font-size: clamp(30px, 4vw, 44px); line-height: 1.08; letter-spacing: -.04em; color: white; }
 .brief-hero p { margin: 5px 0; }
-.brief-hero .brief-meta { color: #d0ee91; }
-.brief-hero small { color: #cbe2d8; }
+.brief-hero .brief-meta { color: #d6f16b; font-size: 11px; }
+.brief-station-date { font-size: 15px; font-weight: 750; }
+.brief-hero small { color: #cbe2d8; font-size: 12px; }
+.brief-controls .secondary { min-height: 44px; text-decoration: none; }
+.brief-controls .secondary:hover { background: var(--mint); }
+.brief-controls :is(a, button, select):focus-visible { outline: 2px solid #d6f16b; outline-offset: 3px; }
 .brief-controls { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; }
-.brief-controls label { display: grid; gap: 6px; min-width: 0; color: #e6f1eb; }
+.brief-controls label { display: grid; gap: 6px; min-width: 0; color: #e6f1eb; font-size: 12px; font-weight: 750; }
 .brief-controls select { width: 100%; min-width: 155px; max-width: 100%; color: #133d31; }
 .brief-status { margin-block: 10px; color: #245d4d; min-height: 0; }
 .brief-status:empty { margin: 0; }
@@ -14,7 +18,8 @@
 .brief-section { border: 1px solid #dbe6df; background: #fff; border-radius: 18px; padding: clamp(15px, 2.5vw, 28px); min-width: 0; }
 .brief-section h2 { margin: 0 0 14px; font-size: clamp(20px, 3vw, 27px); }
 .brief-section h3 { margin: 6px 0; font-size: 16px; }
-.brief-section p { margin: 5px 0 10px; overflow-wrap: anywhere; }
+.brief-section p { margin: 5px 0 10px; overflow-wrap: anywhere; line-height: 1.55; }
+.brief-section p:not(.brief-meta), .brief-coverage { font-size: 14px; }
 .brief-meta { color: #4c665b; font-size: 12px; font-weight: 700; }
 .brief-coverage { display: flex; align-items: flex-start; gap: 12px; background: #fff7e5; color: #62440e; border: 1px solid #ebd4a0; border-radius: 12px; padding: 14px; margin-bottom: 14px; }
 .brief-coverage > svg { flex: none; }
@@ -28,9 +33,11 @@
 .brief-finding-head strong { white-space: nowrap; }
 .brief-finding footer { align-items: center; margin-top: 12px; color: #435c50; font-size: 12px; flex-wrap: wrap; }
 .brief-finding footer div, .brief-records { display: flex; flex-wrap: wrap; gap: 8px; }
-.brief-records a { padding: 5px 8px; background: #edf6f1; border-radius: 6px; font-weight: 700; }
-.brief-records a span { color: #425e50; margin-inline-start: 5px; font-weight: 500; }
-.brief-section a { color: #11644c; display: inline-flex; align-items: center; gap: 4px; overflow-wrap: anywhere; }
+.brief-section a { color: var(--green); display: inline-flex; align-items: center; gap: 7px; overflow-wrap: anywhere; font-size: 13px; font-weight: 750; text-decoration: none; }
+.brief-section a svg { flex: none; }
+.brief-section a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.brief-records a { min-height: 36px; padding: 6px 10px; background: var(--mint); border-radius: 8px; }
+.brief-records a:hover { background: #dceee5; }
 .brief-section a:focus-visible, .brief-section summary:focus-visible { outline: 2px solid #12654e; outline-offset: 3px; }
 .brief-metrics, .brief-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .brief-metrics > div { padding: 14px; border-radius: 10px; background: #f0f6f2; }
@@ -59,6 +66,8 @@
 @keyframes brief-reveal { from { opacity: .7; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 700px) {
   .brief-hero { flex-direction: column; align-items: stretch; gap: 16px; }
+  .brief-controls label { order: -1; flex-basis: 100%; }
+  .brief-records a { min-height: 44px; }
   .brief-columns, .brief-metrics { grid-template-columns: 1fr; }
   .brief-finding-head, .brief-row { flex-wrap: wrap; }
   .brief-ask { flex-wrap: wrap; }

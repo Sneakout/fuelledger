@@ -1,0 +1,399 @@
+.sales-history-page {
+  --history-gap: 16px;
+  --history-panel-padding: clamp(14px, 2vw, 22px);
+  --history-ms: #008663;
+  --history-hsd: #a76d00;
+  display: grid;
+  gap: var(--history-gap);
+  min-width: 0;
+  color: var(--forest);
+}
+
+.sales-history-page :is(button, a, [tabindex]):focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 3px;
+}
+
+.sales-history-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  padding: clamp(20px, 3vw, 34px);
+  border: 1px solid #cfe1d7;
+  border-radius: 20px;
+  background: linear-gradient(125deg, #e8f4ed, #f9fcfa);
+}
+
+.sales-history-hero .back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--green);
+  font-size: .875rem;
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.sales-history-hero .back-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.sales-history-hero h1 {
+  margin: 12px 0 6px;
+  font-size: clamp(1.75rem, 2.5vw, 2.4rem);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -.04em;
+}
+
+.sales-history-hero p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .9375rem;
+  line-height: 1.5;
+}
+
+.sales-history-page :is(.primary, .secondary).small {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: auto;
+  min-height: 44px;
+  margin: 0;
+  padding: 9px 14px;
+  border-radius: 11px;
+  font-size: .875rem;
+  font-weight: 750;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.sales-history-page .small svg,
+.sales-history-hero .back-link svg {
+  flex: 0 0 17px;
+  width: 17px;
+  height: 17px;
+}
+
+.sales-history-page :is(.sales-history-filter, .fuel-history-summary article, .fuel-history-insights article, .fuel-trend-card, .fuel-day-list) {
+  min-width: 0;
+  padding: var(--history-panel-padding);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--white);
+}
+
+.sales-history-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.sales-history-presets button {
+  min-height: 38px;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #f6f9f7;
+  color: var(--forest);
+  font-size: .8125rem;
+  font-weight: 750;
+}
+
+.sales-history-presets button:hover {
+  border-color: var(--green);
+}
+
+.sales-history-presets button[aria-pressed='true'] {
+  border-color: var(--green);
+  background: var(--mint);
+  color: var(--green);
+}
+
+.sales-history-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(0, 1.5fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.sales-history-fields label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--forest);
+  font-size: .8125rem;
+  font-weight: 750;
+}
+
+.page.sales-history-page .sales-history-fields input[type='date'],
+.sales-history-page .sales-history-fields select {
+  width: 100%;
+  height: 44px;
+  font-size: .875rem;
+  font-weight: 650;
+}
+
+.sales-history-page .form-error {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: .875rem;
+}
+
+.fuel-history-summary,
+.fuel-chart-grid,
+.fuel-hover-summary > div,
+.fuel-history-insights {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--history-gap);
+  min-width: 0;
+}
+
+.fuel-history-summary article {
+  --fuel-accent: var(--history-ms);
+  --fuel-tint: #e7f5ef;
+}
+
+.fuel-history-summary article.hsd {
+  --fuel-accent: var(--history-hsd);
+  --fuel-tint: #fff4da;
+}
+
+.fuel-history-summary h2 {
+  width: fit-content;
+  margin: 0 0 12px;
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: var(--fuel-tint);
+  color: var(--fuel-accent);
+  font-size: .8125rem;
+  font-weight: 850;
+  letter-spacing: .04em;
+}
+
+.fuel-history-summary dl,
+.fuel-day-value-pair {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
+  margin: 0;
+}
+
+.fuel-history-summary dt,
+.fuel-history-insights small,
+.fuel-hover-summary small,
+.fuel-day-value-pair em {
+  color: var(--muted);
+  font-size: .8125rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.fuel-history-summary dd,
+.fuel-hover-summary > div b {
+  margin: 4px 0 0;
+  font-size: clamp(.9375rem, 1.5vw, 1.375rem);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: -.025em;
+  overflow-wrap: anywhere;
+}
+
+.sales-history-page :is(dd, .fuel-history-insights b, .fuel-hover-summary b, table) {
+  font-variant-numeric: tabular-nums;
+}
+
+.fuel-history-insights {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.fuel-history-insights article {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.fuel-history-insights article > svg,
+.fuel-data-note svg {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  color: var(--green);
+}
+
+.fuel-history-insights article > span {
+  display: grid;
+  flex: 1;
+  gap: 3px;
+  min-width: 0;
+}
+
+.fuel-history-insights b { font-size: 1rem; }
+.fuel-history-insights em,
+.fuel-hover-summary > div em,
+.fuel-chart-hint {
+  color: var(--muted);
+  font-size: .8125rem;
+  font-style: normal;
+  line-height: 1.45;
+}
+
+.fuel-history-insights .mix i {
+  display: flex;
+  height: 6px;
+  margin-top: 5px;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--mint);
+}
+
+.fuel-history-insights .mix u:first-child { background: var(--history-ms); }
+.fuel-history-insights .mix u:last-child { background: #dca000; }
+
+.fuel-data-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 12px 14px;
+  border: 1px solid #d2e4da;
+  border-radius: 12px;
+  background: #f0f7f3;
+  font-size: .875rem;
+  line-height: 1.5;
+}
+
+.fuel-hover-summary {
+  min-width: 0;
+  padding: var(--history-panel-padding);
+  border: 1px solid #cfe1d7;
+  border-radius: 16px;
+  background: #eef6f2;
+}
+
+.fuel-hover-summary > header,
+.fuel-trend-card > header,
+.fuel-day-list > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+}
+
+.fuel-hover-summary > header { margin-bottom: 14px; }
+.fuel-hover-summary > header > span { display: grid; gap: 3px; }
+.fuel-hover-summary > header b { font-size: 1.125rem; }
+
+.fuel-hover-summary > header > em {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: var(--white);
+  color: var(--muted);
+  font-size: .75rem;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.fuel-hover-summary > header > em.up { background: #dbefe4; color: #126348; }
+.fuel-hover-summary > header > em.down { background: #ffede2; color: #90451e; }
+
+.fuel-hover-summary > div {
+  grid-template-columns: repeat(2, minmax(0, 1.3fr)) repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.fuel-hover-summary > div > span {
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  min-width: 0;
+  padding: 13px;
+  border-radius: 10px;
+  background: var(--white);
+}
+
+.fuel-hover-summary > div > .ms { border-inline-start: 3px solid var(--history-ms); }
+.fuel-hover-summary > div > .hsd { border-inline-start: 3px solid #dca000; }
+.fuel-day-value-pair { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.fuel-day-value-pair > span { display: grid; }
+.fuel-hover-summary .fuel-day-value-pair b { font-size: clamp(.9375rem, 1.3vw, 1.1875rem); }
+
+.fuel-hover-summary .fuel-rsp-note {
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.fuel-trend-card h2,
+.fuel-day-list h2 {
+  margin: 0;
+  font-size: clamp(1.125rem, 1.6vw, 1.375rem);
+  font-weight: 800;
+  letter-spacing: -.02em;
+}
+
+.fuel-trend-card .eyebrow { display: block; margin-bottom: 4px; }
+.fuel-legend { display: flex; gap: 11px; font-size: .8125rem; font-weight: 800; }
+.fuel-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.fuel-legend span::before { content: ''; width: 8px; height: 8px; border-radius: 50%; }
+.fuel-legend .ms::before { background: var(--history-ms); }
+.fuel-legend .hsd::before { background: var(--history-hsd); }
+.fuel-chart-hint { margin: 7px 0 0; }
+
+.fuel-svg-wrap { margin-top: 12px; overflow-x: auto; }
+.fuel-svg-wrap svg { display: block; width: 100%; min-width: 400px; height: auto; cursor: crosshair; }
+.fuel-svg-wrap svg:focus-visible { outline-offset: -3px; }
+.fuel-svg-wrap path { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.fuel-svg-wrap .ms-line { stroke: var(--history-ms); }
+.fuel-svg-wrap .hsd-line { stroke: var(--history-hsd); }
+.fuel-svg-wrap .ms-dot { fill: var(--history-ms); }
+.fuel-svg-wrap .hsd-dot { fill: var(--history-hsd); }
+.fuel-svg-wrap circle { stroke: #fff; stroke-width: 1.5; }
+.fuel-svg-wrap text { fill: #4f655b; font-size: 15px; font-weight: 650; }
+.fuel-svg-wrap .grid-line { stroke: var(--line); }
+.fuel-svg-wrap .hover-line { stroke: #315e50; stroke-width: 1.5; stroke-dasharray: 5 4; }
+
+.fuel-day-list > header { align-items: baseline; margin-bottom: 14px; }
+.fuel-day-list > header b { color: var(--muted); font-size: .8125rem; }
+.fuel-day-table-wrap { overflow-x: auto; border-radius: 9px; }
+.fuel-day-list table { width: 100%; border-collapse: collapse; font-size: .875rem; white-space: nowrap; }
+
+.fuel-day-list :is(th, td) {
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--line);
+  text-align: right;
+}
+
+.fuel-day-list th:first-child { text-align: left; }
+.fuel-day-list thead { background: #eef5f1; }
+.fuel-day-list thead th { font-size: .8125rem; }
+.fuel-day-list tbody th { font-weight: 650; }
+.fuel-day-list tbody tr:last-child > * { border-bottom: 0; }
+
+@media (max-width: 1120px) {
+  .fuel-hover-summary > div,
+  .fuel-history-insights { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fuel-chart-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 760px) {
+  .sales-history-hero { flex-direction: column; align-items: flex-start; }
+  .sales-history-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sales-history-fields > label:last-of-type { grid-column: 1 / -1; }
+  .sales-history-fields > button { justify-self: start; }
+  .page.sales-history-page .sales-history-fields input[type='date'],
+  .sales-history-page .sales-history-fields select { padding-inline: 8px; font-size: 1rem; }
+  .fuel-history-summary { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 480px) {
+  .fuel-hover-summary > div { grid-template-columns: minmax(0, 1fr); }
+  .fuel-history-insights article > svg { display: none; }
+}

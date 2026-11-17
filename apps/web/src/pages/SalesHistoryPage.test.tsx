@@ -23,8 +23,8 @@ describe('SalesHistoryPage', () => {
   afterEach(() => { cleanup(); vi.useRealTimers(); });
   it('shows separate MS and HSD volume and value trends', async () => {
     render(<MemoryRouter><SalesHistoryPage/></MemoryRouter>);
-    expect(await screen.findByRole('heading', { name: 'MS and HSD sales over time' })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Daily volume for MS and HSD' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Fuel sales history' })).toBeInTheDocument();
+    expect(await screen.findByRole('img', { name: 'Daily volume for MS and HSD' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Daily sales value for MS and HSD' })).toBeInTheDocument();
     expect(screen.getAllByText('1,000 L').length).toBeGreaterThan(0);
     expect(screen.getAllByText('2,000 L').length).toBeGreaterThan(0);
@@ -33,7 +33,7 @@ describe('SalesHistoryPage', () => {
     vi.spyOn(volumeChart, 'getBoundingClientRect').mockReturnValue({
       left: 0, top: 0, right: 900, bottom: 250, width: 900, height: 250, x: 0, y: 0, toJSON: () => ({}),
     });
-    fireEvent(volumeChart,new MouseEvent('pointermove',{bubbles:true,clientX:804}));
+    fireEvent(volumeChart,new MouseEvent('pointermove',{bubbles:true,clientX:785}));
     expect(screen.getByText('Friday, 6 November 2026')).toBeInTheDocument();
     expect(screen.getAllByText('900 L').length).toBeGreaterThan(0);
     expect(screen.getAllByText('₹99,000').length).toBeGreaterThan(0);
@@ -41,5 +41,9 @@ describe('SalesHistoryPage', () => {
     fireEvent.keyDown(volumeChart,{key:'ArrowRight'});
     expect(screen.getByText('Saturday, 7 November 2026')).toBeInTheDocument();
     expect(screen.getByText('Litres sold × recorded RSP')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Total sales' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '30 days', pressed: true })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '7 days' }));
+    expect(screen.getByRole('button', { name: '7 days', pressed: true })).toBeInTheDocument();
   });
 });
