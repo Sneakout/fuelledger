@@ -1,35 +1,135 @@
 import { useEffect, useState } from 'react';
-import { BellRing, Check, CircleAlert, Clock3, MessageCircleMore, Send, ShieldCheck, TriangleAlert } from 'lucide-react';
+import { BellRing, Check, MessageCircleMore, RefreshCw, TriangleAlert } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../components/AuthProvider';
-import { ApiRequestError, api, type NotificationDelivery, type NotificationSettings } from '../lib/api';
+import { ApiRequestError, api, type NotificationBootstrap, type NotificationDelivery, type NotificationSettings } from '../lib/api';
 
-const defaults: NotificationSettings = { whatsappNumber: null, whatsappOptedIn: false, densityMissingEnabled: true, lowStockEnabled: true, shiftVarianceEnabled: true, unclosedShiftEnabled: true, dailySummaryEnabled: true, overdueCustomerEnabled: true, lowStockPercent: 20, varianceThreshold: 500, stockVarianceTolerance: 50, dailySummaryHour: 20, providerReady: false };
-const options = [
-  ['densityMissingEnabled', 'Missing morning density', 'One reminder when a fuel tank density entry is missing.', Clock3],
-  ['lowStockEnabled', 'Low tank stock', 'An alert when a tank falls below your chosen stock level.', TriangleAlert],
-  ['shiftVarianceEnabled', 'Shift cash variance', 'Sent when a reconciled shift crosses your variance limit.', CircleAlert],
-  ['unclosedShiftEnabled', 'Shift still open', 'A late-evening reminder for shifts that have not been closed.', Clock3],
-  ['dailySummaryEnabled', 'Daily business summary', 'Sales, fuel sold, expenses and net result at your selected time.', BellRing],
-  ['overdueCustomerEnabled', 'Overdue customer payments', 'A daily alert when customer credit has become overdue.', CircleAlert],
-] as const;
-const deliveryLabel: Record<string, string> = { DENSITY_MISSING: 'Missing density', LOW_STOCK: 'Low stock', SHIFT_VARIANCE: 'Shift variance', SHIFT_OPEN: 'Open shift', APPROVAL_REQUIRED: 'Owner decision', DAILY_SUMMARY: 'Daily summary', OVERDUE_CUSTOMER: 'Overdue customers', SYSTEM_TEST: 'Test message' };
-const deliveryStatus = (status: NotificationDelivery['status']) => status === 'READ' ? 'Read' : status === 'DELIVERED' ? 'Delivered' : status === 'SENT' ? 'Sent' : status === 'FAILED' ? 'Failed' : 'Waiting';
+const labels: Record<string, string> = {
+  LOW_STOCK: 'Low stock', SHIFT_CLOSED_SUMMARY: 'Shift summary', PURCHASE_RECEIPT_SUMMARY: 'Receipt summary',
+  DAILY_SUMMARY: 'Daily operating summary', OVERDUE_CUSTOMER: 'Customer credit report',
+  CUSTOMER_CREDIT_REMINDER: 'Customer payment reminder', SYSTEM_TEST: 'Test message',
+};
+export const whatsappStatus = (status: NotificationDelivery['status']) => ({
+  READ: 'Read', DELIVERED: 'Delivered', ACCEPTED: 'Accepted by WhatsApp', SENT: 'Accepted by WhatsApp',
+  FAILED: 'Failed', PROCESSING: 'Processing', SUPPRESSED: 'Skipped', PENDING: 'Queued',
+})[status];
+
+const deliveryReasons: Record<string, string> = {
+  customer_paused: 'Reminders are paused for this customer.',
+  customer_consent_missing: 'Customer consent is missing or was withdrawn.',
+  customer_balance_disputed: 'The customer has a disputed balance.',
+  no_verified_overdue_balance: 'There is no verified overdue balance.',
+  customer_balance_or_recipient_changed: 'The balance or recipient changed after preparation.',
+  recent_customer_reminder: 'A recent or unconfirmed reminder already exists.',
+  scheduled_policy_changed: 'The owner changed or paused the schedule.',
+  template_not_approved: 'This message type is awaiting activation.',
+  operational_delivery_not_enabled: 'WhatsApp delivery is awaiting activation.',
+  category_disabled: 'This message type is turned off.',
+  owner_not_opted_in: 'The owner has not opted in.',
+  recipient_changed: 'The WhatsApp number changed after preparation.',
+  source_changed: 'The underlying records changed after preparation.',
+};
+export function whatsappReason(reason: string | null) {
+  return reason ? deliveryReasons[reason] ?? 'This message was skipped because it was no longer eligible.' : null;
+}
+
+function TimePicker({ label, value, onChange }: { label: string; value: number; onChange: (hour: number) => void }) {
+  return <label className="field"><span>{label}</span><select value={value} onChange={event => onChange(Number(event.target.value))}>
+    {Array.from({ length: 24 }, (_, hour) => <option key={hour} value={hour}>{String(hour).padStart(2, '0')}:00 IST</option>)}
+  </select></label>;
+}
 
 export function NotificationsPage() {
   const { user } = useAuth();
-  const [settings, setSettings] = useState(defaults); const [deliveries, setDeliveries] = useState<NotificationDelivery[]>([]); const [loading, setLoading] = useState(true); const [saving, setSaving] = useState(false); const [testing, setTesting] = useState(false); const [error, setError] = useState(''); const [message, setMessage] = useState('');
-  const load = async () => { setLoading(true); try { const result = await api.notificationSettings(); setSettings(result.settings); setDeliveries(result.deliveries); } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : 'Unable to load WhatsApp notification settings.'); } finally { setLoading(false); } };
-  useEffect(() => { void load(); }, []);
-  if (user?.role !== 'OWNER') return <main className="page"><div className="form-error">Only the owner can manage WhatsApp notifications.</div></main>;
-  const save = async () => { setSaving(true); setError(''); setMessage(''); try { const result = await api.updateNotificationSettings({ ...settings, whatsappNumber: settings.whatsappNumber ?? '' }); setSettings(result.settings); setMessage('WhatsApp notification settings saved.'); } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : 'Unable to save notification settings.'); } finally { setSaving(false); } };
-  const test = async () => { setTesting(true); setError(''); setMessage(''); try { const result = await api.testWhatsApp(); if (result.delivery.status === 'SENT') { setMessage('Test message sent to the owner’s WhatsApp number.'); await load(); } else setError(result.delivery.reason ?? 'The test message could not be sent.'); } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : 'Unable to send the WhatsApp test message.'); } finally { setTesting(false); } };
+  const allowed = user?.role === 'OWNER' && !user.demoExpiresAt;
+  const [data, setData] = useState<NotificationBootstrap>();
+  const [settings, setSettings] = useState<NotificationSettings>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  useEffect(() => {
+    if (!allowed) return;
+    let active = true;
+    void api.notificationSettings().then(result => {
+      if (active) { setData(result); setSettings(result.settings); }
+    }).catch(() => { if (active) setError('Unable to load WhatsApp settings.'); });
+    return () => { active = false; };
+  }, [allowed]);
+  if (!allowed) return <main className="page"><p className="form-error">Only the owner can manage WhatsApp alerts.</p></main>;
+  if (!data || !settings) return <main className="page">{error ? <p role="alert" className="form-error">{error}</p> : <p>Loading WhatsApp settings…</p>}</main>;
+
+  const edit = <K extends keyof NotificationSettings>(key: K, value: NotificationSettings[K]) =>
+    setSettings(current => current ? { ...current, [key]: value } : current);
+  const choice = (key: 'whatsappOptedIn' | 'dailySummaryEnabled' | 'lowStockEnabled' | 'shiftSummaryEnabled' | 'receiptSummaryEnabled' | 'overdueCustomerEnabled' | 'customerReminderScheduled', title: string, detail?: string) =>
+    <label className="notification-rule"><span><BellRing /></span><div><b>{title}</b>{detail && <small>{detail}</small>}</div><input type="checkbox" checked={settings[key]} onChange={event => edit(key, event.target.checked)} /><i /></label>;
+
+  async function act(run: () => Promise<void>) {
+    setBusy(true); setError(''); setNotice('');
+    try { await run(); }
+    catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : 'Unable to update WhatsApp settings.'); }
+    finally { setBusy(false); }
+  }
+  async function refreshHistory() {
+    const result = await api.notificationSettings();
+    setData(result);
+  }
+
   return <main className="page notifications-page">
-    <section className="notification-hero"><div><span className="eyebrow">Owner alerts</span><h1>Know what needs attention.</h1><p>FuelNerve sends only the business alerts you choose—never a stream of routine activity.</p></div><span><MessageCircleMore /></span></section>
-    {error&&<div className="form-error">{error}</div>}{message&&<div className="success-banner">{message}</div>}
-    {loading?<div className="loading-inline">Loading notification settings…</div>:<>
-      <section className="notification-setup"><header><div><span className="notification-icon"><MessageCircleMore /></span><div><span className="eyebrow">WhatsApp updates</span><h2>Owner’s WhatsApp number</h2><p>Use a number with country code, for example 918977506454.</p></div></div><span className={settings.providerReady?'notification-ready':'notification-pending'}>{settings.providerReady?<><Check /> Ready</>:<><TriangleAlert /> Not available yet</>}</span></header><div className="notification-number"><label><span>WhatsApp number</span><input inputMode="tel" placeholder="919876543210" value={settings.whatsappNumber??''} onChange={event=>setSettings({...settings,whatsappNumber:event.target.value.replace(/[^0-9+]/g,'')})}/></label><label className="notification-consent"><input type="checkbox" checked={settings.whatsappOptedIn} onChange={event=>setSettings({...settings,whatsappOptedIn:event.target.checked})}/><span><b>Owner has opted in to WhatsApp alerts</b><small>Only use a number that has agreed to receive FuelNerve notifications.</small></span></label>{settings.providerReady&&<button className="secondary" disabled={!settings.whatsappOptedIn||testing} onClick={()=>void test()}><Send size={16}/>{testing?'Sending…':'Send test message'}</button>}</div>{!settings.providerReady&&<p className="notification-help"><ShieldCheck size={16}/> WhatsApp updates are not available yet. Your number and alert choices can still be saved.</p>}</section>
-      <section className="notification-layout"><article className="notification-rules"><header><span className="eyebrow">Choose your alerts</span><h2>Important notifications</h2><p>Every alert is sent at most once per relevant event or day to avoid duplicate messages.</p></header><div>{options.map(([key,title,detail,Icon])=><label className="notification-rule" key={key}><span><Icon /></span><div><b>{title}</b><small>{detail}</small></div><input type="checkbox" checked={settings[key]} onChange={event=>setSettings({...settings,[key]:event.target.checked})}/><i /></label>)}</div></article><aside className="notification-thresholds"><span className="eyebrow">Your limits</span><h2>When to alert you</h2><label><span>Low-stock level</span><div><input type="number" min="1" max="50" value={settings.lowStockPercent} onChange={event=>setSettings({...settings,lowStockPercent:Number(event.target.value)})}/><b>%</b></div><small>Alert when a tank reaches this percentage or lower.</small></label><label><span>Tank difference tolerance</span><div><input type="number" min="0" step="0.001" value={settings.stockVarianceTolerance} onChange={event=>setSettings({...settings,stockVarianceTolerance:Number(event.target.value)})}/><b>L</b></div><small>A closing note is required above this unexplained difference.</small></label><label><span>Cash variance limit</span><div><b>₹</b><input type="number" min="0" value={settings.varianceThreshold} onChange={event=>setSettings({...settings,varianceThreshold:Number(event.target.value)})}/></div><small>Alert only when the absolute shift variance reaches this amount.</small></label><label><span>Daily summary time</span><select value={settings.dailySummaryHour} onChange={event=>setSettings({...settings,dailySummaryHour:Number(event.target.value)})}>{Array.from({length:24},(_,hour)=><option key={hour} value={hour}>{String(hour).padStart(2,'0')}:30 IST</option>)}</select><small>FuelNerve checks hourly and sends the summary in Indian Standard Time.</small></label><button className="primary small" disabled={saving} onClick={()=>void save()}>{saving?'Saving…':'Save notification settings'}</button></aside></section>
-      <section className="notification-history"><header><div><span className="eyebrow">Delivery history</span><h2>Recent WhatsApp alerts</h2></div><span>{deliveries.length} recent</span></header>{deliveries.length?<div>{deliveries.map(delivery=><article key={delivery.id}><span className={delivery.status.toLowerCase()}>{['SENT','DELIVERED','READ'].includes(delivery.status)?<Check/>:<TriangleAlert/>}</span><div><b>{deliveryLabel[delivery.type]??delivery.type}</b><small>{delivery.station?.name??'All petrol pumps'} · {new Date(delivery.createdAt).toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'})}</small><p>{delivery.message}</p>{delivery.errorMessage&&<em>{delivery.errorMessage}</em>}</div><strong>{deliveryStatus(delivery.status)}</strong></article>)}</div>:<div className="notification-empty"><BellRing/><b>No WhatsApp alerts sent yet</b><small>Your delivery history will appear here after the first alert.</small></div>}</section>
-    </>}
+    <section className="notification-hero"><div><h1>WhatsApp alerts</h1><p>Choose what FuelNerve sends to you and how customers receive payment reminders.</p></div><span><MessageCircleMore /></span></section>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    {notice && <p className="success-banner" role="status">{notice}</p>}
+    <section className="notification-setup">
+      <header><div><span className="notification-icon"><MessageCircleMore /></span><div><h2>Owner’s WhatsApp</h2><p>Use the country code when entering your number.</p></div></div>
+        <span className={data.deliveryAvailable ? 'notification-ready' : 'notification-pending'}>{data.deliveryAvailable ? <><Check /> Delivery available</> : <><TriangleAlert /> Awaiting activation</>}</span>
+      </header>
+      <div className="notification-number">
+        <label><span>WhatsApp number</span><input type="tel" value={settings.whatsappNumber ?? ''} placeholder="+91 98765 43210" onChange={event => setSettings({ ...settings, whatsappNumber: event.target.value, whatsappOptedIn: false })} /></label>
+        {choice('whatsappOptedIn', 'I agree to receive FuelNerve alerts on this WhatsApp number')}
+      </div>
+    </section>
+    <section className="notification-layout">
+      <article className="notification-rules"><header><h2>Messages to the owner</h2></header>
+        {data.intelligenceActive ? <>
+          {choice('lowStockEnabled', 'Low stock')}
+          <label className="field"><span>Low-stock threshold (% of working capacity)</span><input type="number" min="1" max="50" value={settings.lowStockPercent} onChange={event => edit('lowStockPercent', Number(event.target.value))} /></label>
+          {choice('shiftSummaryEnabled', 'Shift closure summary', 'Sales, collections, differences and closing tank stock.')}
+          {choice('receiptSummaryEnabled', 'Purchase receipt summary', 'Product, tank, quantity, invoice and payment due date.')}
+          {choice('overdueCustomerEnabled', 'Customer credit report', 'Sent when there are outstanding balances.')}
+          <TimePicker label="Credit report time" value={settings.creditReportHour} onChange={hour => edit('creditReportHour', hour)} />
+        </> : <>
+          {choice('dailySummaryEnabled', 'Daily operating summary', 'Sales quantities, reconciled collections and tank stock.')}
+          <TimePicker label="Daily summary time" value={settings.dailySummaryHour} onChange={hour => edit('dailySummaryHour', hour)} />
+        </>}
+      </article>
+      {data.intelligenceActive && <aside className="notification-thresholds">
+        <h2>Customer payment reminders</h2>
+        <p>Review and approve individual reminders from the customer profile. Customers must consent before receiving reminders.</p>
+        {choice('customerReminderScheduled', 'Send scheduled reminders', 'Automatically remind eligible customers with verified overdue balances. A customer receives at most one reminder every seven days.')}
+        {settings.customerReminderScheduled && <TimePicker label="Scheduled reminder time" value={settings.customerReminderHour} onChange={hour => edit('customerReminderHour', hour)} />}
+        <Link to="/customers">Open customer accounts</Link>
+      </aside>}
+    </section>
+    <div className="editor-footer">
+      <button type="button" className="secondary" disabled={busy || !data.settings.whatsappOptedIn || !data.testAvailable} onClick={() => void act(async () => {
+        const result = await api.testWhatsApp();
+        if (result.delivery.status !== 'QUEUED') throw new Error('Test message could not be queued.');
+        await refreshHistory();
+        setNotice('Test message queued. Check delivery history for its status.');
+      })}>Prepare test for saved number</button>
+      <button type="button" className="primary small" disabled={busy} onClick={() => void act(async () => {
+        const result = await api.updateNotificationSettings({ ...settings, whatsappNumber: settings.whatsappNumber ?? '', confirmNewNumber: settings.whatsappOptedIn });
+        setSettings(result.settings);
+        setData({ ...data, settings: result.settings });
+        setNotice('WhatsApp preferences saved.');
+      })}>Save preferences</button>
+    </div>
+    <section className="notification-history"><header><h2>Recent deliveries</h2>
+      <button type="button" className="secondary small" disabled={busy} onClick={() => void act(refreshHistory)}><RefreshCw size={16} /> Refresh</button></header>
+      {data.deliveries.length ? <div>{data.deliveries.map(delivery => <article key={delivery.id}>
+        <div><b>{labels[delivery.type] ?? 'WhatsApp alert'}</b><small>{delivery.station?.name ?? 'All fuel stations'} · {new Date(delivery.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })}</small>
+          <p>{delivery.message}</p>{(whatsappReason(delivery.suppressionReason) || delivery.errorMessage) && <em>{whatsappReason(delivery.suppressionReason) || delivery.errorMessage}</em>}</div>
+        <strong>{whatsappStatus(delivery.status)}</strong>
+      </article>)}</div> : <p className="notification-empty">No WhatsApp delivery history yet.</p>}
+    </section>
   </main>;
 }

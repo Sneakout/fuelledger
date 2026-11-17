@@ -355,8 +355,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ...input, recordedAt: input.recordedAt ?? new Date().toISOString() }),
     }),
-  reconciliationBootstrap: () =>
-    request<ReconciliationBootstrap>("/reconciliation/bootstrap"),
+  reconciliationBootstrap: (shiftId?: string) =>
+    request<ReconciliationBootstrap>(`/reconciliation/bootstrap${shiftId ? `?shiftId=${encodeURIComponent(shiftId)}` : ""}`),
   reconcileShift: (id: string, input: ReconciliationForm) =>
     request<{ shift: ReconciliationShift }>(`/reconciliation/shifts/${id}`, {
       method: "POST",
@@ -385,7 +385,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ ...input, receivedAt: input.receivedAt ?? new Date().toISOString() }),
     }),
-  purchasesBootstrap: () => request<PurchasesBootstrap>("/purchases/bootstrap"),
+  purchasesBootstrap: (invoiceId?: string) => request<PurchasesBootstrap>(`/purchases/bootstrap${invoiceId ? `?invoiceId=${encodeURIComponent(invoiceId)}` : ""}`),
   purchaseReceiptTimingAudit: () => request<ReceiptTimingAudit>("/purchases/receipt-timing-audit"),
   purchaseReceiptShiftImpact: (stationId: string, receivedAt: string) => request<ReceiptShiftImpact>(`/purchases/receipt-shift-impact?stationId=${encodeURIComponent(stationId)}&receivedAt=${encodeURIComponent(receivedAt)}`),
   createSupplier: (input: SupplierInput) =>
@@ -516,7 +516,22 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ assignments }),
     }),
+  customerReminderProfile: (id: string) => request<CustomerReminderProfileResponse>(`/customers/${id}/reminders`),
+  saveCustomerReminderProfile: (id: string, input: CustomerReminderPreferences) => request<{ profile: CustomerReminderProfile }>(`/customers/${id}/reminders`, {
+    method: "PUT", body: JSON.stringify(input),
+  }),
+  previewCustomerReminder: (id: string, stationId: string) => request<{ draft: CustomerReminderDraft }>(`/customers/${id}/reminders/preview`, {
+    method: "POST", body: JSON.stringify({ stationId }),
+  }),
+  approveCustomerReminder: (id: string, stationId: string, snapshot: string) => request<{ id: string; status: NotificationDelivery["status"] }>(`/customers/${id}/reminders/approve`, {
+    method: "POST", body: JSON.stringify({ stationId, snapshot }),
+  }),
   notificationSettings: () => request<NotificationBootstrap>("/notifications"),
+  dailyBriefWorkspace: (stationId: string) => request<DailyBriefWorkspaceResponse>(`/intelligence/daily-brief-workspace?stationId=${encodeURIComponent(stationId)}`),
+  setDailyBriefPreference: (input: { stationId: string; findingKey: string; action: "ACKNOWLEDGE" | "REMIND_LATER" }) =>
+    request<{ acknowledgedAt: string | null; remindAt: string | null }>("/intelligence/daily-brief-workspace/preference", {
+      method: "PUT", body: JSON.stringify(input),
+    }),
   dailyBriefing: (stationId?: string) => request<DailyBriefingResponse>(`/intelligence/daily-briefing${stationId ? `?stationId=${encodeURIComponent(stationId)}` : ""}`),
   nerveAgents: (stationId: string) => request<NerveAgentsResponse>(`/intelligence/agents?stationId=${encodeURIComponent(stationId)}`),
   askFuelNerve: (input: { requestId: string; question: string; stationId?: string; asOf?: string }) =>
@@ -525,7 +540,7 @@ export const api = {
     request<InvestigationResponse>("/intelligence/investigations", { method: "POST", body: JSON.stringify(input) }),
   investigationFollowUp: (investigationId: string, input: { stationId: string; prompt: InvestigationFollowUpPrompt }) =>
     request<InvestigationFollowUpResponse>(`/intelligence/investigations/${encodeURIComponent(investigationId)}/follow-ups`, { method: "POST", body: JSON.stringify(input) }),
-  updateNotificationSettings: (input: OwnerNotificationSettingsInput) =>
+  updateNotificationSettings: (input: OwnerNotificationSettingsInput & { confirmNewNumber?: boolean }) =>
     request<{ settings: NotificationSettings }>("/notifications", {
       method: "PUT",
       body: JSON.stringify(input),
@@ -562,13 +577,22 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
-  updateCustomerNotifications: (id: string, input: Omit<NotificationSettings, "providerReady">) =>
-    request<{ settings: NotificationSettings }>(`/platform/customers/${id}/notifications`, {
-      method: "PUT",
-      body: JSON.stringify(input),
-    }),
   testCustomerWhatsApp: (id: string) =>
-    request<{ delivery: { status: "SENT" | "FAILED" | "SKIPPED"; reason?: string } }>(`/platform/customers/${id}/notifications/test`, { method: "POST" }),
+    request<{ delivery: { status: "QUEUED" | "FAILED" | "SKIPPED"; reason?: string } }>(`/platform/customers/${id}/notifications/test`, { method: "POST" }),
+  whatsappRollout: () => request<WhatsAppRolloutSnapshot>("/platform/whatsapp-rollout"),
+  saveWhatsAppRollout: (policy: WhatsAppRolloutPolicy) =>
+    request<{ policy: WhatsAppRolloutPolicy }>("/platform/whatsapp-rollout", { method: "PUT", body: JSON.stringify(policy) }),
+  pauseWhatsAppRollout: () =>
+    request<{ policy: WhatsAppRolloutPolicy }>("/platform/whatsapp-rollout/pause", { method: "POST" }),
+  generateWhatsAppPreviews: () => request<{ previews: { deferred: number } }>("/platform/whatsapp-rollout/preview", { method: "POST" }),
+  processApprovedWhatsApp: () => request<{ accepted: number; failed: number; deferred: number; suppressed: number }>("/platform/whatsapp-rollout/process-approved", { method: "POST" }),
+  approveWhatsAppPreview: (organizationId: string, deliveryId: string, hash: string) =>
+    request<void>(`/platform/customers/${organizationId}/notifications/deliveries/${deliveryId}/approve-preview`,
+      { method: "POST", body: JSON.stringify({ hash }) }),
+  customerWhatsAppDeliveries: (id: string) =>
+    request<{ deliveries: AdminWhatsAppDelivery[] }>(`/platform/customers/${id}/notifications/deliveries`),
+  retryCustomerWhatsAppDelivery: (id: string, deliveryId: string) =>
+    request<{ queued: boolean }>(`/platform/customers/${id}/notifications/deliveries/${deliveryId}/retry`, { method: "POST" }),
   serviceTickets: () => request<{ tickets: ServiceTicket[] }>("/support/tickets"),
   createServiceTicket: (input: ServiceTicketInput) =>
     request<{ ticket: ServiceTicket }>("/support/tickets", { method: "POST", body: JSON.stringify(input) }),
@@ -590,7 +614,43 @@ export type NotificationSettings = {
   varianceThreshold: number;
   stockVarianceTolerance: number;
   dailySummaryHour: number;
+  shiftSummaryEnabled: boolean;
+  receiptSummaryEnabled: boolean;
+  creditReportHour: number;
+  customerReminderScheduled: boolean;
+  customerReminderHour: number;
   providerReady: boolean;
+};
+export type WhatsAppRolloutPolicy = {
+  stage: "SHADOW" | "INTERNAL" | "PILOT" | "EXPANDED";
+  paused: boolean;
+  organizationIds: string[];
+  enabledCategories: string[];
+  version: number;
+};
+export type WhatsAppRolloutSnapshot = {
+  policy: WhatsAppRolloutPolicy;
+  outcomes: Array<{ status: string; rolloutHold: string | null; suppressionReason: string | null; failureKind: string | null; count: number }>;
+  audit: Array<{ id: string; action: string; createdAt: string }>;
+};
+export type AdminWhatsAppDelivery = {
+  id: string;
+  type: string;
+  status: NotificationDelivery["status"];
+  createdAt: string;
+  attempts: number;
+  errorMessage: string | null;
+  suppressionReason: string | null;
+  rolloutHold: string | null;
+  previewBody: string | null;
+  previewTemplate: string | null;
+  previewHash: string | null;
+  approvedPreviewHash: string | null;
+  previewAt: string | null;
+  recipientEnding: string;
+  sourceId: string | null;
+  recordType: string | null;
+  canRetry: boolean;
 };
 export type NotificationDelivery = {
   id: string;
@@ -598,17 +658,51 @@ export type NotificationDelivery = {
   station: { name: string; code: string } | null;
   destination: string;
   message: string;
-  status: "PENDING" | "SENT" | "DELIVERED" | "READ" | "FAILED";
+  status: "PENDING" | "PROCESSING" | "ACCEPTED" | "SENT" | "DELIVERED" | "READ" | "FAILED" | "SUPPRESSED";
   errorMessage: string | null;
+  suppressionReason: string | null;
   sentAt: string | null;
   deliveredAt: string | null;
   readAt: string | null;
   failedAt: string | null;
   createdAt: string;
 };
+export type CustomerReminderProfile = {
+  id: string;
+  reminderWhatsAppNumber: string | null;
+  reminderConsentAt: string | null;
+  reminderConsentById: string | null;
+  reminderConsentSource: string | null;
+  reminderPaused: boolean;
+};
+export type CustomerReminderPreferences = {
+  destination: string;
+  consentSource: string;
+  recordConsent: boolean;
+  revokeConsent: boolean;
+  paused: boolean;
+};
+export type CustomerReminderProfileResponse = {
+  profile: CustomerReminderProfile;
+  history: Array<Pick<NotificationDelivery, "id" | "status" | "createdAt" | "suppressionReason"> & {
+    station: { name: string } | null;
+    failureKind: string | null;
+  }>;
+};
+export type CustomerReminderDraft = {
+  stationId: string;
+  overdueAmount: number;
+  dueDate: string;
+  destination: string;
+  snapshot: string;
+  preview: string;
+};
 export type NotificationBootstrap = {
   settings: NotificationSettings;
   deliveries: NotificationDelivery[];
+  deliveryAvailable?: boolean;
+  testAvailable?: boolean;
+  intelligenceActive: boolean;
 };
 export type DemoLead = {
   id: string;
@@ -1670,6 +1764,29 @@ export type DailyBriefingFact = {
   evidenceLabel: string;
   evidencePath: string;
 };
+export type BriefRecordLink = { label: string; path: string };
+export type BriefFinding = {
+  key: string; title: string; impact: string; amount: string | null; action: string;
+  severity: "URGENT" | "ATTENTION"; agent: string; checkedAt: string; records: BriefRecordLink[];
+  insufficient?: boolean; acknowledgedAt: string | null; remindAt: string | null;
+};
+type BriefStock = { id: string; title: string; value: string; level: string; path: string };
+type BriefDue = { id: string; title: string; amount: string; dueDate: string; path: string; disputed?: boolean };
+export type DailyBriefWorkspaceResponse = {
+  station: { id: string; name: string; code: string }; date: string; checkedAt: string; demo: boolean;
+  coverage: { noSales: boolean; incompleteShifts: number; collectionsIncomplete: boolean; stockUnavailable: boolean;
+    gaps: Array<{ productId: string; productCode: string; missingFrom: string; missingThrough: string; missingDates: string[]; path: string }> };
+  attention: BriefFinding[];
+  summary: { sales: number; collections: number | null; credit: number; creditIssued: number; creditHasMissingDueDates: boolean;
+    receipts: Array<{ id: string; title: string; detail: string; path: string }>;
+    stock: BriefStock[]; products: Array<{ code: string; volume: string }> };
+  approvals: Array<{ id: string; title: string; reason: string; requester: string; requestedAt: string; path: string }>;
+  specialists: Array<{ key: string; name: string; checkedAt: string | null; findings: Array<{
+    id: string; title: string; impact: string; amount: unknown; action: string; checkedAt: string; records: BriefRecordLink[];
+  }> }>;
+  upcoming: { suppliers: BriefDue[]; customers: BriefDue[]; replenishment: BriefStock[] };
+  resolved: Array<{ id: string; title: string; detail: string; closedAt: string; path: string }>;
+};
 export type DailyBriefingResponse = {
   date: string;
   calculatedAt: string;
@@ -1703,7 +1820,7 @@ export type NerveAgentPresentation = {
 };
 export type NerveAgentsResponse = {
   mode: "READ_ONLY";
-  sourceMode: "SHADOW" | "VERIFIED_DEMO";
+  sourceMode: "SHADOW" | "VERIFIED_DEMO" | "VERIFIED_BRIEFING" | "VERIFIED_AGENT_RUN";
   generatedAt: string;
   stale: boolean;
   safety: { evidenceVerified: boolean; crossTenantDenied: boolean; crossStationDenied: boolean; offlineSafe: boolean; proposalsEnabled: false; actionsEnabled: false };

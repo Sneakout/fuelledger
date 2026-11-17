@@ -1,3 +1,4 @@
+import { customerLedgerBalances } from '../customers/ledger-balances.js';
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 import { AppError } from '../../lib/errors.js';
@@ -86,7 +87,7 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
     prisma.purchaseInvoice.findMany({ where: { organizationId, ...stationWhere, status: { in: ['OPEN', 'PART_PAID'] } }, include: { payments: { select: { amount: true } }, supplier: { select: { name: true, code: true } }, station: { select: { name: true, code: true } } }, orderBy: { dueDate: 'asc' } }),
     prisma.inventoryLedger.findMany({ where: { organizationId, ...stationWhere, occurredAt: { lte: asOf }, station: { active: true }, product: { active: true, inventoryTracked: true }, OR: [{ tankId: null }, { tank: { status: 'ACTIVE', configuration: { active: true } } }] }, include: { product: { select: { id: true, name: true, code: true, unit: true, tankLinked: true, purchasePrice: true, purchasePriceHistory:{where:{effectiveFrom:{lte:asOf}},orderBy:{effectiveFrom:'desc'},take:1} } }, station: { select: { id: true, name: true, code: true } }, tank: { select: { productId: true, configuration: { select: { stationId: true } } } } } }),
     prisma.tank.findMany({ where: { status: 'ACTIVE', product: { active: true, inventoryTracked: true }, configuration: { active: true, station: { organizationId, active: true, ...(stationIds ? { id:{in:stationIds} } : {}) } } }, include: { product: { select: { id: true, name: true, code: true, unit: true, purchasePrice: true, purchasePriceHistory:{where:{effectiveFrom:{lte:asOf}},orderBy:{effectiveFrom:'desc'},take:1} } }, configuration: { include: { station: { select: { id: true, name: true, code: true } } } } } }),
-    prisma.customer.findMany({ where: { organizationId, active: true }, include: { ledger: { where: stationIds ? { stationId:{in:stationIds} } : {}, select: { stationId: true, amount: true, dueDate: true } } }, orderBy: { name: 'asc' } }),
+    prisma.customer.findMany({ where: { organizationId, active: true }, include: { ledger: { where: stationIds ? { stationId:{in:stationIds} } : {}, select: { id: true, stationId: true, amount: true, dueDate: true, occurredAt: true } } }, orderBy: { name: 'asc' } }),
     prisma.journalLine.findMany({ where: { journal: { organizationId, ...stationWhere, journalDate: period } }, include: { account: { select: { code: true, name: true, type: true } }, journal: { select: { id: true, journalDate: true, reference: true, description: true, sourceType: true, sourceId: true, station: { select: { name: true, code: true } }, createdBy: { select: { name: true } } } } } }),
     prisma.shift.findMany({
       where: { station: { organizationId }, ...stationWhere, openedAt: period },
@@ -168,16 +169,7 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
 
   const today = indiaDayStart(asOf);
   const customerAgeing = customers.map(customer => {
-    const outstanding = sum(customer.ledger, row => number(row.amount));
-    const ageing = { current: 0, days1to30: 0, days31to60: 0, days61to90: 0, days90plus: 0 };
-    for (const row of customer.ledger.filter(item => number(item.amount) > 0)) {
-      const days = row.dueDate ? Math.floor((today.getTime() - row.dueDate.getTime()) / 86400000) : 0;
-      const bucket = days <= 0 ? 'current' : days <= 30 ? 'days1to30' : days <= 60 ? 'days31to60' : days <= 90 ? 'days61to90' : 'days90plus';
-      ageing[bucket] += number(row.amount);
-    }
-    const receipts = Math.abs(sum(customer.ledger.filter(row => number(row.amount) < 0), row => number(row.amount)));
-    let remaining = receipts;
-    for (const bucket of ['days90plus', 'days61to90', 'days31to60', 'days1to30', 'current'] as const) { const applied = Math.min(ageing[bucket], remaining); ageing[bucket] -= applied; remaining -= applied; }
+    const { outstanding, ageing } = customerLedgerBalances(customer.ledger, new Date());
     return { id: customer.id, customer: customer.name, code: customer.code, type: customer.type, outstanding, ageing };
   }).filter(row => row.outstanding > .005).sort((a, b) => b.outstanding - a.outstanding);
 

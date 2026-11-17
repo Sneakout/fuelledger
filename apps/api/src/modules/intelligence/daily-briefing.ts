@@ -1,3 +1,4 @@
+import { hasActiveIntelligence } from '@fuelledger/shared';
 import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { env } from '../../config/env.js';
@@ -17,7 +18,7 @@ const severityOrder = { URGENT: 0, ATTENTION: 1, POSITIVE: 2, INFORMATION: 3 } a
 
 export async function requireIntelligenceAccess(organizationId: string, now = new Date()) {
   const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { intelligenceEnabledAt: true, intelligenceExpiresAt: true } });
-  if (!organization?.intelligenceEnabledAt || (organization.intelligenceExpiresAt && organization.intelligenceExpiresAt <= now)) throw new AppError(403, 'INTELLIGENCE_PLAN_REQUIRED', 'Daily briefing is available with Core + FuelNerve Intelligence.');
+  if (!hasActiveIntelligence(organization, now)) throw new AppError(403, 'INTELLIGENCE_PLAN_REQUIRED', 'Daily briefing is available with Core + FuelNerve Intelligence.');
 }
 
 function fallbackNarrative(facts: BriefingFact[]): Narrative {
@@ -32,7 +33,7 @@ function fallbackNarrative(facts: BriefingFact[]): Narrative {
 async function explain(facts: BriefingFact[]): Promise<{ narrative: Narrative; mode: string; model: string | null }> {
   if (!env.OPENAI_API_KEY || !facts.length) return { narrative: fallbackNarrative(facts), mode: 'DETERMINISTIC', model: null };
   try {
-    const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify({
+    const response = await fetch('https://api.openai.com/v1/responses', { method: 'POST', signal: AbortSignal.timeout(5_000), headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify({
       model: env.OPENAI_BRIEFING_MODEL, store: false,
       instructions: 'You explain and prioritize verified fuel-station facts. Never calculate, infer, change, or introduce numbers, money, quantities, dates, percentages, names, or evidence. Use only supplied fact IDs. Write plain language. Do not use digits, currency symbols, or percent signs. Return at most five items.',
       input: JSON.stringify(facts),

@@ -1,18 +1,19 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { ownerNotificationPacketSchema, type OwnerNotificationPacket, type OwnerNotificationSettingsInput } from '@fuelledger/shared';
+import { allowsOwnerWhatsApp, findFuelNerveAgent, hasActiveIntelligence, intelligenceWhatsAppAgents } from '@fuelledger/shared';
 import { OwnerNotificationType, Prisma } from '@prisma/client';
-import { apnsConfigured, env, whatsappConfigured } from '../../config/env.js';
+import { apnsConfigured, env } from '../../config/env.js';
 import { AppError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 import { prisma } from '../../lib/prisma.js';
-import { bookStockAt } from '../../lib/stock.js';
 import { indiaDate, indiaDayStart, indiaParts } from '../../lib/india-time.js';
-import { buildReport } from '../reports/service.js';
-import { dailyBriefing } from '../intelligence/daily-briefing.js';
+import { readDailyOperatingFacts } from './message-facts.js';
 import { sendApns } from './apns.js';
-import { buildApprovalScenario, buildMissingRecordScenario, buildProfitScenario, buildShiftScenario, buildStockScenario } from './scenario-builders.js';
-import { buildWhatsAppTemplate } from './whatsapp-template.js';
+import { buildApprovalScenario, buildMissingRecordScenario, buildShiftScenario } from './scenario-builders.js';
+import { creditDeliverySnapshot, queueOwnerWhatsApp } from './delivery-queue.js';
+import { coreDailyMessage, money as formatMoney } from './agent-messages.js';
 
-type DeliveryResult = { status: 'SENT' | 'FAILED' | 'SKIPPED'; reason?: string };
+type DeliveryResult = { status: 'SENT' | 'FAILED' | 'SKIPPED' | 'QUEUED'; reason?: string; id?: string };
 const money = (value: number) => `₹${Math.round(value).toLocaleString('en-IN')}`;
 const defaults = {
   whatsappNumber: null as string | null,
@@ -27,6 +28,11 @@ const defaults = {
   varianceThreshold: 500,
   stockVarianceTolerance: 50,
   dailySummaryHour: 20,
+  shiftSummaryEnabled: true,
+  receiptSummaryEnabled: true,
+  creditReportHour: 20,
+  customerReminderScheduled: false,
+  customerReminderHour: 10,
 };
 type NotificationSettingFields = Omit<typeof defaults, 'varianceThreshold' | 'stockVarianceTolerance'> & { varianceThreshold: unknown; stockVarianceTolerance: unknown };
 
@@ -40,27 +46,24 @@ function featureEnabled(settings: typeof defaults, type: OwnerNotificationType) 
     : true;
 }
 
-const agentForType: Partial<Record<OwnerNotificationType, NonNullable<OwnerNotificationPacket['responsibleAgent']>>> = {
-  DENSITY_MISSING: { key: 'inventory-watch', name: 'Stock Agent', responsibility: 'Tanks, readings, receipts and fuel movement' },
-  LOW_STOCK: { key: 'inventory-watch', name: 'Stock Agent', responsibility: 'Tanks, readings, receipts and fuel movement' },
-  SHIFT_VARIANCE: { key: 'reconciliation-review', name: 'Shift Agent', responsibility: 'Shifts, collections and handovers' },
-  SHIFT_OPEN: { key: 'reconciliation-review', name: 'Shift Agent', responsibility: 'Shifts, collections and handovers' },
-  APPROVAL_REQUIRED: { key: 'inventory-watch', name: 'Stock Agent', responsibility: 'Tanks, readings, receipts and fuel movement' },
-  OVERDUE_CUSTOMER: { key: 'receivables-watch', name: 'Credit Agent', responsibility: 'Customer balances, ageing and payment follow-up' },
-  CREDIT_SALE: { key: 'receivables-watch', name: 'Credit Agent', responsibility: 'Customer balances, ageing and payment follow-up' },
-  CATALOG_CHANGE: { key: 'purchase-check', name: 'Purchase Agent', responsibility: 'Supplier invoices, rates, quantities and receipts' },
-  DAILY_SUMMARY: { key: 'profit-insight', name: 'Profit Agent', responsibility: 'Margin, costs and financial changes' },
+const agentForType: Partial<Record<OwnerNotificationType, string>> = {
+  ...intelligenceWhatsAppAgents,
+  DENSITY_MISSING: 'inventory-watch',
+  SHIFT_VARIANCE: 'reconciliation-review',
+  SHIFT_OPEN: 'reconciliation-review',
+  APPROVAL_REQUIRED: 'inventory-watch',
+  CREDIT_SALE: 'credit-watch',
+  CATALOG_CHANGE: 'purchase-check',
 };
-const purchaseAgent = { key: 'purchase-check', name: 'Purchase Agent', responsibility: 'Supplier invoices, rates, quantities and receipts' } as const;
-const nerveAssistant = { key: 'owner-assistant', name: 'Nerve Assistant', responsibility: 'Coordinates questions across FuelNerve specialists' } as const;
 function responsibleAgent(type: OwnerNotificationType, recordType: string) {
-  if (recordType === 'DAILY_BRIEFING') return nerveAssistant;
-  if (recordType === 'PURCHASE_INVOICE' || recordType === 'SUPPLIER_PAYABLE' || recordType === 'PURCHASE_RECEIPT' || recordType === 'PRODUCT_PRICE_CHANGE_REQUEST' || recordType === 'MARKET_PRICE_OUTLOOK') return purchaseAgent;
-  return agentForType[type] ?? null;
+  const purchaseRecord = ['PURCHASE_INVOICE', 'SUPPLIER_PAYABLE', 'PURCHASE_RECEIPT', 'PRODUCT_PRICE_CHANGE_REQUEST', 'MARKET_PRICE_OUTLOOK'].includes(recordType);
+  const key = recordType === 'DAILY_BRIEFING' ? 'business-assistant' : purchaseRecord ? 'purchase-check' : agentForType[type];
+  const agent = key ? findFuelNerveAgent(key) : undefined;
+  return agent ? { key: agent.agentKey, name: agent.name, responsibility: agent.purpose } : null;
 }
 export function presentNotificationSettings(settings: (NotificationSettingFields & { id?: string; updatedAt?: Date }) | null) {
   const value = settings ?? defaults;
-  return { ...value, varianceThreshold: Number(value.varianceThreshold), stockVarianceTolerance: Number(value.stockVarianceTolerance), providerReady: whatsappConfigured };
+  return { ...value, varianceThreshold: Number(value.varianceThreshold), stockVarianceTolerance: Number(value.stockVarianceTolerance), providerReady: Boolean(env.WHATSAPP_DELIVERY_ENABLED && env.WHATSAPP_BUSINESS_ACCOUNT_ID && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_APP_SECRET && env.WHATSAPP_WEBHOOK_VERIFY_TOKEN) };
 }
 
 export async function getSettings(organizationId: string) {
@@ -81,33 +84,28 @@ export async function updateSettings(organizationId: string, input: OwnerNotific
     varianceThreshold: new Prisma.Decimal(input.varianceThreshold),
     stockVarianceTolerance: new Prisma.Decimal(input.stockVarianceTolerance),
     dailySummaryHour: input.dailySummaryHour,
+    ...(input.shiftSummaryEnabled !== undefined ? { shiftSummaryEnabled: input.shiftSummaryEnabled } : {}),
+    ...(input.receiptSummaryEnabled !== undefined ? { receiptSummaryEnabled: input.receiptSummaryEnabled } : {}),
+    ...(input.creditReportHour !== undefined ? { creditReportHour: input.creditReportHour } : {}),
+    ...(input.customerReminderScheduled !== undefined ? { customerReminderScheduled: input.customerReminderScheduled } : {}),
+    ...(input.customerReminderHour !== undefined ? { customerReminderHour: input.customerReminderHour } : {}),
   };
   const settings = await prisma.ownerNotificationSettings.upsert({ where: { organizationId }, create: { organizationId, ...data }, update: data });
   return presentNotificationSettings(settings);
 }
 
-export async function recentDeliveries(organizationId: string) {
-  return prisma.ownerNotificationDelivery.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' }, take: 12, select: { id: true, type: true, station: { select: { name: true, code: true } }, destination: true, message: true, status: true, errorMessage: true, sentAt: true, deliveredAt: true, readAt: true, failedAt: true, createdAt: true } });
-}
-
-async function sendTemplate(destination: string, message: string) {
-  const template = buildWhatsAppTemplate(env.WHATSAPP_TEMPLATE_NAME!, env.WHATSAPP_TEMPLATE_LANGUAGE, env.WHATSAPP_TEMPLATE_STYLE, message);
-  const response = await fetch(`https://graph.facebook.com/${env.WHATSAPP_API_VERSION}/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to: destination, type: 'template', template }),
-  });
-  const body = await response.json().catch(() => null) as { messages?: Array<{ id?: string }>; error?: { message?: string } } | null;
-  if (!response.ok) throw new Error(body?.error?.message ?? `WhatsApp API returned ${response.status}.`);
-  return body?.messages?.[0]?.id ?? null;
+export async function recentDeliveries(organizationId: string, stationIds?: string[]) {
+  return prisma.ownerNotificationDelivery.findMany({ where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}) }, orderBy: { createdAt: 'desc' }, take: 12, select: { id: true, type: true, station: { select: { name: true, code: true } }, destination: true, message: true, status: true, errorMessage: true, suppressionReason: true, sentAt: true, deliveredAt: true, readAt: true, failedAt: true, createdAt: true } });
 }
 
 type BaseNotificationPacket = Omit<OwnerNotificationPacket, 'schemaVersion' | 'responsibleAgent'>;
-type AlertInput = { organizationId: string; stationId?: string; type: OwnerNotificationType; dedupeKey: string; title?: (packet: OwnerNotificationPacket) => string; message: (packet: OwnerNotificationPacket) => string; packet: BaseNotificationPacket; severity?: 'INFORMATION' | 'ATTENTION' | 'URGENT'; evidenceSourceType?: string; evidenceSourceId?: string };
+type AlertInput = { organizationId: string; stationId?: string; type: OwnerNotificationType; dedupeKey: string; title?: (packet: OwnerNotificationPacket) => string; message: (packet: OwnerNotificationPacket) => string; packet: BaseNotificationPacket; severity?: 'INFORMATION' | 'ATTENTION' | 'URGENT'; evidenceSourceType?: string; evidenceSourceId?: string; snapshot?: string; version?: string; stillRelevant?: () => Promise<boolean> };
 
-function alertPresentation(input: AlertInput, packet: OwnerNotificationPacket, intelligenceActive = false) {
+function alertPresentation(input: AlertInput, packet: OwnerNotificationPacket) {
   const byType = {
     DENSITY_MISSING: ['Morning density is due', '/inventory'], LOW_STOCK: ['Fuel stock needs attention', '/inventory'],
+    SHIFT_CLOSED_SUMMARY: ['Shift closed and reconciled', '/reconciliation'],
+    PURCHASE_RECEIPT_SUMMARY: ['Stock delivery recorded', '/purchases'],
     SHIFT_VARIANCE: ['Shift variance needs review', '/reconciliation'], SHIFT_OPEN: ['A shift is still open', '/operations'],
     APPROVAL_REQUIRED: ['An owner decision is waiting', '/inventory'],
     MARKET_PRICE_OUTLOOK: ['Plan ahead of a possible price rise', '/inventory'],
@@ -115,10 +113,16 @@ function alertPresentation(input: AlertInput, packet: OwnerNotificationPacket, i
     CREDIT_SALE: ['A new customer credit supply was recorded', '/customers'],
     CATALOG_CHANGE: ['A manager added a purchase record', '/purchases'],
     SYSTEM_TEST: ['FuelNerve alert test', '/notifications'],
+    CUSTOMER_CREDIT_REMINDER: ['Customer payment reminder', '/customers'],
   } as const;
   const [title, path] = byType[input.type];
-  const agent = intelligenceActive ? agentForType[input.type] : undefined;
+  const agent = packet.responsibleAgent;
   return { title: input.title?.(packet) ?? (agent ? agent.name + ': ' + title : title), path: packet.evidence[0]?.path ?? path, severity: input.severity ?? (input.type === 'DAILY_SUMMARY' || input.type === 'SYSTEM_TEST' ? 'INFORMATION' : 'ATTENTION') };
+}
+
+const whatsappPreview = new AsyncLocalStorage<boolean>();
+export function prepareNotificationPreviews<T>(run: () => Promise<T>) {
+  return whatsappPreview.run(true, run);
 }
 
 async function deliverPush(alert: { id: string; organizationId: string; type: OwnerNotificationType; title: string; message: string; evidencePath: string; evidenceSourceType: string | null; evidenceSourceId: string | null }) {
@@ -145,38 +149,39 @@ export async function sendOwnerNotification(input: AlertInput): Promise<Delivery
     prisma.organization.findUnique({ where: { id: input.organizationId }, select: { intelligenceEnabledAt: true, intelligenceExpiresAt: true } }),
   ]);
   const settings = raw ? { ...raw, varianceThreshold: Number(raw.varianceThreshold), stockVarianceTolerance: Number(raw.stockVarianceTolerance) } : defaults;
-  if (!featureEnabled(settings, input.type)) return { status: 'SKIPPED', reason: 'disabled_by_owner' };
-  const now = new Date();
-  const intelligenceActive = Boolean(organization?.intelligenceEnabledAt && (!organization.intelligenceExpiresAt || organization.intelligenceExpiresAt > now));
+  const categoryEnabled = featureEnabled(settings, input.type);
+  const intelligenceActive = hasActiveIntelligence(organization);
+  const whatsappAllowed = Boolean(organization && allowsOwnerWhatsApp(input.type, input.packet.recordType, intelligenceActive));
+  if (!categoryEnabled && !whatsappAllowed) return { status: 'SKIPPED', reason: 'disabled_by_owner' };
+  if (input.stillRelevant && !(await input.stillRelevant())) return { status: 'SKIPPED', reason: 'facts_changed' };
   const packet = ownerNotificationPacketSchema.parse({ schemaVersion: 1, ...input.packet, responsibleAgent: intelligenceActive ? responsibleAgent(input.type, input.packet.recordType) : null });
-  const presentation = alertPresentation(input, packet, intelligenceActive);
   const message = input.message(packet);
-  const alertMessage = message.replace(/\n*[^\n]*https?:\/\/\S+/g, '').trim();
-  const primaryEvidence = packet.evidence[0]!;
-  const alert = await prisma.ownerAlert.upsert({ where: { dedupeKey: input.dedupeKey }, create: { organizationId: input.organizationId, stationId: input.stationId ?? null, type: input.type, dedupeKey: input.dedupeKey, title: presentation.title, message: alertMessage, severity: presentation.severity, evidenceLabel: primaryEvidence.label, evidencePath: presentation.path, evidenceSourceType: input.evidenceSourceType ?? null, evidenceSourceId: input.evidenceSourceId ?? null, packet: packet as unknown as Prisma.InputJsonValue }, update: {} });
-  await deliverPush(alert);
-  if (!settings.whatsappOptedIn || !settings.whatsappNumber) return { status: 'SKIPPED', reason: 'owner_not_opted_in' };
-  if (!whatsappConfigured) return { status: 'SKIPPED', reason: 'whatsapp_not_configured' };
-  if (env.WHATSAPP_TEMPLATE_STYLE === 'NO_PARAMETERS' && input.type !== 'SYSTEM_TEST') return { status: 'SKIPPED', reason: 'whatsapp_test_template_only' };
-  const existing = await prisma.ownerNotificationDelivery.findUnique({ where: { dedupeKey: input.dedupeKey }, select: { status: true } });
-  if (existing) return { status: ['SENT', 'DELIVERED', 'READ'].includes(existing.status) ? 'SENT' : 'SKIPPED', reason: 'already_processed' };
-  let delivery;
-  try {
-    delivery = await prisma.ownerNotificationDelivery.create({ data: { organizationId: input.organizationId, stationId: input.stationId ?? null, type: input.type, dedupeKey: input.dedupeKey, destination: settings.whatsappNumber, message } });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return { status: 'SKIPPED', reason: 'already_processed' };
-    throw error;
+  if (categoryEnabled) {
+    const presentation = alertPresentation(input, packet);
+    const alertMessage = message.replace(/\n*[^\n]*https?:\/\/\S+/g, '').trim();
+    const primaryEvidence = packet.evidence[0]!;
+    const alert = await prisma.ownerAlert.upsert({ where: { dedupeKey: input.dedupeKey }, create: { organizationId: input.organizationId, stationId: input.stationId ?? null, type: input.type, dedupeKey: input.dedupeKey, title: presentation.title, message: alertMessage, severity: presentation.severity, evidenceLabel: primaryEvidence.label, evidencePath: presentation.path, evidenceSourceType: input.evidenceSourceType ?? null, evidenceSourceId: input.evidenceSourceId ?? null, packet: packet as unknown as Prisma.InputJsonValue }, update: {} });
+    if (input.type !== 'SYSTEM_TEST' && !whatsappPreview.getStore()) await deliverPush(alert);
   }
-  try {
-    const providerMessageId = await sendTemplate(settings.whatsappNumber, message);
-    await prisma.ownerNotificationDelivery.update({ where: { id: delivery.id }, data: { status: 'SENT', providerMessageId, sentAt: new Date() } });
-    return { status: 'SENT' };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message.slice(0, 500) : 'WhatsApp delivery failed.';
-    logger.warn({ organizationId: input.organizationId, type: input.type, error: errorMessage }, 'WhatsApp notification delivery failed');
-    await prisma.ownerNotificationDelivery.update({ where: { id: delivery.id }, data: { status: 'FAILED', errorMessage } });
-    return { status: 'FAILED', reason: errorMessage };
+  if (!whatsappAllowed) {
+    return { status: 'SKIPPED', reason: 'whatsapp_category_not_in_plan' };
   }
+  if (input.stillRelevant && !(await input.stillRelevant())) return { status: 'SKIPPED', reason: 'facts_changed' };
+  const delivery = await queueOwnerWhatsApp({
+    organizationId: input.organizationId, ...(input.stationId ? { stationId: input.stationId } : {}), type: input.type,
+    eventKey: input.dedupeKey, destination: settings.whatsappNumber, optedIn: settings.whatsappOptedIn, categoryEnabled: categoryEnabled
+      && (input.type !== 'SHIFT_CLOSED_SUMMARY' || settings.shiftSummaryEnabled)
+      && (input.type !== 'PURCHASE_RECEIPT_SUMMARY' || settings.receiptSummaryEnabled),
+    recordType: packet.recordType, message, guard: { status: packet.status,
+      ...(input.evidenceSourceId ? { sourceId: input.evidenceSourceId } : {}),
+      ...(packet.quantity ? { quantity: packet.quantity.value } : {}),
+      ...(input.snapshot ? { snapshot: input.snapshot } : {}),
+      ...(input.version ? { version: input.version } : {}),
+    },
+  });
+  return delivery.status === 'SUPPRESSED'
+    ? { status: 'SKIPPED', reason: delivery.suppressionReason ?? 'suppressed' }
+    : { status: 'QUEUED', id: delivery.id };
 }
 
 export async function notifyCatalogRecordCreated(input: {
@@ -386,9 +391,9 @@ export async function unregisterPushDevice(organizationId: string, userId: strin
 export async function sendTestNotification(organizationId: string) {
   const settings = await getSettings(organizationId);
   if (!settings.whatsappOptedIn || !settings.whatsappNumber) throw new AppError(400, 'WHATSAPP_OPT_IN_REQUIRED', 'Save an opted-in WhatsApp number before sending a test.');
-  if (!settings.providerReady) throw new AppError(503, 'WHATSAPP_NOT_CONFIGURED', 'WhatsApp delivery is not configured yet.');
+  if (!env.WHATSAPP_TEMPLATE_NAME) throw new AppError(503, 'WHATSAPP_NOT_CONFIGURED', 'The WhatsApp test template is unavailable.');
   const now = new Date();
-  return sendOwnerNotification({ organizationId, type: 'SYSTEM_TEST', dedupeKey: `test:${organizationId}:${now.getTime()}`, packet: { subjectName: 'Owner notification test', recordType: 'SYSTEM_TEST', product: null, eventDate: now.toISOString(), dueDate: null, amount: null, quantity: null, status: 'TEST', daysOverdueOrWaiting: null, station: { id: null, name: 'All fuel stations' }, evidence: [{ label: 'Open notification settings', path: '/notifications', recordType: 'NOTIFICATION_SETTINGS', recordId: null }], availableActions: ['ACKNOWLEDGE', 'VIEW_RECORD'] }, message: () => `FuelNerve test message\n\nWhatsApp alerts are connected for ${indiaDate()}. You will receive only the alerts you enable in FuelNerve.\n\nOpen FuelNerve: ${env.APP_URL}` });
+  return sendOwnerNotification({ organizationId, type: 'SYSTEM_TEST', dedupeKey: `test:${organizationId}:${Math.floor(now.getTime() / 60_000)}`, packet: { subjectName: 'Owner notification test', recordType: 'SYSTEM_TEST', product: null, eventDate: now.toISOString(), dueDate: null, amount: null, quantity: null, status: 'TEST', daysOverdueOrWaiting: null, station: { id: null, name: 'All fuel stations' }, evidence: [{ label: 'Open notification settings', path: '/notifications', recordType: 'NOTIFICATION_SETTINGS', recordId: null }], availableActions: ['ACKNOWLEDGE', 'VIEW_RECORD'] }, message: () => `FuelNerve test message\n\nWhatsApp alerts are connected for ${indiaDate()}. You will receive only the alerts you enable in FuelNerve.\n\nOpen FuelNerve: ${env.APP_URL}` });
 }
 
 export async function notifyMarketPriceOutlook(input: {
@@ -440,38 +445,24 @@ export async function notifyShiftVariance(organizationId: string, shift: { id: s
   return sendOwnerNotification({ organizationId, stationId: shift.station.id, type: 'SHIFT_VARIANCE', dedupeKey: `shift-variance:${shift.id}`, title: () => scenario.title, packet: scenario.facts, message: () => scenario.sentence });
 }
 
-export async function notifyLowStock(organizationId: string, tankId: string) {
-  const tank = await prisma.tank.findFirst({ where: { id: tankId, status: 'ACTIVE', configuration: { active: true, station: { organizationId } } }, include: { product: { select: { name: true, code: true } }, configuration: { include: { station: { select: { id: true, name: true } } } } } });
-  if (!tank) return { status: 'SKIPPED' as const, reason: 'tank_not_found' };
-  const stock = Number(await bookStockAt(prisma, { organizationId, stationId: tank.configuration.station.id, productId: tank.productId, tankId: tank.id }));
-  const fillPercent = Number(tank.workingCapacity) ? Math.max(0, stock / Number(tank.workingCapacity) * 100) : 0;
-  const settings = await getSettings(organizationId);
-  if (fillPercent > settings.lowStockPercent) return { status: 'SKIPPED' as const, reason: 'stock_healthy' };
-  const date = indiaDate();
-  const now = new Date();
-  const scenario = buildStockScenario({ tankId: tank.id, tankCode: tank.code, product: tank.product, measuredAt: now, availableQuantity: Math.max(0, stock), state: stock <= 0 ? 'EMPTY' : 'LOW_STOCK', station: tank.configuration.station, evidence: [{ label: `Open ${tank.product.code} tank ${tank.code}`, path: '/inventory', recordType: 'TANK', recordId: tank.id }] });
-  return sendOwnerNotification({ organizationId, stationId: tank.configuration.station.id, type: 'LOW_STOCK', dedupeKey: `low-stock:${tank.id}:${date}`, title: () => scenario.title, packet: scenario.facts, message: () => scenario.sentence });
-}
 
 export async function runScheduledNotifications(now = new Date()) {
   const { hour } = indiaParts(now);
   const date = indiaDate(now);
-  const organizations = await prisma.organization.findMany({ select: { id: true, intelligenceEnabledAt: true, intelligenceExpiresAt: true, notificationSettings: { select: { dailySummaryHour: true } } } });
+  const organizations = await prisma.organization.findMany({ select: { id: true, intelligenceEnabledAt: true, intelligenceExpiresAt: true, notificationSettings: { select: { dailySummaryHour: true, creditReportHour: true } } } });
   const results: DeliveryResult[] = [];
   for (const organization of organizations) {
     if (hour === 9) results.push(await notifyMissingDensity(organization.id, date, now));
     if (hour === 23) results.push(await notifyUnclosedShifts(organization.id, date));
-    if (hour === (organization.notificationSettings?.dailySummaryHour ?? defaults.dailySummaryHour)) {
-      const intelligenceActive = Boolean(organization.intelligenceEnabledAt && (!organization.intelligenceExpiresAt || organization.intelligenceExpiresAt > now));
-      if (intelligenceActive) {
-        const briefing = await dailyBriefing(organization.id);
-        const briefingCalculatedAt = new Date(briefing.calculatedAt);
-        results.push(await sendOwnerNotification({ organizationId: organization.id, type: 'DAILY_SUMMARY', dedupeKey: `daily-briefing:${organization.id}:${date}`, title: () => briefing.narrative.headline, severity: 'INFORMATION', packet: { subjectName: 'Daily owner brief', recordType: 'DAILY_BRIEFING', product: null, eventDate: briefingCalculatedAt.toISOString(), dueDate: null, amount: null, quantity: null, status: 'READY', daysOverdueOrWaiting: null, station: { id: null, name: 'All fuel stations' }, evidence: [{ label: 'Open verified daily records', path: '/reports', recordType: 'DAILY_BRIEFING', recordId: null }], availableActions: ['ACKNOWLEDGE', 'VIEW_RECORD', 'GIVE_DETAILS'] }, message: () => `${briefing.narrative.headline}\n\n${briefing.narrative.summary}\n\nReview the verified briefing: ${env.APP_URL}/reports` }));
-      } else results.push(await notifyDailySummary(organization.id, date));
-      results.push(await notifyOverdueCustomers(organization.id, date));
+    if (hasActiveIntelligence(organization, now)) {
+      if (hour === (organization.notificationSettings?.creditReportHour ?? defaults.creditReportHour)) {
+        results.push(await notifyOverdueCustomers(organization.id, date, now));
+      }
+    } else if (hour === (organization.notificationSettings?.dailySummaryHour ?? defaults.dailySummaryHour)) {
+      results.push(await notifyDailySummary(organization.id, date, now));
     }
   }
-  return { date, checkedOrganizations: organizations.length, sent: results.filter(result => result.status === 'SENT').length, failed: results.filter(result => result.status === 'FAILED').length, skipped: results.filter(result => result.status === 'SKIPPED').length };
+  return { date, checkedOrganizations: organizations.length, queued: results.filter(result => result.status === 'QUEUED').length, failed: results.filter(result => result.status === 'FAILED').length, skipped: results.filter(result => result.status === 'SKIPPED').length };
 }
 
 async function notifyMissingDensity(organizationId: string, date: string, now: Date) {
@@ -501,20 +492,58 @@ async function notifyUnclosedShifts(organizationId: string, date: string) {
   return sendOwnerNotification({ organizationId, type: 'SHIFT_OPEN', dedupeKey: `open-shifts:${organizationId}:${date}`, title: () => scenario.title, packet: scenario.facts, message: () => scenario.sentence });
 }
 
-async function notifyDailySummary(organizationId: string, date: string) {
-  const report = await buildReport(organizationId, { startDate: date, endDate: date });
-  const calculatedAt = new Date();
-  const scenario = buildProfitScenario({ periodLabel: date, calculatedAt, netResult: report.summary.netProfit, station: { id: null, name: 'All fuel stations' }, evidence: [{ label: 'Open daily reports', path: '/reports', recordType: 'REPORT', recordId: date }] });
-  return sendOwnerNotification({ organizationId, type: 'DAILY_SUMMARY', dedupeKey: `daily-summary:${organizationId}:${date}`, title: () => scenario.title, packet: scenario.facts, message: () => scenario.sentence });
+async function notifyDailySummary(organizationId: string, date: string, now: Date) {
+  const facts = await readDailyOperatingFacts({ organizationId }, date, now);
+  const collected = facts.collections.actual?.toNumber() ?? null;
+  const title = 'Daily operating summary';
+  return sendOwnerNotification({
+    organizationId, type: 'DAILY_SUMMARY', dedupeKey: `daily-summary:${organizationId}:${date}`, title: () => title,
+    packet: {
+      subjectName: title, recordType: 'CORE_DAILY_SUMMARY', product: null, eventDate: now.toISOString(), dueDate: null,
+      amount: collected !== null ? { value: collected, currency: 'INR' } : null, quantity: null, status: facts.completeness, daysOverdueOrWaiting: null,
+      station: { id: null, name: 'All fuel stations' },
+      evidence: [{ label: 'Open daily reports', path: '/reports', recordType: 'REPORT', recordId: date }],
+      availableActions: ['VIEW_RECORD'],
+    },
+    message: () => coreDailyMessage(facts, date, env.APP_URL),
+  });
 }
 
-async function notifyOverdueCustomers(organizationId: string, date: string) {
-  const report = await buildReport(organizationId, { startDate: date, endDate: date });
-  const overdue = report.customers.map(customer => ({ ...customer, overdue: customer.ageing.days1to30 + customer.ageing.days31to60 + customer.ageing.days61to90 + customer.ageing.days90plus })).filter(customer => customer.overdue > 0.005);
-  if (!overdue.length) return { status: 'SKIPPED' as const, reason: 'no_overdue_customers' };
-  const total = overdue.reduce((sum, customer) => sum + customer.overdue, 0);
-  const examples = overdue.slice(0, 3).map(customer => customer.customer).join(', ');
-  const now = new Date();
-  const first = overdue[0]!;
-  return sendOwnerNotification({ organizationId, type: 'OVERDUE_CUSTOMER', dedupeKey: `overdue-customers:${organizationId}:${date}`, packet: { subjectName: overdue.length === 1 ? first.customer : `${overdue.length} customers`, recordType: 'CUSTOMER_RECEIVABLE', product: null, eventDate: now.toISOString(), dueDate: null, amount: { value: total, currency: 'INR' }, quantity: null, status: 'OVERDUE', daysOverdueOrWaiting: null, station: { id: null, name: 'All fuel stations' }, evidence: [{ label: overdue.length === 1 ? `Open ${first.customer} ledger` : 'Open customer ledgers', path: '/customers', recordType: 'CUSTOMER_LEDGER', recordId: null }], availableActions: ['ACKNOWLEDGE', 'REMIND_LATER', 'VIEW_RECORD', 'GIVE_DETAILS'] }, message: () => `FuelNerve receivables alert\n\n${overdue.length} customer${overdue.length === 1 ? '' : 's'} have overdue payments totalling ${money(total)}.\n${examples}${overdue.length > 3 ? '…' : ''}\n\nReview customers: ${env.APP_URL}/customers` });
+async function notifyOverdueCustomers(organizationId: string, date: string, now: Date) {
+  const readReport = async (asOf: Date) => {
+    const { facts, snapshot } = await creditDeliverySnapshot(organizationId, asOf);
+    const customers = facts
+      .sort((a, b) => b.overdueAmount - a.overdueAmount || b.outstanding - a.outstanding || a.customerId.localeCompare(b.customerId));
+    if (!customers.length) return null;
+    const total = customers.reduce((sum, customer) => sum.plus(customer.outstanding), new Prisma.Decimal(0));
+    const overdue = customers.reduce((sum, customer) => sum.plus(customer.overdueAmount), new Prisma.Decimal(0));
+    const lines = customers.slice(0, 5).map(customer => {
+      const due = customer.oldestDaysOverdue !== null ? `${formatMoney(customer.overdueAmount)} overdue · oldest ${customer.oldestDaysOverdue} days`
+        : customer.completeness === 'INCOMPLETE' ? 'Due date needs review' : 'None overdue';
+      return `${customer.customerName.slice(0, 60)}: ${formatMoney(customer.outstanding)} outstanding · ${due}`;
+    });
+    return { customers, total, snapshot, message: [
+      'FuelNerve Credit Agent · Customer dues',
+      `${formatMoney(total)} outstanding · ${formatMoney(overdue)} overdue`,
+      ...lines, ...(customers.length > lines.length ? [`+${customers.length - lines.length} more in FuelNerve`] : []),
+      `Review ledgers: ${env.APP_URL}/customers`,
+    ].join('\n') };
+  };
+  const report = await readReport(now);
+  if (!report) return { status: 'SKIPPED' as const, reason: 'no_outstanding_customers' };
+  const { customers, total, message } = report;
+  return sendOwnerNotification({
+    organizationId, type: 'OVERDUE_CUSTOMER', dedupeKey: `overdue-customers:${organizationId}:${date}`, snapshot: report.snapshot,
+    stillRelevant: async () => (await readReport(new Date()))?.message === message,
+    packet: {
+      subjectName: `${customers.length} customer account${customers.length === 1 ? '' : 's'}`,
+      recordType: 'CUSTOMER_RECEIVABLE', product: null, eventDate: now.toISOString(), dueDate: null,
+      amount: { value: total.toNumber(), currency: 'INR' }, quantity: null, status: 'OUTSTANDING',
+      daysOverdueOrWaiting: customers.length === 1 ? customers[0]!.oldestDaysOverdue : null,
+      station: { id: null, name: 'All fuel stations' },
+      evidence: [{ label: 'Open customer ledgers', path: '/customers', recordType: 'CUSTOMER_LEDGER', recordId: customers.length === 1 ? customers[0]!.customerId : null }],
+      availableActions: ['ACKNOWLEDGE', 'VIEW_RECORD'],
+    },
+    message: () => message,
+  });
 }

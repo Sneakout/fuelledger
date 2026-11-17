@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { create, findUnique, readForNerve, nerveFindingSources } = vi.hoisted(() => ({ create: vi.fn(), findUnique: vi.fn(), readForNerve: vi.fn(), nerveFindingSources: vi.fn() }));
+vi.mock("../src/config/env.js", () => ({ env: { INTELLIGENCE_INVESTIGATION_MONTHLY_LIMIT: 20 } }));
 vi.mock("../src/lib/prisma.js", () => ({ prisma: { organization: { findUnique: vi.fn().mockResolvedValue({ intelligenceEnabledAt: new Date(), intelligenceExpiresAt: null }) }, intelligenceInvestigation: { findUnique, findUniqueOrThrow: vi.fn(), count: vi.fn().mockResolvedValue(0), create } } }));
 vi.mock("../src/modules/nerve/read-service.js", () => ({ readForNerve, nerveReadCapabilities: ["inventory", "receipt-timing", "reconciliation"] }));
 vi.mock("../src/modules/intelligence/nerve-findings.js", () => ({ nerveFindingSources }));

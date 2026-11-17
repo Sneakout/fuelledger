@@ -1,51 +1,75 @@
 import { useEffect, useMemo, useState } from "react";
 import { BadgeCheck, Building2, Clipboard, ExternalLink, LifeBuoy, Mail, MessageCircleMore, Phone, Save, Sparkles, Users } from "lucide-react";
-import { ApiRequestError, api, type DemoLeadsBootstrap, type NotificationSettings, type PlatformCustomer, type PlatformCustomersBootstrap, type PlatformServiceTicket, type ServiceTicketStatus, type SubscriptionBillingPeriod, type SubscriptionPlan } from "../lib/api";
+import { ApiRequestError, api, type DemoLeadsBootstrap, type PlatformCustomer, type PlatformCustomersBootstrap, type PlatformServiceTicket, type ServiceTicketStatus, type SubscriptionBillingPeriod, type SubscriptionPlan } from "../lib/api";
+import { WhatsAppRolloutPanel } from "./WhatsAppRolloutPanel";
 import { useAuth } from "../components/AuthProvider";
+import type { AdminWhatsAppDelivery } from "../lib/api";
 
 const dateTime = (value: string) => new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
 
-const alertChoices: Array<[keyof NotificationSettings, string]> = [
-  ["densityMissingEnabled", "Missing density"],
-  ["lowStockEnabled", "Low stock"],
-  ["shiftVarianceEnabled", "Shift variance"],
-  ["unclosedShiftEnabled", "Open shift"],
-  ["dailySummaryEnabled", "Daily summary"],
-  ["overdueCustomerEnabled", "Overdue credit"],
-];
-
 function CustomerWhatsAppSettings({ customer }: { customer: PlatformCustomer }) {
-  const [settings, setSettings] = useState(customer.notificationSettings);
-  const [saving, setSaving] = useState(false);
+  const settings = customer.notificationSettings;
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState("");
-  async function save() {
-    setSaving(true); setMessage("");
+  const [deliveries, setDeliveries] = useState<AdminWhatsAppDelivery[]>([]);
+  const [retrying, setRetrying] = useState<string | null>(null);
+  async function refreshDeliveries() {
+    try { setDeliveries((await api.customerWhatsAppDeliveries(customer.id)).deliveries); }
+    catch { setMessage("Could not load WhatsApp delivery history."); }
+  }
+  async function approve(delivery: AdminWhatsAppDelivery) {
+    if (!delivery.previewHash) return;
+    setRetrying(delivery.id);
     try {
-      const { providerReady: _providerReady, ...input } = settings;
-      const result = await api.updateCustomerNotifications(customer.id, input);
-      setSettings(result.settings); setMessage("WhatsApp alerts saved");
+      await api.approveWhatsAppPreview(customer.id, delivery.id, delivery.previewHash);
+      setMessage("Preview approved. The rollout controls govern when it can send.");
+      await refreshDeliveries();
+    } catch (error) { setMessage(error instanceof ApiRequestError ? error.message : "Could not approve this preview."); }
+    finally { setRetrying(null); }
+  }
+  async function retry(deliveryId: string) {
+    setRetrying(deliveryId);
+    try {
+      await api.retryCustomerWhatsAppDelivery(customer.id, deliveryId);
+      setMessage("Retry queued.");
+      await refreshDeliveries();
     } catch (error) {
-      setMessage(error instanceof ApiRequestError ? error.message : "Unable to save WhatsApp alerts.");
-    } finally { setSaving(false); }
+      setMessage(error instanceof ApiRequestError ? error.message : "Could not queue a safe retry.");
+    } finally { setRetrying(null); }
   }
   async function test() {
     setTesting(true); setMessage("");
     try {
       const result = await api.testCustomerWhatsApp(customer.id);
-      setMessage(result.delivery.status === "SENT" ? "Test WhatsApp message accepted by Meta" : result.delivery.reason ?? "Test message was not sent");
+      setMessage(result.delivery.status === "QUEUED" ? "Test message queued. Check delivery history for its status." : result.delivery.reason ?? "Test message was not queued");
+      await refreshDeliveries();
     } catch (error) {
       setMessage(error instanceof ApiRequestError ? error.message : "Unable to send the test message.");
     } finally { setTesting(false); }
   }
-  return <details className="admin-whatsapp">
+  return <details className="admin-whatsapp" onToggle={event => { if (event.currentTarget.open) void refreshDeliveries(); }}>
     <summary><MessageCircleMore/><span><b>WhatsApp alerts</b><small>{settings.whatsappOptedIn && settings.whatsappNumber ? `Active · +${settings.whatsappNumber}` : "Not active"}</small></span></summary>
     <div className="admin-whatsapp-body">
-      <label><span>Customer WhatsApp number</span><input inputMode="tel" placeholder="919876543210" value={settings.whatsappNumber ?? ""} onChange={(event) => setSettings({ ...settings, whatsappNumber: event.target.value.replace(/[^0-9+]/g, "") })}/></label>
-      <label className="admin-whatsapp-optin"><input type="checkbox" checked={settings.whatsappOptedIn} onChange={(event) => setSettings({ ...settings, whatsappOptedIn: event.target.checked })}/><span>Customer opt-in confirmed</span></label>
-      <div className="admin-alert-choices">{alertChoices.map(([key, label]) => <label key={key}><input type="checkbox" checked={Boolean(settings[key])} onChange={(event) => setSettings({ ...settings, [key]: event.target.checked })}/><span>{label}</span></label>)}</div>
-      <div className="admin-whatsapp-thresholds"><label><span>Low stock %</span><input type="number" min="1" max="50" value={settings.lowStockPercent} onChange={(event) => setSettings({ ...settings, lowStockPercent: Number(event.target.value) })}/></label><label><span>Cash variance ₹</span><input type="number" min="0" value={settings.varianceThreshold} onChange={(event) => setSettings({ ...settings, varianceThreshold: Number(event.target.value) })}/></label><label><span>Summary hour</span><input type="number" min="0" max="23" value={settings.dailySummaryHour} onChange={(event) => setSettings({ ...settings, dailySummaryHour: Number(event.target.value) })}/></label></div>
-      <div className="admin-whatsapp-action"><button className="secondary small" disabled={saving || testing} onClick={() => void save()}><Save size={14}/>{saving ? "Saving…" : "Save WhatsApp setup"}</button>{settings.providerReady && settings.whatsappOptedIn && settings.whatsappNumber && <button className="secondary small" disabled={saving || testing} onClick={() => void test()}><MessageCircleMore size={14}/>{testing ? "Sending…" : "Send test"}</button>}{message && <small>{message}</small>}</div>
+      <p>Owners manage WhatsApp preferences in their account.</p>
+      <div className="admin-whatsapp-action">{settings.whatsappOptedIn && settings.whatsappNumber && <button className="secondary small" disabled={testing} onClick={() => void test()}><MessageCircleMore size={14}/>{testing ? "Queuing…" : "Prepare test preview"}</button>}{message && <small>{message}</small>}</div>
+      <div>
+        <button type="button" className="secondary small" onClick={() => void refreshDeliveries()}>Refresh delivery history</button>
+        {deliveries.map(delivery => <div key={delivery.id}>
+          <b>{delivery.type.toLowerCase().replaceAll("_", " ")}</b>
+          <span> · {delivery.status === "SENT" ? "Accepted (legacy)" : delivery.status.toLowerCase()} · {dateTime(delivery.createdAt)} · {delivery.attempts} attempts</span>
+          {(delivery.errorMessage || delivery.suppressionReason) && <p>{delivery.errorMessage ?? delivery.suppressionReason?.replaceAll("_", " ")}</p>}
+          {delivery.rolloutHold && <p>{delivery.rolloutHold.replaceAll("_", " ")}</p>}
+          {delivery.previewTemplate && <details open={delivery.status === "PENDING"}>
+            <summary>Message preview · recipient ending {delivery.recipientEnding}</summary>
+            <p>{delivery.previewTemplate}{delivery.sourceId ? ` · Source record ${delivery.sourceId}` : ""}</p>
+            <p style={{ overflowWrap: "anywhere" }}>{delivery.previewBody || "Uses the configured test template with no inserted text."}</p>
+            {delivery.status === "PENDING" && delivery.previewHash && (delivery.previewHash === delivery.approvedPreviewHash
+              ? <small>Preview approved</small>
+              : <button type="button" className="secondary small" disabled={retrying !== null} onClick={() => void approve(delivery)}>Approve preview</button>)}
+          </details>}
+          {delivery.canRetry && <button type="button" className="secondary small" disabled={retrying !== null} onClick={() => void retry(delivery.id)}>Retry delivery</button>}
+        </div>)}
+      </div>
     </div>
   </details>;
 }
@@ -138,6 +162,7 @@ export function DemoLeadsPage() {
     <section className="leads-hero"><div><span className="eyebrow">Growth desk</span><h1>Customers & enquiries</h1><p>Follow new signups from first interest to verified setup and lifetime activation.</p></div><Sparkles/></section>
     {error && <div className="form-error">{error}</div>}
     <section className="leads-stats three"><article><Users/><span><small>Registered customers</small><b>{accounts.customers.length}</b></span></article><article><BadgeCheck/><span><small>Paid plans active</small><b>{active}</b></span></article><article><Sparkles/><span><small>Demo enquiries</small><b>{unique}</b></span></article></section>
+    <WhatsAppRolloutPanel customers={accounts.customers} />
     <section className="leads-list service-ticket-list"><header><div><span className="eyebrow">Customer service</span><h2>Service tickets</h2><p>Issues submitted from customer Help pages, newest first.</p></div><small>{tickets.filter((ticket) => ticket.status !== "RESOLVED").length} open</small></header>{tickets.length ? tickets.map((ticket) => <ServiceTicketCard key={`${ticket.id}-${ticket.updatedAt}`} ticket={ticket} onSaved={loadTickets}/>) : <div className="leads-empty"><LifeBuoy/><h2>No service tickets</h2></div>}</section>
     <section className="leads-list customer-list"><header><div><span className="eyebrow">Customer activation</span><h2>Registered FuelNerve accounts</h2><p>Select the customer’s exact plan and billing choice. Approve access only after independently verifying payment.</p></div><small>Latest 250 accounts</small></header>{accounts.customers.length ? accounts.customers.map((customer) => <CustomerActivation key={`${customer.id}-${customer.subscriptionUpdatedAt}`} customer={customer} onSaved={loadAccounts} />) : <div className="leads-empty"><Building2/><h2>No customer signups yet</h2></div>}</section>
     <section className="leads-list"><header><div><span className="eyebrow">Follow-up list</span><h2>Recent demo visitors</h2></div><small>Latest 250 sessions</small></header>{data.leads.length ? data.leads.map((lead) => { const email = lead.kind === "EMAIL"; return <article key={lead.id}><span className={email ? "lead-kind email" : "lead-kind phone"}>{email ? <Mail/> : <Phone/>}</span><div><strong>{lead.contact}</strong><small>Started {dateTime(lead.createdAt)} · Demo ends {dateTime(lead.expiresAt)}</small></div><button className="secondary small" onClick={() => void copy(lead.contact)}><Clipboard size={14}/>{copied === lead.contact ? "Copied" : "Copy"}</button></article>; }) : <div className="leads-empty"><Users/><h2>No demo enquiries yet</h2><p>When someone starts a demo, it will appear here.</p></div>}</section>

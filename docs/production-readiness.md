@@ -30,7 +30,9 @@ Set the following **Production** environment variables in the Vercel dashboard. 
 | `WHATSAPP_ACCESS_TOKEN` | Meta WhatsApp Cloud API system-user access token |
 | `WHATSAPP_PHONE_NUMBER_ID` | Meta WhatsApp sender phone number ID |
 | `WHATSAPP_API_VERSION` | The supported Meta Graph API version, for example `v27.0` |
-| `WHATSAPP_TEMPLATE_NAME` | Approved WhatsApp template name, for example `fuelledger_alert` |
+| `WHATSAPP_TEMPLATE_NAME` | Template for the explicit test alert |
+| `WHATSAPP_BUSINESS_ACCOUNT_ID` | Meta WhatsApp Business Account owning the production sender and templates |
+| `WHATSAPP_DELIVERY_ENABLED` | Operational delivery switch, defaults to `false` |
 | `WHATSAPP_TEMPLATE_LANGUAGE` | Template language code, normally `en` |
 | `WHATSAPP_TEMPLATE_STYLE` | `ALERT_BODY` for the approved one-variable FuelNerve Utility template; `NO_PARAMETERS` only for the Meta `hello_world` transport test |
 | `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | A new random secret of at least 16 characters, entered identically in Meta's webhook setup |
@@ -51,16 +53,41 @@ Add the production domain to Google OAuth's Authorized JavaScript Origins. Use a
 
 ## WhatsApp owner alerts
 
-FuelNerve can alert an opted-in owner about missing morning density readings, low tank stock, cash variances, open shifts, the daily summary and overdue customer payments. The app records each delivery attempt, so the owner can see whether an alert was sent or failed.
+After deploying the additive queue migration, configure the Cloud API sender, business account, app secret, webhook verify token and scheduler credentials in the production environment. In WhatsApp Manager, subscribe the callback at `/api/notifications/whatsapp/webhook` to the `messages` field. Confirm that the dedicated system user can send messages and read the account's template statuses. Configure billing with Meta for business-initiated delivery.
 
-1. In Meta Business Manager, connect the sending WhatsApp number and create an approved utility template named `fuelledger_alert` with one body variable: `{{1}}`. The application sends the complete alert as that variable.
-2. Add the WhatsApp and `CRON_SECRET` variables above to Vercel's **Production** environment, then redeploy. In Meta, set the callback URL to `https://your-production-domain/api/notifications/whatsapp/webhook`, use the exact `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, and subscribe to the `messages` field.
-3. After taking a verified production database backup, run `corepack pnpm db:deploy` once from a protected release terminal using the production `DATABASE_URL`.
-4. Sign in as the owner, open **WhatsApp alerts**, enter the owner's number with country code, confirm consent, choose alert types and use **Send test alert**.
+Keep `WHATSAPP_DELIVERY_ENABLED=false` until the sender, signed delivery-status webhook and all five English utility templates have been verified. The worker checks each template's approval before dispatch. Jobs awaiting approval or reactivation remain queued and expire after 24 hours. The separate test template may use Meta's `hello_world`, `en_US` and `WHATSAPP_TEMPLATE_STYLE=NO_PARAMETERS` on test infrastructure.
 
-For test-number transport checks, configure Meta's `hello_world` template with language `en_US` and `WHATSAPP_TEMPLATE_STYLE=NO_PARAMETERS`. In this mode only the explicit system test can use WhatsApp; operational alerts continue to create FuelNerve app and push alerts but are not sent through WhatsApp. Never use an unrelated Meta sample template to represent a FuelNerve business event.
+Run these server-side requests with `Authorization: Bearer <CRON_SECRET>`. Use the existing deployment scheduler or another authenticated scheduler. Keep the production delivery worker paused until launch checks are complete.
 
-The initial Hobby-compatible deployment supports saving alert preferences and sending a manual test alert. Before enabling automated alerts, upgrade to Vercel Pro and restore the hourly scheduled check. Alert rules use India time (`Asia/Kolkata`): density is checked at 9:00 AM, open shifts at 11:00 PM, and the daily summary at the hour selected by the owner. Scheduled functions are protected with `CRON_SECRET`; never expose this value in the web app.
+- `GET /api/notifications/cron/agent-messages` queues owner messages from verified station events.
+- `GET /api/notifications/cron/daily` queues the one Core daily report and the Intelligence owner credit report when applicable.
+- `GET /api/notifications/cron/whatsapp-delivery` drains a bounded batch. Schedule it every minute for the pilot.
+
+Growth Desk shows recent attempts and suppression reasons. Accepted means Meta acknowledged the request. Delivered and Read require signed Meta webhooks. A timeout, ambiguous provider response or worker interruption after dispatch stays visible as an unconfirmed outcome. A matching signed callback can reconcile it. Automatic retries cover pre-dispatch checks and explicit rate-limit rejections. One administrator retry is available for recent jobs with known non-acceptance. The worker revalidates plan, recipient, consent, preferences and source evidence for each attempt.
+
+### Owner utility templates
+
+All five were submitted for review on the Fuel Nerve WhatsApp Business Account and were still in review when checked on 17 November 2026. Each uses one numbered body variable. Examples submitted to Meta use fictional records.
+
+| Template | Body |
+| --- | --- |
+| `fuelnerve_stock_level_v1` | FuelNerve stock alert for your fuel station. A tank has reached its configured reorder threshold. {{1}} Review the tank record in FuelNerve to confirm whether a delivery is needed. |
+| `fuelnerve_shift_closed_v1` | FuelNerve shift closure report for your fuel station. The shift has been closed and its sales, collections and closing tank stock have been recorded. {{1}} Review the shift reconciliation in FuelNerve for the original readings. |
+| `fuelnerve_purchase_receipt_v1` | FuelNerve purchase receipt for your fuel station. A supplier delivery has been recorded against a purchase invoice. {{1}} Review the purchase invoice in FuelNerve for receipt and payment details. |
+| `fuelnerve_owner_credit_v1` | FuelNerve customer credit report for your fuel station. The following customer balances are outstanding as of this report. {{1}} Review customer accounts in FuelNerve before following up. |
+| `fuelnerve_daily_operations_v1` | FuelNerve daily operations report for your fuel station. This is the daily summary of recorded fuel sales, collections and tank stock. {{1}} Review the station dashboard in FuelNerve for the underlying records. |
+
+The Credit Agent also prepares customer-facing reminder drafts for owner review. See Customer WhatsApp reminders for the separate template and consent flow.
+
+[Meta template management](https://developers.facebook.com/docs/graph-api/reference/whats-app-business-account/message_templates/) · [WhatsApp Business Messaging Policy](https://business.whatsapp.com/policy)
+
+## Station agent job processing
+
+Agent reviews use a separate scheduled request. After the additive `nerve_review_jobs` migration and API deployment, configure a server-side scheduler to send `GET /api/notifications/cron/agent-reviews` every minute with `Authorization: Bearer <CRON_SECRET>`. The endpoint schedules one review per agent, station and Indian business day and processes a bounded batch of queued work. Watch queue age and terminal failures during the pilot, and adjust polling or worker concurrency to match volume. Stopping the schedule pauses processing while transaction events continue to be recorded.
+
+Inspect `nerve_review_jobs` for pending work, expired leases and terminal failures. A healthy response reports counts for queued, completed, retried, failed and skipped reviews. A completed job contains the verified findings and the runtime audit for the successful attempt. Reviews are read-only and the worker has no WhatsApp delivery call.
+
+The agent-messages worker handles reconciled shifts, posted receipts and stock changes. Agent jobs created before the migration are excluded from WhatsApp delivery.
 
 ## Smoke checklist
 
@@ -83,3 +110,32 @@ The initial Hobby-compatible deployment supports saving alert preferences and se
 ## Remaining operational requirements
 
 Before broad rollout, provision private object storage for attachments, set database backup retention with point-in-time recovery, test restores at least monthly, configure error tracking, publish Privacy Policy/Terms/Refund and Cancellation/Data Retention policies, and complete a payment gateway/subscription enforcement milestone.
+
+## Customer WhatsApp reminders
+
+Owners manage notification preferences under **WhatsApp alerts**. Growth Desk provides activation, test messages and delivery troubleshooting. Core sends the daily operating summary. Core + Intelligence supports operational alerts, the scheduled owner credit report and customer reminders.
+
+Customer reminders start with **Preview reminder** and **Approve and queue reminder** in the customer profile. Scheduled sending is off until the owner saves an enabled schedule. The daily cron must run during the selected Indian Standard Time hour. Consent is associated with the saved WhatsApp number and records when, how and by whom it was captured. A new number needs separate consent.
+
+The delivery worker checks the approved balance and destination against the current ledger, including cross-station payments. A dispute, paused customer, revoked consent, changed scheduled policy or recent delivery can stop dispatch. An unresolved delivery blocks additional reminders for the customer.
+
+The English utility template `fuelnerve_customer_payment_reminder_v1` was submitted for Meta review in the production Fuel Nerve WhatsApp Business Account. It uses one numbered body variable.
+
+> Payment reminder for your fuel account. Our records show an overdue balance. {{1}} If you have already paid or believe the balance is incorrect, please contact your fuel station.
+
+Example variable: Sample Fuel Station · Demo Fleet · ₹4,250.00 overdue as of 2026-11-17 · Earliest unpaid due date 2026-11-10.
+
+Verify Meta approval and the signed delivery webhook before enabling production dispatch. Start with an owner-reviewed test to an opted-in test recipient. Use Growth Desk to confirm the delivery result before enabling any customer schedule.
+
+## Controlled WhatsApp rollout
+
+Deploy the additive migrations with **Shadow** selected as the initial database policy. The independent deployment switch `WHATSAPP_DELIVERY_ENABLED` defaults to `false` and applies to transport tests as well. Shadow previews can be generated with this switch off. Once live account setup is verified, set the deployment switch to `true` and keep the database policy paused until the intended stage and category are selected.
+
+In **Settings → Growth Desk → WhatsApp rollout**, use **Generate previews** to run a bounded review batch without contacting Meta. Open **WhatsApp alerts** on the appropriate account, compare the preview and recipient with the shift reconciliation, physical receipt, tank stock, daily totals or credit ledger, then select **Approve preview**. Review event-date, station and currency amounts in addition to the text. The worker binds approval to the sender, recipient, template and current contents. A changed calculation requires a new approval.
+
+1. **Internal test** permits one opted-in owner account. Start with one operational category and one reviewed preview. Use **Process approved messages** or the authenticated delivery worker. Compare the actual handset message with the approved preview and confirm a signed **Delivered** or **Read** update. Meta acceptance alone does not advance the rollout.
+2. **Owner pilot** permits up to five explicitly selected opted-in accounts after the internal delivery check. Keep customer reminders off. Review rejected, uncertain, delayed and suppressed jobs in Growth Desk while comparing received messages with their evidence.
+3. Turn on **Customer reminders** separately after a pilot owner delivery is verified. Start with owner-reviewed recipients. Continue using both recipient consent and a final ledger check. Verify that a payment or dispute changes or withdraws the preview before it can send.
+4. **Expanded delivery** keeps explicit account enrollment and per-message preview approval. Expand in small batches and check the previous 24 hours of outcomes before adding the next group.
+
+**Pause all WhatsApp** blocks new dispatch claims immediately without redeploying. Uncheck an individual delivery category to pause just that category. In-flight messages can still complete and authenticated delivery callbacks continue updating history. Agent events, proposed messages, drafts and approval history are preserved. Keep the rollout-enabled release in place when pausing. Redeploying a version from before the rollout controls can bypass this database switch.

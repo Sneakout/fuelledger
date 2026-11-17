@@ -1,0 +1,103 @@
+.shell .sidebar > nav { min-height: 0; }
+.shell .sidebar .brand,
+.shell .sidebar .station-card,
+.shell .sidebar .sidebar-foot { flex-shrink: 0; }
+.shell .sidebar .sidebar-foot { margin-top: auto; }
+
+.shell .topbar .shell-greeting { min-width: 0; }
+.shell-greeting strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell .topbar .status { flex-shrink: 0; }
+.shell-approvals {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--forest);
+  font-size: 12px;
+  font-weight: 800;
+  text-decoration: none;
+}
+.shell-approvals:hover,
+.shell-approvals.active { background: var(--mint); border-color: #b9d8ca; }
+.shell-approvals span {
+  min-width: 20px;
+  padding: 2px 5px;
+  border-radius: 20px;
+  background: #e9f7b9;
+  color: #2f5527;
+  text-align: center;
+}
+.shell nav.shell-section-nav {
+  flex-direction: row;
+  gap: 6px;
+  padding: 7px 34px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  overflow-x: auto;
+}
+.shell .shell-section-nav a {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 6px 11px;
+  color: #526b61;
+  white-space: nowrap;
+}
+.shell .shell-section-nav a:hover,
+.shell .shell-section-nav a[aria-current="page"] { background: var(--mint); color: var(--forest); }
+.shell nav.shell-mobile-nav,
+.shell .shell-backdrop { display: none; }
+
+@media (max-width: 760px) {
+  .shell .sidebar { visibility: hidden; }
+  .shell .sidebar.open { visibility: visible; }
+  .shell .shell-backdrop { display: block; z-index: 19; }
+  .shell .workspace { padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
+  .shell .topbar { padding-inline: 12px; gap: 7px; }
+  .shell .topbar .status { padding: 6px 7px; font-size: 10px; }
+  .shell-approvals { min-height: 44px; padding-inline: 8px; gap: 4px; }
+  .shell-approvals > svg { width: 15px; }
+  .shell nav.shell-section-nav { padding-inline: 12px; }
+  .shell .shell-section-nav a { min-height: 44px; }
+  .shell nav.shell-mobile-nav {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 0;
+    position: fixed;
+    inset: auto 0 0;
+    z-index: 9;
+    padding: 3px 5px calc(3px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--line);
+    background: #fff;
+    overflow: visible;
+  }
+  .shell .shell-mobile-nav :is(a, button) {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 50px;
+    padding: 3px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: #526b61;
+    font-size: 10px;
+    font-weight: 750;
+  }
+  .shell .shell-mobile-nav :is(a:hover, button:hover, [aria-current], [aria-expanded="true"]) {
+    background: var(--mint);
+    color: var(--forest);
+  }
+  .shell .sidebar.open ~ .workspace .approval-reminder { visibility: hidden; }
+  .shell .approval-reminder { bottom: calc(68px + env(safe-area-inset-bottom, 0px)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell .sidebar { transition: none; }
+}

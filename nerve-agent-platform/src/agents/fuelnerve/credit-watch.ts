@@ -48,7 +48,7 @@ function creditFacts(item: JsonObject, result: ToolResult) {
       whyItMatters: `${reasons.join("; ")}.`, calculatedAt: result.calculatedAt,
       periodStart: textValue(invoice.eventDate, result.calculatedAt), periodEnd: result.calculatedAt,
       recommendedNextStep: `Open invoice ${invoiceNumber} and verify its ledger and receipt records before using the reminder draft.`,
-      displayValue: { customerId: item.customerId, customer, invoiceId: invoice.invoiceId, invoiceNumber, originalAmount: invoice.originalAmount, amountPaid: invoice.amountPaid, outstanding, eventDate: invoice.eventDate, dueDate: invoice.dueDate, daysOverdue, status, creditLimit, customerOutstanding, reminderDraft, sendState: "NOT_SENT", sendingRequiresExplicitApproval: true },
+      displayValue: { customerId: item.customerId ?? null, customer, invoiceId: invoice.invoiceId ?? null, invoiceNumber, originalAmount: invoice.originalAmount ?? null, amountPaid: invoice.amountPaid ?? null, outstanding, eventDate: invoice.eventDate ?? null, dueDate: invoice.dueDate ?? null, daysOverdue, status, creditLimit, customerOutstanding, reminderDraft, sendState: "NOT_SENT", sendingRequiresExplicitApproval: true },
       priorityRank: numberValue(invoice.priorityRank), priorityReason: textValue(invoice.priorityReason),
       recordsToCompare: ["Customer invoice", "Customer ledger", "Recorded receipts"], relatedContext: { reminderDraft, sendState: "NOT_SENT", sendingRequiresExplicitApproval: true },
     }, evidenceIds);

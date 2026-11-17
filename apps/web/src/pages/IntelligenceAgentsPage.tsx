@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { fuelNerveAgents as agentCatalogue } from "@fuelledger/shared";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { AlertTriangle, ArrowLeft, ArrowRight, Bot, CheckCircle2, ChevronDown, ClipboardCheck, Clock3, Droplets, FileCheck2, FileText, MessageCircleQuestion, Paperclip, Plus, RefreshCw, SearchCheck, Send, ShieldCheck, Sparkles, TrendingUp, X } from "lucide-react";
 import { useAuth } from "../components/AuthProvider";
@@ -21,14 +22,6 @@ type TeamAgent = NerveAgentPresentation & {
   findings: NerveFinding[];
 };
 
-const agentCatalogue: Array<NerveAgentPresentation & { area: string; aliases?: string[]; checks: string[] }> = [
-  { agentKey: "reconciliation-review", name: "Shift Agent", purpose: "Shifts, collections and handovers", icon: "shift", area: "Operations", checks: ["Open or overdue shifts", "Missing readings and collections", "Differences that still need reconciliation"] },
-  { agentKey: "inventory-watch", name: "Stock Agent", purpose: "Tanks, readings, receipts and movement", icon: "stock", area: "Operations", checks: ["Empty and low-stock tanks", "Physical stock compared with book stock", "Missing density readings and unusual movement"] },
-  { agentKey: "credit-watch", aliases: ["receivables-watch"], name: "Credit Agent", purpose: "Customer dues, ageing and reminder drafts", icon: "specialist", area: "Money", checks: ["Customer payments that are overdue", "Partial payments and agreed credit limits", "Verified details for reminder drafts"] },
-  { agentKey: "purchase-check", name: "Purchase Agent", purpose: "Invoices, receipts, rates and supplier payments", icon: "specialist", area: "Money", checks: ["Invoice and delivery quantity differences", "Possible duplicates and rate differences", "Supplier payments that are overdue"] },
-  { agentKey: "profit-insight", name: "Profit Agent", purpose: "Margins, costs and financial changes", icon: "profit", area: "Money", checks: ["Revenue and cost changes", "Fuel and non-fuel contribution", "Comparable periods and missing costs"] },
-  { agentKey: "business-assistant", aliases: ["owner-assistant"], name: "Owner Assistant", purpose: "Connects findings and answers with supporting records", icon: "assistant", area: "Your guide", checks: ["Brings related agent findings together", "Explains why an issue comes first", "Takes you to the exact supporting records"] },
-];
 
 export function IntelligenceAgentsPage() {
   const { agentKey } = useParams();
@@ -128,7 +121,7 @@ export function IntelligenceAgentsPage() {
   return <main className="page nerve-page">
     <header className="today-heading"><div><span className="eyebrow">{`${dayGreeting()}, ${user?.name.split(" ")[0] ?? "there"}`}</span><h1>Nerve Intelligence</h1><p>Six specialists review <strong>{selectedStation?.name ?? "the selected station"}</strong> and bring forward what needs your attention.</p></div>{data && <span className="today-updated"><Clock3/> Last review {relativeTime(data.generatedAt)}</span>}</header>
 
-    {data && <section className="nerve-team" aria-label={`Nerve Intelligence specialists for ${selectedStation?.name ?? "the selected station"}`}><div className="nerve-team-heading"><div><span className="eyebrow">Your specialist team</span><h2>Six agents, one clear owner view</h2><p>Each agent watches a specific part of the business. The Owner Assistant connects their findings.</p></div><span>{reviewedAgentCount} reviewed · {team.length - reviewedAgentCount} awaiting review</span></div><div className="nerve-team-grid">{team.map(agent => <AgentTeamCard key={agent.agentKey} agent={agent}/>)}</div></section>}
+    {data && <section className="nerve-team" aria-label={`Nerve Intelligence specialists for ${selectedStation?.name ?? "the selected station"}`}><div className="nerve-team-heading"><div><span className="eyebrow">Your specialist team</span><h2>Six agents, one clear owner view</h2><p>Each agent watches a specific part of the business. The Nerve Assistant connects their findings.</p></div><span>{reviewedAgentCount} reviewed · {team.length - reviewedAgentCount} awaiting review</span></div><div className="nerve-team-grid">{team.map(agent => <AgentTeamCard key={agent.agentKey} agent={agent}/>)}</div></section>}
 
     <AskNerveBar stationId={selectedStationId} stationName={selectedStation?.name} isDemo={Boolean(user?.demoExpiresAt)} onRecordsChanged={() => void load()}/>
 

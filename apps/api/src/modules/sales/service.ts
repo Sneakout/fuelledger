@@ -1,4 +1,5 @@
 import { safeTransaction } from '../../lib/safe-save.js';
+import { enqueueReview } from '../nerve/review-events.js';
 import type { SaleInput } from '@fuelledger/shared';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
@@ -6,7 +7,7 @@ import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 import { collectionAccount, postJournal } from '../accounting/service.js';
 import { assertStockAvailable } from '../../lib/stock.js';
-import { notifyCreditSale, notifyLowStock } from '../notifications/service.js';
+import { notifyCreditSale } from '../notifications/service.js';
 
 const saleInclude = { station: { select: { id: true, name: true, code: true } }, shift: { select: { id: true, shiftNumber: true, status: true } }, product: { select: { id: true, name: true, code: true, unit: true, meterLinked: true, isService: true } }, employee: { select: { id: true, name: true, role: true } }, tank: { select: { id: true, code: true } }, nozzle: { select: { id: true, code: true, dispenser: { select: { code: true } } } }, customer: { select: { id: true, name: true, code: true, type: true } }, vehicle: { select: { id: true, number: true, label: true } } } as const;
 
@@ -43,7 +44,6 @@ export async function createSale(organizationId: string, input: SaleInput) {
   if (metered) {
     const sale = await createMeteredSale(organizationId, input, shift, {...product,sellingPrice:applicablePrice,purchasePrice:applicablePurchasePrice});
     await notifyCreditSaleAfterCommit(organizationId, sale);
-    if (sale.tank?.id) await notifyLowStock(organizationId, sale.tank.id).catch(() => undefined);
     return sale;
   }
   if (input.tankId || input.nozzleId || input.meterOpening !== null && input.meterOpening !== undefined || input.meterClosing !== null && input.meterClosing !== undefined) throw new AppError(400, 'EQUIPMENT_NOT_APPLICABLE', 'This product is not sold from a meter. Record the quantity directly.');
@@ -51,7 +51,6 @@ export async function createSale(organizationId: string, input: SaleInput) {
   if (!quantity) throw new AppError(400, 'QUANTITY_REQUIRED', 'Enter a quantity for this sale.');
   const sale = await persistSale({ organizationId, input, kind: product.isService ? 'SERVICE' : 'PRODUCT', quantity, product:{...product,sellingPrice:applicablePrice,purchasePrice:applicablePurchasePrice} });
   await notifyCreditSaleAfterCommit(organizationId, sale);
-  if (sale.tank?.id) await notifyLowStock(organizationId, sale.tank.id).catch(() => undefined);
   return sale;
 }
 
@@ -111,6 +110,7 @@ async function persistSale({ organizationId, input, kind, quantity, product }: {
     if (product.inventoryTracked) await tx.inventoryLedger.create({ data: { organizationId, stationId: input.stationId, productId: product.id, tankId: input.tankId ?? null, type: 'SALE', quantityDelta: new Prisma.Decimal(quantity).neg(), unitCost:product.purchasePrice, saleId: sale.id, occurredAt: sale.occurredAt, createdById: input.employeeId } });
     if (customer && ['CREDIT', 'FLEET'].includes(input.paymentMethod)) { const dueDate = new Date(sale.occurredAt); dueDate.setDate(dueDate.getDate() + customer.creditDays); await tx.customerLedgerEntry.create({ data: { organizationId, stationId: input.stationId, customerId: customer.id, type: 'SALE', amount: totalAmount, saleId: sale.id, description: `${sale.product.name} sale`, dueDate, occurredAt: sale.occurredAt, createdById: input.employeeId } }); }
     await postJournal(tx,{organizationId,stationId:input.stationId,createdById:input.employeeId,journalDate:sale.occurredAt,reference:`SALE-${sale.id.slice(-8)}`,description:`${sale.product.name} sale`,sourceType:'SALE',sourceId:sale.id,lines:[{account:collectionAccount(input.paymentMethod),debit:totalAmount},{account:product.isService?'4010':'4000',credit:totalAmount},...(product.inventoryTracked?[{account:'5000',debit:new Prisma.Decimal(quantity).mul(product.purchasePrice)},{account:'1200',credit:new Prisma.Decimal(quantity).mul(product.purchasePrice)}]:[])]});
+    await enqueueReview(tx, { type: 'SALE_RECORDED', organizationId, stationId: sale.stationId, resourceId: sale.id, occurredAt: sale.occurredAt });
     return sale;
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

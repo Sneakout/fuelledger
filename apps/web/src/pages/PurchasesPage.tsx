@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   FileText,
@@ -114,6 +114,7 @@ const supplierCodeFromName = (name: string) =>
     .replace(/^-|-$/g, "")
     .slice(0, 30);
 export function PurchasesPage() {
+  const openedInvoiceLink = useRef<string | null>(null);
   const [data, setData] = useState<PurchasesBootstrap | null>(null),
     [mode, setMode] = useState<Mode>(null),
     [error, setError] = useState(""),
@@ -169,7 +170,7 @@ export function PurchasesPage() {
     referenceNo: "",
   });
   const load = async () => {
-    const result = await api.purchasesBootstrap();
+    const result = await api.purchasesBootstrap(new URLSearchParams(window.location.search).get("invoiceId") ?? undefined);
     setData(result);
     setInvoice((x) => {
       const supplierId = x.supplierId || result.suppliers[0]?.id || "";
@@ -188,6 +189,42 @@ export function PurchasesPage() {
   useEffect(() => {
     void load().catch(() => setError("Unable to load purchases."));
   }, []);
+  function openInvoice(item: PurchaseInvoice) {
+    setEditingInvoice(item);
+    setPricePreview(null);
+    setEditQuantities(
+      Object.fromEntries(
+        item.lines.map((line) => [
+          line.id,
+          String(Number(line.quantity)),
+        ]),
+      ),
+    );
+    setCorrectionReason("");
+    setReceiptDateCorrection("");
+    setInvoice((current) => ({
+      ...current,
+      stationId: item.station.id,
+      supplierId: item.supplier.id,
+      invoiceNumber: item.invoiceNumber,
+      invoiceDate: item.invoiceDate.slice(0, 10),
+      dueDate: item.dueDate.slice(0, 10),
+      notes: item.notes ?? "",
+      receiveNow: Boolean(item.receipt),
+      paidNow: false,
+      paymentReferenceNo: "",
+    }));
+    setMode("edit-invoice");
+  }
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("invoiceId");
+    if (!id || openedInvoiceLink.current === id) return;
+    const match = data?.invoices.find(item => item.id === id);
+    if (match) {
+      openedInvoiceLink.current = id;
+      openInvoice(match);
+    }
+  }, [data]);
   useEffect(() => {
     const localValue = editingInvoice ? receiptDateCorrection : receiptTimeEdited && invoice.receiveNow ? invoice.receivedAt : "";
     const station = editingInvoice?.station.id ?? invoice.stationId;
@@ -568,33 +605,7 @@ export function PurchasesPage() {
                     )}
                     <button
                       className="text-button"
-                      onClick={() => {
-                        setEditingInvoice(item);
-                        setPricePreview(null);
-                        setEditQuantities(
-                          Object.fromEntries(
-                            item.lines.map((line) => [
-                              line.id,
-                              String(Number(line.quantity)),
-                            ]),
-                          ),
-                        );
-                        setCorrectionReason("");
-                        setReceiptDateCorrection("");
-                        setInvoice((current) => ({
-                          ...current,
-                          stationId: item.station.id,
-                          supplierId: item.supplier.id,
-                          invoiceNumber: item.invoiceNumber,
-                          invoiceDate: item.invoiceDate.slice(0, 10),
-                          dueDate: item.dueDate.slice(0, 10),
-                          notes: item.notes ?? "",
-                          receiveNow: Boolean(item.receipt),
-                          paidNow: false,
-                          paymentReferenceNo: "",
-                        }));
-                        setMode("edit-invoice");
-                      }}
+                      onClick={() => openInvoice(item)}
                     >
                       View / Edit
                     </button>

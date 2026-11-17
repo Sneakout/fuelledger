@@ -54,7 +54,7 @@ export class NerveRuntime {
         const request: ToolRequest = { requestId: randomUUID(), toolId: call.toolId, contractVersion: context.contractVersion, context, input: call.input };
         run.toolRequestIds.push(request.requestId);
         await append("TOOL_STARTED", { requestId: request.requestId, toolId: call.toolId });
-        const result = await this.options.tools.execute(request, { signal: options.signal });
+        const result = await this.options.tools.execute(request, options.signal ? { signal: options.signal } : {});
         results.push(result);
         await append("TOOL_COMPLETED", { requestId: request.requestId, toolId: call.toolId, evidenceIds: result.evidence.map(item => item.evidenceId) });
       }

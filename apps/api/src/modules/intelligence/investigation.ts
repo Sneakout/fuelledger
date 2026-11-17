@@ -77,8 +77,8 @@ function investigationPlan(sources: SourceFinding[]): Array<{ key: string; capab
     const period = sources.map(source => ({ startDate: dateOnly(source.detail.periodStart), endDate: dateOnly(source.detail.periodEnd) })).find(value => value.startDate && value.endDate);
     return [{ key: "profit", capability: "profit", ...(period?.startDate ? { startDate: period.startDate } : {}), ...(period?.endDate ? { endDate: period.endDate } : {}) }];
   }
-  if ([...kinds].some(kind => kind.includes("SHIFT") || kind.includes("RECONCILIATION"))) return [{ key: "reconciliation", capability: "reconciliation" }, { key: "dashboard", capability: "dashboard" }];
-  if ([...kinds].some(kind => kind.includes("CREDIT") || kind.includes("RECEIVABLE"))) return [{ key: "receivables", capability: "receivables" }];
+  if ([...kinds].some(kind => kind.includes("SHIFT") || kind.includes("RECONCILIATION") || kind === "COLLECTION_VARIANCE_DETECTED")) return [{ key: "reconciliation", capability: "reconciliation" }, { key: "dashboard", capability: "dashboard" }];
+  if ([...kinds].some(kind => kind.includes("CREDIT") || kind.includes("RECEIVABLE") || kind === "CUSTOMER_INVOICE_OVERDUE")) return [{ key: "receivables", capability: "receivables" }];
   if ([...kinds].some(kind => kind.includes("PURCHASE") || kind.includes("PAYABLE"))) return [{ key: "purchase-review", capability: "purchase-review" }, { key: "payables", capability: "payables" }];
   if ([...kinds].every(kind => kind.includes("RECEIPT_TIMING"))) return [{ key: "receipt-timing", capability: "receipt-timing" }];
   return [{ key: "inventory", capability: "inventory" }, { key: "receipt-timing", capability: "receipt-timing" }];
@@ -102,7 +102,7 @@ function buildInvestigation(sources: SourceFinding[], snapshots: Array<{ key: st
     observations.push(cited("Previous-period comparison", `The previous posted net result was ${money(currentResult.priorNetProfit)}.`, undefined, previous));
     fallbackConnections.push(connection("Sales, cost of sales, and expenses should be reviewed together because each contributes to the posted result. The records do not establish a cause by themselves.", "SUPPORTED", [current, previous]));
     unknowns.push(cited("Reason for the change", "Posted journals show the result but do not prove why operating performance changed.", undefined, current));
-  } else if (kinds.some(kind => kind.includes("SHIFT") || kind.includes("RECONCILIATION"))) {
+  } else if (kinds.some(kind => kind.includes("SHIFT") || kind.includes("RECONCILIATION") || kind === "COLLECTION_VARIANCE_DETECTED")) {
     const reconciliation = firstItem(snapshotByKey(snapshots, "reconciliation")); const evidenceId = evidenceByCapability("reconciliation")!; const shifts = arrayObjects(reconciliation.shifts);
     const priority = objectValue(reconciliation.priority);
     if (priority) { const priorityFact = addFact({ factId: "shift-priority", label: `Shift ${String(priority.shiftNumber ?? "")}`, value: priority, context: "FuelNerve-calculated shift review priority.", evidenceIds: [evidenceId] }); observations.push(cited(`Review Shift ${String(priority.shiftNumber ?? "")} first`, arrayStrings(priority.priorityReasons).join("; ") || "This is the highest-ranked unreconciled shift.", typeof priority.awaitingMinutes === "number" ? `Waiting ${number(priority.awaitingMinutes)} minutes` : undefined, priorityFact)); }
@@ -111,7 +111,7 @@ function buildInvestigation(sources: SourceFinding[], snapshots: Array<{ key: st
     for (const [index, shift] of shifts.filter(row => row.status === "RECONCILIATION_REQUIRED").entries()) { const fact = addFact({ factId: `shift-${index + 1}`, label: `Shift ${String(shift.shiftNumber ?? "")}`, value: shift, context: "Closed shift awaiting reconciliation.", evidenceIds: [evidenceId] }); observations.push(cited(`Shift ${String(shift.shiftNumber ?? "")}`, `Closed under ${String(shift.managerName ?? "the recorded manager")} and still awaiting reconciliation.`, money(shift.salesTotal), fact)); if (typeof shift.closedAt === "string") timeline.push(cited("Shift closed", `Shift ${String(shift.shiftNumber ?? "")} entered the reconciliation queue.`, undefined, fact, shift.closedAt)); }
     fallbackConnections.push(connection("The available records show completed shifts waiting for owner review; they do not indicate that a discrepancy has been approved or resolved.", "SUPPORTED", [summary]));
     unknowns.push(cited("Handover context", "The records cannot confirm any explanation that was communicated outside FuelNerve.", undefined, summary));
-  } else if (kinds.some(kind => kind.includes("CREDIT") || kind.includes("RECEIVABLE"))) {
+  } else if (kinds.some(kind => kind.includes("CREDIT") || kind.includes("RECEIVABLE") || kind === "CUSTOMER_INVOICE_OVERDUE")) {
     const receivables = arrayItems(snapshotByKey(snapshots, "receivables")); const evidenceId = evidenceByCapability("receivables")!;
     for (const customer of receivables) {
       const overdue = arrayObjects(customer.invoices).filter(invoice => String(invoice.status).includes("OVERDUE"));

@@ -1,4 +1,5 @@
 import { safeTransaction } from '../../lib/safe-save.js';
+import { enqueueReview } from '../nerve/review-events.js';
 import { additionalCustomerDebt, collectionDifferences } from '../../lib/shift-collections.js';
 import type { ReconciliationInput } from "@fuelledger/shared";
 import { paymentMethods } from "@fuelledger/shared";
@@ -58,19 +59,16 @@ export async function openShiftsForNerve(organizationId: string, stationId: stri
     };
   });
 }
-export async function bootstrap(organizationId: string, stationIds?: string[]) {
-  const shifts = await prisma.shift.findMany({
-    where: {
-      station: {
-        organizationId,
-        ...(stationIds ? { id: { in: stationIds } } : {}),
-      },
-      status: { in: ["RECONCILIATION_REQUIRED", "LOCKED"] },
-    },
-    orderBy: { closedAt: "desc" },
-    take: 30,
-    include: shiftInclude,
-  });
+export async function bootstrap(organizationId: string, stationIds?: string[], requestedShiftId?: string) {
+  const where = {
+    station: { organizationId, ...(stationIds ? { id: { in: stationIds } } : {}) },
+    status: { in: ["RECONCILIATION_REQUIRED", "LOCKED"] as Array<"RECONCILIATION_REQUIRED" | "LOCKED"> },
+  };
+  const shifts = await prisma.shift.findMany({ where, orderBy: { closedAt: "desc" }, take: 30, include: shiftInclude });
+  if (requestedShiftId && !shifts.some(shift => shift.id === requestedShiftId)) {
+    const requested = await prisma.shift.findFirst({ where: { ...where, id: requestedShiftId }, include: shiftInclude });
+    if (requested) shifts.push(requested);
+  }
   const expectedRows = shifts.length
     ? await prisma.sale.groupBy({
         by: ["shiftId", "paymentMethod"],
@@ -378,6 +376,7 @@ export async function reconcile(
       data: { status: "LOCKED" },
       include: shiftInclude,
     });
+    await enqueueReview(tx, { type: 'SHIFT_RECONCILED', organizationId, stationId: locked.stationId, resourceId: shiftId, occurredAt: new Date() });
     return presentShift(
       locked,
       input.collections.map((collection) => ({

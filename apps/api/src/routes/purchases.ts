@@ -74,7 +74,7 @@ purchasesRouter.post("/invoice-import/metrics", (req, res) => {
 
 purchasesRouter.use(safeSaveContext);
 
-purchasesRouter.get("/bootstrap", async (req, res) => res.json(await service.bootstrap(req.user!.organization.id, permittedStationIds(req.user!))));
+purchasesRouter.get("/bootstrap", async (req, res) => res.json(await service.bootstrap(req.user!.organization.id, permittedStationIds(req.user!), typeof req.query.invoiceId === "string" ? req.query.invoiceId.slice(0, 64) : undefined)));
 purchasesRouter.get("/receipt-timing-audit", async (req, res) => res.json(await service.receiptTimingAudit(req.user!.organization.id, permittedStationIds(req.user!))));
 purchasesRouter.get("/receipt-shift-impact", async (req, res) => res.json(await service.receiptShiftImpact(req.user!.organization.id, String(req.query.stationId ?? ""), String(req.query.receivedAt ?? ""), permittedStationIds(req.user!))));
 purchasesRouter.get("/receipts/:id/timing-preview", async (req, res) => res.json(await service.receiptTimingRepairPreview(req.user!.organization.id, req.params.id!, String(req.query.receivedAt ?? ""), permittedStationIds(req.user!))));

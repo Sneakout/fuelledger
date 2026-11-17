@@ -17,8 +17,8 @@ export class AgentSdkError extends Error {
     this.name = "AgentSdkError";
     this.code = code;
     this.retryable = retryable;
-    this.details = details;
-    this.correlationId = correlationId;
+    if (details !== undefined) this.details = details;
+    if (correlationId !== undefined) this.correlationId = correlationId;
   }
 
   toAgentError(): AgentError {

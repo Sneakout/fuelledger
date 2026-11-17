@@ -23,6 +23,7 @@ const AccountingPage = lazy(() =>
     default: module.AccountingPage,
   })),
 );
+const NotificationsPage = lazy(() => import("./pages/NotificationsPage").then(module => ({ default: module.NotificationsPage })));
 const CustomersPage = lazy(() =>
   import("./pages/CustomersPage").then((module) => ({
     default: module.CustomersPage,
@@ -50,6 +51,7 @@ const LoginPage = lazy(() =>
   import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })),
 );
 const HelpPage = lazy(() => import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })));
+const DailyBriefPage = lazy(() => import("./pages/DailyBriefPage").then(module => ({ default: module.DailyBriefPage })));
 const IntelligenceAgentsPage = lazy(() =>
   import("./pages/IntelligenceAgentsPage").then((module) => ({ default: module.IntelligenceAgentsPage })),
 );
@@ -145,8 +147,9 @@ export default function App() {
           <Route path="reports/downloads" element={<DownloadReportsPage />} />
           <Route path="staff" element={<StaffPage />} />
           <Route path="help" element={<HelpPage />} />
-          <Route path="notifications" element={<Navigate to="/help" replace />} />
+          <Route path="notifications" element={<NotificationsPage />} />
           <Route path="insights" element={<IntelligenceAgentsPage />} />
+          <Route path="insights/daily-brief" element={<DailyBriefPage />} />
           <Route path="insights/:agentKey" element={<IntelligenceAgentsPage />} />
           <Route path="intelligence-agents" element={<IntelligenceAgentsPage />} />
           <Route path="subscription" element={<SubscriptionPage />} />

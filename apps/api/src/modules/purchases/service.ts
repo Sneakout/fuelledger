@@ -1,4 +1,5 @@
 import { safeTransaction } from '../../lib/safe-save.js';
+import { enqueueReview } from '../nerve/review-events.js';
 import type { ExpenseCategoryInput, ExpenseInput, PurchaseInvoiceInput, PurchaseInvoiceReceiptInput, PurchaseInvoiceUpdateInput, SupplierInput, SupplierPaymentInput } from '@fuelledger/shared';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
@@ -132,7 +133,7 @@ export async function receiptShiftImpact(organizationId: string, stationId: stri
   const shift = await shiftAtInstant(prisma, organizationId, stationId, receivedAt);
   return { receivedAt: receivedAt.toISOString(), interval: shift ? 'DURING_SHIFT' as const : 'BETWEEN_SHIFTS' as const, affectsClosedShift: affectsClosedShift(shift), shift: shift ? { id: shift.id, shiftNumber: shift.shiftNumber, status: shift.status, openedAt: shift.openedAt, closedAt: shift.closedAt } : null };
 }
-export async function bootstrap(organizationId: string, stationIds?: string[]) {
+export async function bootstrap(organizationId: string, stationIds?: string[], requestedInvoiceId?: string) {
   await prisma.expenseCategory.createMany({ data: defaultExpenseCategories.map(category => ({ organizationId, ...category })), skipDuplicates: true });
   const startOfToday = indiaDayStart();
   const [suppliers, invoices, stations, products, categories, expenses, unmatchedReceipts] = await Promise.all([
@@ -207,14 +208,18 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
     }),
     prisma.purchaseReceipt.findMany({ where: { organizationId, invoiceId: null, ...(stationIds ? { stationId: { in: stationIds } } : {}) }, take: 100, orderBy: { receivedAt: 'desc' }, include: { lines: { include: { product: { select: { name: true, unit: true } } } } } }),
   ]);
-  const shaped = invoices.map((invoice) => ({
+  const requested = requestedInvoiceId && !invoices.some(invoice => invoice.id === requestedInvoiceId)
+    ? await prisma.purchaseInvoice.findFirst({ where: { id: requestedInvoiceId, organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}) }, include: invoiceInclude })
+    : null;
+  const summarize = (invoice: typeof invoices[number]) => ({
     ...invoice,
     outstanding: outstanding(invoice),
     overdue: invoice.status !== 'PAID' && invoice.status !== 'VOID' && invoice.dueDate < startOfToday,
-  }));
+  });
+  const shaped = invoices.map(summarize);
   return {
     suppliers,
-    invoices: shaped,
+    invoices: requested ? [...shaped, summarize(requested)] : shaped,
     stations,
     products: products.map((product) => ({
       ...product,
@@ -386,6 +391,7 @@ export async function createInvoice(organizationId: string, userId: string, inpu
             createdById: userId,
           },
         });
+        await enqueueReview(tx, { type: 'RECEIPT_RECORDED', organizationId, stationId: station.id, resourceId: receipt.id, occurredAt: receipt.receivedAt });
         const affectedShift = await shiftAtInstant(tx, organizationId, station.id, receipt.receivedAt);
         if (receiptTiming!.receivedAtReason)
           await tx.receiptTimingAuditEvent.create({
@@ -501,6 +507,7 @@ export async function createInvoice(organizationId: string, userId: string, inpu
           ],
         });
       }
+      if (!input.receiveNow) await enqueueReview(tx, { type: 'INVOICE_CHANGED', organizationId, stationId: invoice.stationId, resourceId: invoice.id, occurredAt: invoice.invoiceDate });
       return invoice;
     });
   } catch (error) {
@@ -549,6 +556,7 @@ export async function receiveInvoiceStock(organizationId: string, userId: string
         await tx.inventoryLedger.create({ data: { organizationId, stationId: invoice.stationId, productId: product.id, tankId: tank?.id ?? null, type: 'RECEIPT', quantityDelta: line.quantity, unitCost: line.unitCost, receiptLineId: receiptLine.id, occurredAt: receipt.receivedAt, createdById: userId } });
       }
       await postJournal(tx, { organizationId, stationId: invoice.stationId, createdById: userId, journalDate: receipt.receivedAt, reference: `GRN-${receipt.id.slice(-8)}`, description: `Stock received for invoice ${invoice.invoiceNumber}`, sourceType: 'PURCHASE_RECEIPT', sourceId: receipt.id, lines: [{ account: '1200', debit: invoice.subtotal }, { account: '1220', credit: invoice.subtotal }] });
+      await enqueueReview(tx, { type: 'RECEIPT_RECORDED', organizationId, stationId: invoice.stationId, resourceId: receipt.id, occurredAt: receipt.receivedAt });
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AppError(409, 'INVOICE_ALREADY_RECEIVED', 'Stock has already been received for this invoice.');
@@ -874,6 +882,7 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
         status = 'PAID';
         await tx.purchaseInvoice.update({ where: { id }, data: { status } });
       }
+      await enqueueReview(tx, { type: 'INVOICE_CHANGED', organizationId, stationId: invoice.stationId, resourceId: id, occurredAt: new Date(), version: input.version + 1 });
       return tx.purchaseInvoice.findUniqueOrThrow({
         where: { id },
         include: invoiceInclude,
@@ -934,6 +943,7 @@ export async function payInvoice(organizationId: string, userId: string, input: 
           },
         ],
       });
+      await enqueueReview(tx, { type: 'SUPPLIER_PAYMENT', organizationId, stationId: invoice.stationId, resourceId: payment.id, occurredAt: payment.paidAt });
       return payment;
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },

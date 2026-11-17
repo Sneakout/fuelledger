@@ -13,6 +13,8 @@ beforeEach(() => {
   db.purchaseInvoice.findFirst.mockResolvedValue({ id: 'i', stationId: 's', invoiceNumber: 'I1', invoiceDate: new Date('2026-01-01'), dueDate: new Date('2026-01-04'), supplier: { name: 'Supplier', paymentTerms: 3 }, status: 'PAID', subtotal: d(100), taxAmount: d(0), totalAmount: d(100), notes: null, payments: [{ id: 'p', amount: d(100), origin: 'RECORDED_PAYMENT' }], lines: [{ id: 'l', quantity: d(1), unitCost: d(100), taxRate: d(0), description: 'Oil', product: null }], receipt: { id: 'r', receivedAt: new Date('2026-01-03'), lines: [] } });
   tx = { purchaseInvoice: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), update: vi.fn(), findUniqueOrThrow: vi.fn() }, purchaseInvoiceCorrection: { create: vi.fn() }, journal: { updateMany: vi.fn() }, purchaseReceipt: { update: vi.fn() }, receiptTimingAuditEvent: { create: vi.fn() }, shift: { findMany: vi.fn().mockResolvedValue([]) }, inventoryLedger: { updateMany: vi.fn() }, supplierPayment: { update: vi.fn(), create: vi.fn() } };
   db.$transaction.mockImplementation(async fn => fn(tx));
+  tx.organization = { findUnique: vi.fn().mockResolvedValue({ intelligenceEnabledAt: new Date(0), intelligenceExpiresAt: null }) };
+  tx.nerveReviewJob = { createMany: vi.fn() };
 });
 describe('safe invoice correction', () => {
   it('blocks a reduction below payments without changing money', async () => {
@@ -32,6 +34,9 @@ describe('safe invoice correction', () => {
     expect(tx.purchaseInvoice.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'PART_PAID', totalAmount: d(200) }) }));
     expect(tx.supplierPayment.update).not.toHaveBeenCalled();
     expect(tx.supplierPayment.create).not.toHaveBeenCalled();
+    expect(tx.nerveReviewJob.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({ eventKey: 'INVOICE_CHANGED:i:1', agentKey: 'purchase-check' })]),
+    }));
   });
   it('preserves real payments and receipt date while auditing date changes', async () => {
     await updateInvoice('o', 'u', 'i', input);

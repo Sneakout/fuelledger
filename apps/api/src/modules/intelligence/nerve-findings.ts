@@ -1,6 +1,8 @@
 import { readFile, stat } from "node:fs/promises";
 import { z } from "zod";
 import { AppError } from "../../lib/errors.js";
+import { prisma } from "../../lib/prisma.js";
+import { reviewAgents } from "../nerve/review-events.js";
 import { agentPresentation } from "./agent-presentation.js";
 import { demoAgentFindings } from "./demo-agent-findings.js";
 import type { BriefingFact } from "./daily-briefing.js";
@@ -11,6 +13,48 @@ const findingSchema = z.object({
   evidence: z.array(evidenceSchema).min(1), proposalIds: z.tuple([]), actionIds: z.tuple([]), visibility: z.literal("SHADOW"),
 });
 const resultSchema = z.object({ agentKey: z.string(), runId: z.string(), findings: z.array(findingSchema) });
+const persistedOutcome = z.object({
+  runId: z.string().uuid(),
+  findings: z.array(z.object({
+    findingId: z.string().uuid(), type: z.string(), title: z.string(), calculatedAt: z.string(),
+    severity: z.string(), whyItMatters: z.string(), recommendedNextStep: z.string(),
+    displayValue: z.unknown(), period: z.object({ start: z.string(), end: z.string() }),
+    stationId: z.string(), supportingRecords: z.array(z.object({ evidenceId: z.string() })).min(1),
+    priorityRank: z.number().optional(), priorityReason: z.string().optional(), recordsToCompare: z.array(z.unknown()).optional(),
+  })),
+  evidence: z.array(evidenceSchema),
+});
+
+export async function completedReviewFindings(organizationId: string, stationId: string) {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  // The Assistant contributes its coordinated answer separately. Its overview is not a specialist finding.
+  const rows = await Promise.all(reviewAgents.filter(key => key !== "business-assistant").map(agentKey =>
+    prisma.nerveReviewJob.findFirst({
+      where: { organizationId, stationId, agentKey, completedAt: { gte: cutoff } },
+      orderBy: [{ completedAt: "desc" }, { id: "desc" }],
+      select: { agentKey: true, completedAt: true, outcome: true },
+    }),
+  ));
+  return rows.flatMap(row => {
+    if (!row?.completedAt) return [];
+    const parsed = persistedOutcome.safeParse(row.outcome);
+    if (!parsed.success) return [];
+    const { runId, findings, evidence } = parsed.data;
+    const agent = agentPresentation(row.agentKey);
+    const sources = findings.flatMap(finding => {
+      if (finding.stationId !== stationId) return [];
+      const supporting = evidence.filter(record => record.tenantId === organizationId && record.applicationId === "fuelnerve"
+        && finding.supportingRecords.some(item => item.evidenceId === record.evidenceId));
+      if (!supporting.length) return [];
+      const detail = { ...finding, periodStart: finding.period.start, periodEnd: finding.period.end };
+      return [{ findingId: finding.findingId, type: finding.type, title: finding.title, detectedAt: finding.calculatedAt,
+        summary: JSON.stringify(detail), detail, agent, evidence: supporting, proposalIds: [] as [], actionIds: [] as [], visibility: "SHADOW" as const }];
+    });
+    if (sources.length !== findings.length) return [];
+    const display = sources.map(source => presentFinding(source, agent));
+    return [{ ...agent, runId, lastCompletedAt: row.completedAt.toISOString(), status: agentStatus(display), findings: display, sources }];
+  });
+}
 const reportSchema = z.object({
   mode: z.literal("SHADOW"), visibility: z.literal("HIDDEN"), proposalsEnabled: z.literal(false), actionsEnabled: z.literal(false),
   generatedAt: z.string(), scope: z.object({ organizationId: z.string(), stationId: z.string() }), results: z.array(resultSchema),

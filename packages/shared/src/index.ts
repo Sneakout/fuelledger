@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export * from "./stock-rules.js";
+export * from "./fuelnerve-agents.js";
 export * from "./purchase-price.js";
 export * from "./calibration/dip-calibration.js";
 
@@ -105,6 +106,11 @@ export const ownerNotificationSettingsSchema = z
     varianceThreshold: z.coerce.number().min(0).max(1_000_000),
     stockVarianceTolerance: z.coerce.number().min(0).max(100_000).default(50),
     dailySummaryHour: z.coerce.number().int().min(0).max(23),
+    shiftSummaryEnabled: z.boolean().optional(),
+    receiptSummaryEnabled: z.boolean().optional(),
+    creditReportHour: z.number().int().min(0).max(23).optional(),
+    customerReminderScheduled: z.boolean().optional(),
+    customerReminderHour: z.number().int().min(0).max(23).optional(),
   })
   .superRefine((value, context) => {
     if (value.whatsappOptedIn && !value.whatsappNumber)

@@ -61,6 +61,8 @@ describe('closing shift', () => {
       tank: { findFirst: vi.fn().mockResolvedValue({openingStock:d(1000)}) },
       inventoryLedger: { findMany: vi.fn().mockResolvedValue([]), aggregate: vi.fn().mockResolvedValue({_sum:{quantityDelta:d(-20)}}), create:vi.fn() },
       ownerNotificationSettings: { findUnique: vi.fn().mockResolvedValueOnce({stockVarianceTolerance:d(1)}).mockResolvedValue({stockVarianceTolerance:d(50)}) },
+      organization: { findUnique: vi.fn().mockResolvedValue({ intelligenceEnabledAt: new Date(0), intelligenceExpiresAt: null }) },
+      nerveReviewJob: { createMany: vi.fn() },
       shiftTankReading:{update:vi.fn()},shiftNozzleReading:{update:vi.fn()},shiftNozzleAssignment:{update:vi.fn()},
     };
     db.$transaction.mockImplementation(async fn => fn(tx));
@@ -80,5 +82,9 @@ describe('closing shift', () => {
     await expect(closeShift('org','s',input)).rejects.toMatchObject({code:'SHIFT_NOT_OPEN'});
     expect(tx.sale.create).toHaveBeenCalledTimes(1);
     expect(db.$transaction).toHaveBeenCalledWith(expect.any(Function),{isolationLevel:'Serializable'});
+    expect(tx.nerveReviewJob.createMany).toHaveBeenCalledTimes(1);
+    expect(tx.nerveReviewJob.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.arrayContaining([expect.objectContaining({ eventKey: 'SHIFT_CLOSED:s:0', stationId: 'station', agentKey: 'reconciliation-review' })]),
+    }));
   });
 });

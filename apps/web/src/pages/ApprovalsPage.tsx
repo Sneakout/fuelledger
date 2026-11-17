@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Check, Clock3, ExternalLink, PackageCheck, RefreshCw, ShieldCheck, SlidersHorizontal, X, XCircle } from "lucide-react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { ApiRequestError, api, type OwnerApproval } from "../lib/api";
 import { useAuth } from "../components/AuthProvider";
 
@@ -102,6 +102,8 @@ function DecisionDialog({ approval, onClose, onSaved }: { approval: OwnerApprova
 
 export function ApprovalsPage() {
   const { user } = useAuth();
+  const [params] = useSearchParams();
+  const requestedId = params.get("approvalId");
   const [tab, setTab] = useState<Tab>("PENDING");
   const [approvals, setApprovals] = useState<OwnerApproval[]>([]);
   const [selected, setSelected] = useState<OwnerApproval | null>(null);
@@ -114,6 +116,13 @@ export function ApprovalsPage() {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const approval = approvals.find(item => item.id === requestedId);
+    if (!approval) return;
+    setTab(approval.status === 'PENDING' ? 'PENDING' : 'REVIEWED');
+    if (approval.status === 'PENDING') setSelected(approval);
+    else document.getElementById(`approval-${approval.id}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [approvals, requestedId]);
   const visible = useMemo(() => approvals.filter(item => tab === "PENDING" ? item.status === "PENDING" : item.status !== "PENDING"), [approvals, tab]);
   const pendingCount = approvals.filter(item => item.status === "PENDING").length;
 
@@ -126,7 +135,7 @@ export function ApprovalsPage() {
     {error ? <div className="form-error">{error}</div> : null}
     {loading ? <div className="approval-loading"><RefreshCw className="spin" />Loading approvals…</div> : visible.length === 0 ? <section className="approval-empty"><Check /><h2>{tab === "PENDING" ? "No approvals waiting" : "No reviewed requests yet"}</h2><p>{tab === "PENDING" ? "New price, stock or product requests will appear here for the owner." : "Completed decisions will remain here as an audit trail."}</p></section> : <div className="approval-list">{visible.map(approval => {
       const evidence = objectFrom(approval.evidence); const path = typeof evidence.evidencePath === "string" ? evidence.evidencePath : null;
-      return <article key={approval.id} className={`approval-card ${approval.status.toLowerCase()}`}><header><span className="approval-type-icon">{approval.actionType === "PRODUCT_PRICE_CHANGE" ? <SlidersHorizontal /> : <PackageCheck />}</span><div><small>{approval.station.name} · {dateTime(approval.requestedAt)}</small><h2>{approvalTitle(approval)}</h2><p>Requested by {approval.requestedBy.name}</p></div><em>{approval.status === "PENDING" ? <><Clock3 />Waiting</> : approval.status === "APPROVED" ? <><Check />Approved</> : <><XCircle />Rejected</>}</em></header><ApprovalSummary approval={approval} /><p className="approval-card-reason">{approval.reason}</p><footer>{path ? <Link to={path}><ExternalLink />View evidence</Link> : <span />}{approval.status === "PENDING" ? <button onClick={() => setSelected(approval)}>Review decision <ArrowRight /></button> : <small>{approval.decidedBy?.name ?? "Owner"} · {approval.decidedAt ? dateTime(approval.decidedAt) : "Reviewed"}{approval.decisionNote ? ` · ${approval.decisionNote}` : ""}</small>}</footer></article>;
+      return <article id={`approval-${approval.id}`} key={approval.id} className={`approval-card ${approval.status.toLowerCase()}`}><header><span className="approval-type-icon">{approval.actionType === "PRODUCT_PRICE_CHANGE" ? <SlidersHorizontal /> : <PackageCheck />}</span><div><small>{approval.station.name} · {dateTime(approval.requestedAt)}</small><h2>{approvalTitle(approval)}</h2><p>Requested by {approval.requestedBy.name}</p></div><em>{approval.status === "PENDING" ? <><Clock3 />Waiting</> : approval.status === "APPROVED" ? <><Check />Approved</> : <><XCircle />Rejected</>}</em></header><ApprovalSummary approval={approval} /><p className="approval-card-reason">{approval.reason}</p><footer>{path ? <Link to={path}><ExternalLink />View evidence</Link> : <span />}{approval.status === "PENDING" ? <button onClick={() => setSelected(approval)}>Review decision <ArrowRight /></button> : <small>{approval.decidedBy?.name ?? "Owner"} · {approval.decidedAt ? dateTime(approval.decidedAt) : "Reviewed"}{approval.decisionNote ? ` · ${approval.decisionNote}` : ""}</small>}</footer></article>;
     })}</div>}
     {selected ? <DecisionDialog approval={selected} onClose={() => setSelected(null)} onSaved={() => { setSelected(null); void load(); }} /> : null}
   </main>;

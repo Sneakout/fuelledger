@@ -1,3 +1,5 @@
+import { findFuelNerveAgent } from "@fuelledger/shared";
+
 export type AgentIconKey = "shift" | "stock" | "profit" | "assistant" | "specialist";
 
 export type AgentPresentation = {
@@ -7,20 +9,10 @@ export type AgentPresentation = {
   icon: AgentIconKey;
 };
 
-const presentations: Record<string, Omit<AgentPresentation, "agentKey">> = {
-  "reconciliation-review": { name: "Shift Agent", purpose: "Shifts, collections and handovers", icon: "shift" },
-  "inventory-watch": { name: "Stock Agent", purpose: "Tanks, readings, receipts and movement", icon: "stock" },
-  "credit-watch": { name: "Credit Agent", purpose: "Customer dues, ageing and reminder drafts", icon: "specialist" },
-  "purchase-check": { name: "Purchase Agent", purpose: "Invoices, receipts, rates and supplier payments", icon: "specialist" },
-  "profit-insight": { name: "Profit Agent", purpose: "Margin, costs and financial changes", icon: "profit" },
-  "business-assistant": { name: "Nerve Assistant", purpose: "Coordinates questions across specialists", icon: "assistant" },
-  "owner-assistant": { name: "Nerve Assistant", purpose: "Coordinates questions across specialists", icon: "assistant" },
-};
-
 export function agentPresentation(agentKey: string): AgentPresentation {
-  const presentation = presentations[agentKey];
+  const presentation = findFuelNerveAgent(agentKey);
   return presentation
-    ? { agentKey, ...presentation }
+    ? { agentKey: presentation.agentKey, name: presentation.name, purpose: presentation.purpose, icon: presentation.icon }
     : { agentKey, name: "Nerve Specialist", purpose: "Reviews relevant business records", icon: "specialist" };
 }
 

@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
 import crypto from 'node:crypto';
 
-vi.mock('../src/lib/prisma.js', () => ({ prisma: { $queryRaw: vi.fn().mockResolvedValue([{ '?column?': 1 }]), user: { findUnique: vi.fn() }, ownerNotificationDelivery: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) } } }));
+vi.mock('../src/lib/prisma.js', () => ({ prisma: { $queryRaw: vi.fn().mockResolvedValue([{ '?column?': 1 }]), user: { findUnique: vi.fn() }, ownerNotificationDelivery: { findFirst: vi.fn().mockResolvedValue({ id: 'delivery-1', providerMessageId: 'wamid.1', callbackKey: null, status: 'ACCEPTED', failureKind: null }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) } } }));
 process.env.DATABASE_URL = 'postgresql://test:test@localhost:5432/test';
 process.env.JWT_SECRET = 'test-secret-that-is-at-least-32-characters';
 process.env.CORS_ORIGIN = 'http://localhost:5173';
-process.env.CRON_SECRET = 'test-cron-secret';
+process.env.CRON_SECRET = 'test-cron-secret-at-least-16';
+process.env.WHATSAPP_BUSINESS_ACCOUNT_ID = '123456789';
+process.env.WHATSAPP_PHONE_NUMBER_ID = 'test-sender';
 process.env.WHATSAPP_WEBHOOK_VERIFY_TOKEN = 'test-webhook-verify-token';
 process.env.WHATSAPP_APP_SECRET = 'test-meta-app-secret-that-is-long-enough';
 
@@ -24,11 +26,11 @@ describe('API', async () => {
     expect(rejected.status).toBe(403);
   });
   it('accepts authentic Meta delivery webhooks and rejects forged ones', async () => {
-    const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value: { statuses: [{ id: 'wamid.1', status: 'delivered', timestamp: '1794542400' }] } }] }] });
+    const body = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: '123456789', changes: [{ field: 'messages', value: { metadata: { phone_number_id: 'test-sender' }, statuses: [{ id: 'wamid.1', status: 'delivered', timestamp: '1794542400' }] } }] }] });
     const signature = `sha256=${crypto.createHmac('sha256', process.env.WHATSAPP_APP_SECRET!).update(body).digest('hex')}`;
     const accepted = await request(createApp()).post('/api/notifications/whatsapp/webhook').set('Content-Type', 'application/json').set('X-Hub-Signature-256', signature).send(body);
     expect(accepted.status).toBe(200); expect(accepted.body).toEqual({ received: true, processed: 1 });
-    expect(prisma.ownerNotificationDelivery.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { providerMessageId: 'wamid.1', status: { in: ['PENDING', 'SENT'] } }, data: expect.objectContaining({ status: 'DELIVERED' }) }));
+    expect(prisma.ownerNotificationDelivery.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'delivery-1', providerMessageId: 'wamid.1', callbackKey: null, status: 'ACCEPTED' }, data: expect.objectContaining({ status: 'DELIVERED' }) }));
     const rejected = await request(createApp()).post('/api/notifications/whatsapp/webhook').set('Content-Type', 'application/json').set('X-Hub-Signature-256', 'sha256=bad').send(body);
     expect(rejected.status).toBe(401);
   });

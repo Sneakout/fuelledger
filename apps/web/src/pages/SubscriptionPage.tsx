@@ -67,7 +67,7 @@ export function SubscriptionPage() {
       <span className="sp-kicker">{intelligenceActive ? "SUBSCRIPTION ACTIVE" : "YOUR SUBSCRIPTION"}</span>
       <h1>{intelligenceActive ? <>Core connected.<br /><span>FuelNerve Intelligence active.</span></> : <>Your fuel station.<br /><span>Six agents watching the details.</span></>}</h1>
       <p>{intelligenceActive ? `${selectedStation?.name || "Your fuel station"} has full Core access plus owner intelligence, evidence-backed alerts and approval workflows.` : "FuelNerve Intelligence turns trusted station records into daily reviews, early warnings and clear actions for the owner."}</p>
-      {intelligenceActive ? <Link to="/insights" className="sp-hero-link">Open Nerve Intelligence <ArrowRight size={17} /></Link> : <a href="#plan-comparison" className="sp-hero-link">Compare your plans <ArrowRight size={17} /></a>}
+      {intelligenceActive ? <Link to="/insights/daily-brief" className="sp-hero-link">Open Nerve Intelligence <ArrowRight size={17} /></Link> : <a href="#plan-comparison" className="sp-hero-link">Compare your plans <ArrowRight size={17} /></a>}
     </section>
 
     <section className="sp-account" aria-label="Current subscription" aria-live="polite">
@@ -125,7 +125,7 @@ export function SubscriptionPage() {
       <header><span className="sp-kicker"><Bot size={15} /> {intelligenceActive ? "YOUR ACTIVE INTELLIGENCE" : "YOUR AGENT TEAM"}</span><h2>{intelligenceActive ? "Specialists focused on your fuel station." : "Always reviewing. Ready when you ask."}</h2><p>Each capability has one clear job and works from the records already inside your fuel station account.</p><span>{intelligenceActive ? agentStatus ? `${agentStatus.summary.agents} specialist agents reported in the latest review.` : "Live agent status is available in Nerve Intelligence." : "Agent capabilities are in phased early access."}</span></header>
       <div className="sp-agent-grid">{agents.map(({ icon: Icon, name, copy }, index) => <article key={name}><div className="sp-agent-top"><span className="sp-agent-icon"><Icon /></span><em>0{index + 1}</em></div><h3>{name}<small> Agent</small></h3><p>{copy}</p><div className="sp-agent-state"><i /> {intelligenceActive ? "Active access" : "Early access"}</div></article>)}</div>
       <div className="sp-agent-flow"><span><BanknoteArrowDown /> Trusted station records</span><ArrowRight /><span><Bot /> Specialist agents review</span><ArrowRight /><span><BadgeCheck /> Owner gets clear actions</span></div>
-      {intelligenceActive && <Link className="sp-agent-action" to="/insights">Open Nerve Intelligence <ArrowRight size={16} /></Link>}
+      {intelligenceActive && <Link className="sp-agent-action" to="/insights/daily-brief">Open Nerve Intelligence <ArrowRight size={16} /></Link>}
     </section>
 
     {!intelligenceActive && <section className="sp-preview-section">
@@ -160,6 +160,6 @@ function ActiveSubscriptionControl({ status, agentStatus, stationName }: { statu
         <div><dt>Evidence</dt><dd>{agentStatus?.safety.evidenceVerified ? "Verified" : "Open to review"}</dd></div>
       </dl>
     </div>
-    <div className="sp-active-actions"><Link className="sp-button sp-primary" to="/insights">Open Nerve Intelligence <ArrowRight size={16} /></Link><a className="sp-button sp-secondary" href="tel:+918977506454"><Phone size={16} /> Subscription support</a></div>
+    <div className="sp-active-actions"><Link className="sp-button sp-primary" to="/insights/daily-brief">Open Nerve Intelligence <ArrowRight size={16} /></Link><a className="sp-button sp-secondary" href="tel:+918977506454"><Phone size={16} /> Subscription support</a></div>
   </section>;
 }

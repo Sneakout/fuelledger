@@ -162,9 +162,11 @@ export function HistoricalSalesImportPage() {
   const { stations, selectedStationId, selectStation } = useStation();
   const today = new Date();
   const [stationId, setStationId] = useState(selectedStationId || stations[0]?.id || '');
-  const [month, setMonth] = useState(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`);
+  const requestedPeriod = new URLSearchParams(location.search).get('month');
+  const linkedMonth = requestedPeriod && /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedPeriod) ? requestedPeriod : undefined;
+  const [month, setMonth] = useState(linkedMonth ?? `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`);
   const [setup, setSetup] = useState<HistoricalSalesSetup | null>(null);
-  const [productId, setProductId] = useState('');
+  const [productId, setProductId] = useState(() => new URLSearchParams(location.search).get('productId') ?? '');
   const [rows, setRows] = useState<HistoricalSalesRowInput[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [applyCutover, setApplyCutover] = useState(false);
@@ -221,11 +223,11 @@ export function HistoricalSalesImportPage() {
     let active = true;
     const submittedMonths = imports.filter(item => item.product.code === selected.product.code).map(item => item.month);
     void Promise.all(submittedMonths.map(importedMonth => deleteHistoricalDraftsForImport(stationId, productId, importedMonth)))
-      .then(() => latestHistoricalDraft(stationId, productId))
+      .then(() => latestHistoricalDraft(stationId, productId, linkedMonth))
       .then(draft => { if (active && restoredDraftScope.current === scope && draft) restoreDraft(draft, 'Saved OCR draft restored from this browser.'); })
       .catch(() => undefined);
     return () => { active = false; };
-  }, [selected, stationId, productId, imports, importsLoaded]);
+  }, [selected, stationId, productId, imports, importsLoaded, linkedMonth]);
   useEffect(() => {
     if (!rows.length) return;
     const calculated = calculateDraftRows(rows, uncertainCells);

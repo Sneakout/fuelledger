@@ -71,13 +71,13 @@ export function ReconciliationPage() {
   } | null>(null);
   const load = () =>
     api
-      .reconciliationBootstrap()
+      .reconciliationBootstrap(requestedShiftId ?? undefined)
       .then((result) => {
         setData(result);
-        const next =
-          result.shifts.find((s) => s.id === requestedShiftId) ??
-          result.shifts.find((s) => s.status === "RECONCILIATION_REQUIRED") ??
-          result.shifts[0];
+        const next = requestedShiftId
+          ? result.shifts.find(s => s.id === requestedShiftId)
+          : result.shifts.find(s => s.status === "RECONCILIATION_REQUIRED") ?? result.shifts[0];
+        if (requestedShiftId && !next) setError("This shift is no longer available for reconciliation.");
         if (next && !shiftId) choose(next);
       })
       .catch((e) =>

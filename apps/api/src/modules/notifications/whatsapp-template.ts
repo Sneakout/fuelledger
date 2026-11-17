@@ -9,3 +9,12 @@ export function buildWhatsAppTemplate(name: string, language: string, style: Wha
       : {}),
   };
 }
+
+export const operationalBodies: Record<string, string> = {
+  fuelnerve_stock_level_v1: 'FuelNerve stock alert for your fuel station. A tank has reached its configured reorder threshold. {{1}} Review the tank record in FuelNerve to confirm whether a delivery is needed.',
+  fuelnerve_shift_closed_v1: 'FuelNerve shift closure report for your fuel station. The shift has been closed and its sales, collections and closing tank stock have been recorded. {{1}} Review the shift reconciliation in FuelNerve for the original readings.',
+  fuelnerve_purchase_receipt_v1: 'FuelNerve purchase receipt for your fuel station. A supplier delivery has been recorded against a purchase invoice. {{1}} Review the purchase invoice in FuelNerve for receipt and payment details.',
+  fuelnerve_owner_credit_v1: 'FuelNerve customer credit report for your fuel station. The following customer balances are outstanding as of this report. {{1}} Review customer accounts in FuelNerve before following up.',
+  fuelnerve_customer_payment_reminder_v1: 'Payment reminder for your fuel account. Our records show an overdue balance. {{1}} If you have already paid or believe the balance is incorrect, please contact your fuel station.',
+  fuelnerve_daily_operations_v1: 'FuelNerve daily operations report for your fuel station. This is the daily summary of recorded fuel sales, collections and tank stock. {{1}} Review the station dashboard in FuelNerve for the underlying records.',
+};

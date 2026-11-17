@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { InventoryPage } from './InventoryPage';
+vi.mock('../components/StationProvider', () => ({ useStation: () => ({ selectedStationId: '', selectStation: vi.fn() }) }));
 
 const { inventoryBootstrap } = vi.hoisted(() => ({ inventoryBootstrap: vi.fn() }));
 

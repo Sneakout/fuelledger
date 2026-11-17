@@ -1,11 +1,16 @@
 import { Router } from "express";
-import { customerSubscriptionUpdateSchema, ownerNotificationSettingsSchema } from "@fuelledger/shared";
+import { customerSubscriptionUpdateSchema } from "@fuelledger/shared";
 import { z } from "zod";
 import { isPlatformAdminEmail } from "../config/env.js";
 import { AppError } from "../lib/errors.js";
 import { prisma } from "../lib/prisma.js";
 import { authenticate } from "../middleware/authenticate.js";
-import { presentNotificationSettings, sendTestNotification, updateSettings } from "../modules/notifications/service.js";
+import { presentNotificationSettings, sendTestNotification } from "../modules/notifications/service.js";
+import { drainAgentMessages } from "../modules/notifications/agent-dispatch.js";
+import { drainReviewJobs, scheduleDailyReviews } from "../modules/nerve/review-worker.js";
+import { prepareNotificationPreviews, runScheduledNotifications } from "../modules/notifications/service.js";
+import { approveRolloutPreview, pauseRollout, readRollout, rolloutInput, updateRollout } from "../modules/notifications/whatsapp-rollout.js";
+import { adminWhatsAppDeliveries, drainWhatsAppQueue, retryWhatsAppDelivery } from "../modules/notifications/delivery-queue.js";
 
 export const platformRouter = Router();
 const planPricesPaise = {
@@ -112,20 +117,65 @@ platformRouter.get("/service-tickets/:id/screenshot", async (req, res) => {
     throw new AppError(404, "SCREENSHOT_NOT_FOUND", "This ticket does not have a screenshot.");
   res.type(screenshot.screenshotMimeType).setHeader("Content-Disposition", `inline; filename="${screenshot.screenshotFileName.replaceAll('"', '')}"`).send(screenshot.screenshotContent);
 });
-platformRouter.put("/customers/:id/notifications", async (req, res) => {
+platformRouter.get("/whatsapp-rollout", async (req, res) => {
   requirePlatformAdmin(req.user!.email);
-  const parsed = ownerNotificationSettingsSchema.safeParse(req.body);
-  if (!parsed.success)
-    throw new AppError(400, "NOTIFICATION_SETTINGS_INVALID", "Review the WhatsApp alert settings.", parsed.error.flatten());
-  const customer = await prisma.organization.findUnique({ where: { id: req.params.id! }, select: { id: true } });
-  if (!customer) throw new AppError(404, "CUSTOMER_NOT_FOUND", "This customer account was not found.");
-  res.json({ settings: await updateSettings(customer.id, parsed.data) });
+  const policy = await readRollout();
+  const outcomes = await prisma.ownerNotificationDelivery.groupBy({
+    by: ["status", "rolloutHold", "suppressionReason", "failureKind"],
+    where: { eventKey: { not: null }, createdAt: { gte: new Date(Date.now() - 86_400_000) } },
+    _count: { _all: true },
+  });
+  const audit = await prisma.whatsAppRolloutAudit.findMany({ orderBy: { createdAt: "desc" }, take: 15,
+    select: { id: true, action: true, createdAt: true } });
+  res.json({ policy, audit, outcomes: outcomes.map(({ _count, ...outcome }) => ({ ...outcome, count: _count._all })) });
+});
+platformRouter.put("/whatsapp-rollout", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const input = rolloutInput.safeParse(req.body);
+  if (!input.success) throw new AppError(400, "ROLLOUT_INVALID", input.error.issues[0]?.message ?? "Review the delivery settings.");
+  res.json({ policy: await updateRollout(input.data, req.user!.id) });
+});
+platformRouter.post("/whatsapp-rollout/pause", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  res.json({ policy: await pauseRollout(req.user!.id) });
+});
+platformRouter.post("/whatsapp-rollout/preview", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const result = await prepareNotificationPreviews(async () => {
+    const queued = await scheduleDailyReviews();
+    const reviews = await drainReviewJobs();
+    await runScheduledNotifications(new Date());
+    const messages = await drainAgentMessages();
+    const previews = await drainWhatsAppQueue(new Date(), { previewOnly: true });
+    return { queued, reviews, messages, previews };
+  });
+  res.json(result);
+});
+platformRouter.post("/whatsapp-rollout/process-approved", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  res.json(await drainWhatsAppQueue());
+});
+platformRouter.post("/customers/:id/notifications/deliveries/:deliveryId/approve-preview", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const input = z.object({ hash: z.string().regex(/^[a-f0-9]{64}$/) }).safeParse(req.body);
+  if (!input.success) throw new AppError(400, "PREVIEW_INVALID", "Refresh the message preview before approving it.");
+  await approveRolloutPreview(req.params.id!, req.params.deliveryId!, input.data.hash, req.user!.id);
+  res.status(204).end();
 });
 platformRouter.post("/customers/:id/notifications/test", async (req, res) => {
   requirePlatformAdmin(req.user!.email);
   const customer = await prisma.organization.findUnique({ where: { id: req.params.id! }, select: { id: true } });
   if (!customer) throw new AppError(404, "CUSTOMER_NOT_FOUND", "This customer account was not found.");
   res.json({ delivery: await sendTestNotification(customer.id) });
+});
+platformRouter.get("/customers/:id/notifications/deliveries", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  res.json({ deliveries: await adminWhatsAppDeliveries(req.params.id!) });
+});
+platformRouter.post("/customers/:id/notifications/deliveries/:deliveryId/retry", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  await retryWhatsAppDelivery(req.params.id!, req.params.deliveryId!, req.user!.id);
+  res.status(202).json({ queued: true });
 });
 platformRouter.put("/customers/:id/subscription", async (req, res) => {
   requirePlatformAdmin(req.user!.email);

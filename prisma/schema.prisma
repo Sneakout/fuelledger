@@ -109,11 +109,14 @@ enum AccountType {
 enum OwnerNotificationType {
   DENSITY_MISSING
   LOW_STOCK
+  SHIFT_CLOSED_SUMMARY
+  PURCHASE_RECEIPT_SUMMARY
   SHIFT_VARIANCE
   SHIFT_OPEN
   APPROVAL_REQUIRED
   DAILY_SUMMARY
   OVERDUE_CUSTOMER
+  CUSTOMER_CREDIT_REMINDER
   CREDIT_SALE
   CATALOG_CHANGE
   MARKET_PRICE_OUTLOOK
@@ -122,6 +125,9 @@ enum OwnerNotificationType {
 
 enum NotificationDeliveryStatus {
   PENDING
+  PROCESSING
+  ACCEPTED
+  SUPPRESSED
   SENT
   DELIVERED
   READ
@@ -198,6 +204,8 @@ model Organization {
   historicalSalesImports     HistoricalSalesImport[]
   historicalSalesCorrections HistoricalSalesImportCorrection[]
 
+  dailyBriefFindingPreferences DailyBriefFindingPreference[]
+
   @@map("organizations")
 }
 
@@ -242,6 +250,8 @@ model Station {
   historicalSalesImports     HistoricalSalesImport[]
   historicalSalesCorrections HistoricalSalesImportCorrection[]
 
+  dailyBriefFindingPreferences DailyBriefFindingPreference[]
+
   @@unique([organizationId, code])
   @@index([organizationId])
   @@map("stations")
@@ -276,6 +286,11 @@ model OwnerNotificationSettings {
   varianceThreshold      Decimal      @default(500) @map("variance_threshold") @db.Decimal(12, 2)
   stockVarianceTolerance Decimal      @default(50) @map("stock_variance_tolerance") @db.Decimal(12, 3)
   dailySummaryHour       Int          @default(20) @map("daily_summary_hour")
+  shiftSummaryEnabled    Boolean      @default(true) @map("shift_summary_enabled")
+  receiptSummaryEnabled  Boolean      @default(true) @map("receipt_summary_enabled")
+  creditReportHour       Int          @default(20) @map("credit_report_hour")
+  customerReminderScheduled Boolean   @default(false) @map("customer_reminder_scheduled")
+  customerReminderHour   Int          @default(10) @map("customer_reminder_hour")
   createdAt              DateTime     @default(now()) @map("created_at")
   updatedAt              DateTime     @updatedAt @map("updated_at")
   organization           Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -287,6 +302,7 @@ model OwnerNotificationDelivery {
   id                String                     @id @default(cuid())
   organizationId    String                     @map("organization_id")
   stationId         String?                    @map("station_id")
+  customerId        String?                    @map("customer_id")
   type              OwnerNotificationType
   dedupeKey         String                     @unique @map("dedupe_key")
   destination       String                     @map("destination")
@@ -294,6 +310,25 @@ model OwnerNotificationDelivery {
   status            NotificationDeliveryStatus @default(PENDING)
   providerMessageId String?                    @unique @map("provider_message_id")
   errorMessage      String?                    @map("error_message")
+  eventKey          String?                    @map("event_key")
+  rolloutStage      String?                    @map("rollout_stage")
+  rolloutHold       String?                    @map("rollout_hold")
+  previewBody       String?                    @map("preview_body")
+  previewTemplate   String?                    @map("preview_template")
+  previewHash       String?                    @map("preview_hash")
+  previewAt         DateTime?                  @map("preview_at")
+  approvedPreviewHash String?                  @map("approved_preview_hash")
+  recordType        String?                    @map("record_type")
+  guard             Json?
+  attempts          Int                        @default(0)
+  availableAt       DateTime                   @default(now()) @map("available_at")
+  leaseUntil        DateTime?                  @map("lease_until")
+  callbackKey       String?                    @unique @map("callback_key")
+  dispatchStartedAt DateTime?                  @map("dispatch_started_at")
+  failureKind       String?                    @map("failure_kind")
+  suppressionReason String?                    @map("suppression_reason")
+  retriedById       String?                    @map("retried_by_id")
+  retriedAt         DateTime?                  @map("retried_at")
   sentAt            DateTime?                  @map("sent_at")
   deliveredAt       DateTime?                  @map("delivered_at")
   readAt            DateTime?                  @map("read_at")
@@ -302,9 +337,70 @@ model OwnerNotificationDelivery {
   organization      Organization               @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   station           Station?                   @relation(fields: [stationId], references: [id], onDelete: Restrict)
 
+  customer          Customer?                  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId, customerId, createdAt], map: "whatsapp_customer_history_idx")
   @@index([organizationId, createdAt])
   @@index([stationId, createdAt])
+  @@index([status, availableAt], map: "owner_whatsapp_queue_idx")
   @@map("owner_notification_deliveries")
+}
+
+model WhatsAppRollout {
+  id                String   @id
+  stage             String   @default("SHADOW")
+  paused            Boolean  @default(true)
+  organizationIds   String[] @default([]) @map("organization_ids")
+  enabledCategories String[] @default([]) @map("enabled_categories")
+  version           Int      @default(0)
+
+  @@map("whatsapp_rollout")
+}
+
+model WhatsAppRolloutAudit {
+  id        String   @id @default(cuid())
+  actorId   String   @map("actor_id")
+  action    String
+  details   Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("whatsapp_rollout_audit")
+}
+
+model NerveReviewJob {
+  id             String   @id @default(cuid())
+  eventKey       String
+  organizationId String
+  stationId      String
+  agentKey       String
+  eventType      String
+  resourceId     String
+  occurredAt     DateTime
+  availableAt    DateTime @default(now())
+  attempts       Int      @default(0)
+  leaseToken     String?
+  leaseUntil     DateTime?
+  completedAt    DateTime?
+  failedAt       DateTime?
+  outcome        Json?
+  lastError      String?
+  notificationHandledAt DateTime?
+  notificationNextAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  @@unique([organizationId, stationId, eventKey, agentKey], map: "nerve_review_event_agent_key")
+  @@index([completedAt, failedAt, availableAt, leaseUntil], map: "nerve_review_claim_idx")
+  @@index([organizationId, stationId, agentKey, completedAt], map: "nerve_review_latest_idx")
+  @@index([notificationHandledAt, notificationNextAt], map: "nerve_review_notification_idx")
+  @@map("nerve_review_jobs")
+}
+
+model StockAlertState {
+  tankId    String   @id
+  episodeId String
+  level     String
+
+  @@map("stock_alert_states")
 }
 
 model OwnerAlert {
@@ -813,6 +909,12 @@ model Customer {
   creditLimit            Decimal                 @default(0) @map("credit_limit") @db.Decimal(14, 2)
   creditDays             Int                     @default(0) @map("credit_days")
   active                 Boolean                 @default(true)
+  reminderWhatsAppNumber String?                 @map("reminder_whatsapp_number")
+  reminderConsentAt      DateTime?               @map("reminder_consent_at")
+  reminderConsentById    String?                 @map("reminder_consent_by_id")
+  reminderConsentSource  String?                 @map("reminder_consent_source")
+  reminderPaused         Boolean                 @default(false) @map("reminder_paused")
+  whatsappReminders      OwnerNotificationDelivery[]
   createdAt              DateTime                @default(now()) @map("created_at")
   updatedAt              DateTime                @updatedAt @map("updated_at")
   organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Restrict)
@@ -1322,6 +1424,8 @@ model User {
   historicalSalesImports     HistoricalSalesImport[]
   historicalSalesCorrections HistoricalSalesImportCorrection[]
 
+  dailyBriefFindingPreferences DailyBriefFindingPreference[]
+
   @@index([organizationId])
   @@map("users")
 }
@@ -1455,4 +1559,20 @@ model DemoAccessClaim {
   firstUsedAt DateTime @default(now()) @map("first_used_at")
 
   @@map("demo_access_claims")
+}
+
+model DailyBriefFindingPreference {
+  organizationId String @map("organization_id")
+  stationId String @map("station_id")
+  userId String @map("user_id")
+  findingKey String @map("finding_key")
+  acknowledgedAt DateTime? @map("acknowledged_at")
+  remindAt DateTime? @map("remind_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  station Station @relation(fields: [stationId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, stationId, userId, findingKey])
+  @@map("daily_brief_finding_preferences")
 }

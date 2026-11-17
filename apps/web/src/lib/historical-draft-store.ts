@@ -68,10 +68,10 @@ export async function deleteHistoricalDraftsForImport(stationId: string, product
   await Promise.all(rows.filter(row => row.scopeKey === scopeKey && row.month === month).map(row => deleteHistoricalDraft(row.id)));
 }
 
-export async function latestHistoricalDraft(stationId: string, productId: string) {
+export async function latestHistoricalDraft(stationId: string, productId: string, month?: string) {
   const scopeKey = historicalDraftScope(stationId, productId);
   const rows = await request<HistoricalOcrDraft[]>('readonly', store => store.getAll());
-  return rows.filter(row => row.scopeKey === scopeKey && row.id.includes(`:v${OCR_DRAFT_VERSION}:`)).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  return rows.filter(row => row.scopeKey === scopeKey && (!month || row.month === month) && row.id.includes(`:v${OCR_DRAFT_VERSION}:`)).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
 }
 
 export function draftFile(draft: HistoricalOcrDraft) {

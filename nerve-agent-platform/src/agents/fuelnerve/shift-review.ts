@@ -33,7 +33,7 @@ function shiftFacts(item: JsonObject, result: ToolResult) {
   }
   if (numberValue(item.openShifts) > 0) {
     const overdue = booleanValue(item.openShiftOverdue);
-    facts.push(findingFact({ ...common, findingType: overdue ? "SHIFT_OPEN_OVERDUE" : "SHIFT_OPEN", severity: overdue ? "ATTENTION" : "INFORMATION", title: overdue ? "A shift is overdue for closing" : "A shift remains open", whyItMatters: overdue ? "An overdue open shift delays handover and reconciliation." : "The shift is still operational and has not reached final reconciliation.", recommendedNextStep: "Open the shift record and verify its current status.", displayValue: item.openShifts }, evidenceIds));
+    facts.push(findingFact({ ...common, findingType: overdue ? "SHIFT_OPEN_OVERDUE" : "SHIFT_OPEN", severity: overdue ? "ATTENTION" : "INFORMATION", title: overdue ? "A shift is overdue for closing" : "A shift remains open", whyItMatters: overdue ? "An overdue open shift delays handover and reconciliation." : "The shift is still operational and has not reached final reconciliation.", recommendedNextStep: "Open the shift record and verify its current status.", displayValue: item.openShifts ?? 0 }, evidenceIds));
   }
   if (numberValue(item.missingReadings) > 0) facts.push(findingFact({ ...common, findingType: "SHIFT_READINGS_MISSING", severity: "ATTENTION", title: "Shift readings are missing", whyItMatters: "Closing and stock review need complete recorded readings.", recommendedNextStep: "Review the shift reading checklist.", displayValue: item.missingReadings ?? 0 }, evidenceIds));
   if (numberValue(item.collectionVariance) !== 0) facts.push(findingFact({ ...common, findingType: "COLLECTION_VARIANCE_DETECTED", severity: "URGENT", title: "Collections differ from expected", whyItMatters: "The application-reported collection variance requires human review.", recommendedNextStep: "Open reconciliation and compare each payment method.", displayValue: item.collectionVariance ?? 0 }, evidenceIds));
@@ -56,7 +56,7 @@ function groupedShiftFact(shift: JsonObject, result: ToolResult) {
     whyItMatters: `${details.join(" · ")}. ${reasons.length ? `Priority: ${reasons.join("; ").toLowerCase()}.` : ""}`.trim(),
     calculatedAt: result.calculatedAt, periodStart: String(shift.openedAt ?? result.calculatedAt), periodEnd: String(shift.closedAt ?? result.calculatedAt),
     recommendedNextStep: `Open Shift ${shiftNumber} and compare ${recordsToCompare.length ? recordsToCompare.join(", ").toLowerCase() : "its readings, collections and handover"}.`,
-    displayValue: { shiftId, shiftNumber, stationName: shift.stationName, waitingMinutes: waiting, absoluteCollectionDifference: difference, missingReadings: readings, missingCollections: collections, issueTypes },
+    displayValue: { shiftId, shiftNumber, stationName: shift.stationName ?? null, waitingMinutes: waiting, absoluteCollectionDifference: difference, missingReadings: readings, missingCollections: collections, issueTypes },
     priorityRank: numberValue(shift.priorityRank), priorityReason: reasons.join("; "), recordsToCompare, relatedContext: shift,
   }, evidenceIds);
 }

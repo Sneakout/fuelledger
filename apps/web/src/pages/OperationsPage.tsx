@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Beaker, CheckCircle2, Clock3, Fuel, LockKeyhole, Play } from "lucide-react";
 import {
   ApiRequestError,
@@ -9,6 +10,7 @@ import {
   type ShiftBootstrap,
   type ShiftStation,
 } from "../lib/api";
+import { useStation } from "../components/StationProvider";
 import { formatIndiaDateTime } from "../lib/india-time";
 const money = (value: string | number) =>
   new Intl.NumberFormat("en-IN", {
@@ -99,6 +101,9 @@ function ShiftTimes({
   );
 }
 export function OperationsPage() {
+  const navigate = useNavigate();
+  const { selectedStationId, selectStation: selectWorkspaceStation } = useStation();
+  const requestedShiftId = new URLSearchParams(window.location.search).get("shiftId");
   const [data, setData] = useState<ShiftBootstrap | null>(null),
     [stationId, setStationId] = useState(""),
     [managerId, setManagerId] = useState(""),
@@ -132,8 +137,10 @@ export function OperationsPage() {
         }),
       ]);
       setData(result);
+      const requestedStationId = result.shifts.find(shift => shift.id === requestedShiftId)?.station.id;
       const station =
-        result.stations.find((item) => item.id === stationId) ??
+        result.stations.find(item => item.id === requestedStationId) ??
+        result.stations.find((item) => item.id === (stationId || selectedStationId)) ??
         result.stations[0];
       if (station) selectStation(station, result);
     } catch (item) {
@@ -185,8 +192,8 @@ export function OperationsPage() {
     }
   };
   const active = useMemo(
-    () => data?.shifts.find((s) => s.status === "OPEN"),
-    [data],
+    () => data?.shifts.find(s => s.status === "OPEN" && (!requestedShiftId || s.station.id === stationId)),
+    [data, requestedShiftId, stationId],
   );
   const selected = data?.stations.find((s) => s.id === stationId);
   const config = selected?.configurations[0];
@@ -296,7 +303,7 @@ export function OperationsPage() {
     setSaving(true);
     setError("");
     try {
-      await api.closeShift(active.id, {
+      const { shift } = await api.closeShift(active.id, {
         closingCash: closeCash,
         tankReadings: closeTanks,
         nozzleReadings: closeNozzles.map((reading) => {
@@ -313,8 +320,7 @@ export function OperationsPage() {
         })),
         notes,
       });
-      setNotes("");
-      load();
+      navigate(`/reconciliation?shiftId=${encodeURIComponent(shift.id)}`);
     } catch (e) {
       setError(
         e instanceof ApiRequestError ? e.message : "Unable to close shift.",
@@ -568,7 +574,10 @@ export function OperationsPage() {
                   const next = data.stations.find(
                     (s) => s.id === e.target.value,
                   );
-                  if (next) selectStation(next);
+                  if (next) {
+                    selectWorkspaceStation(next.id);
+                    selectStation(next);
+                  }
                 }}
               >
                 {data.stations.map((s) => (

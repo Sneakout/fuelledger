@@ -1,4 +1,5 @@
 import { safeTransaction } from '../../lib/safe-save.js';
+import { enqueueReview } from '../nerve/review-events.js';
 import { assertStockAvailable, tankBookStocksAt, tankMovementDeltasBetween } from '../../lib/stock.js';
 import type {
   CloseShiftInput,
@@ -765,6 +766,7 @@ export async function closeShift(
       include,
     });
   })();
+  await enqueueReview(tx, { type: 'SHIFT_CLOSED', organizationId, stationId: closed.stationId, resourceId: closed.id, occurredAt: closed.closedAt! });
   return summary(closed);
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

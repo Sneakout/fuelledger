@@ -144,7 +144,7 @@ struct IntelligenceNotificationPopup: View {
         switch agent.key {
         case "reconciliation-review": "checkmark.seal"
         case "inventory-watch": "drop.triangle"
-        case "receivables-watch": "indianrupeesign.circle"
+        case "credit-watch", "receivables-watch": "indianrupeesign.circle"
         case "purchase-check": "doc.text.magnifyingglass"
         case "profit-insight": "chart.line.uptrend.xyaxis"
         default: "sparkles"
@@ -343,6 +343,6 @@ private struct LoadPlanSwipeControl: View {
 extension OwnerAlert {
     var hasKnownIntelligenceAgent: Bool {
         guard let key = packet?.responsibleAgent?.key else { return false }
-        return ["reconciliation-review", "inventory-watch", "receivables-watch", "purchase-check", "profit-insight", "owner-assistant"].contains(key)
+        return ["reconciliation-review", "inventory-watch", "credit-watch", "receivables-watch", "purchase-check", "profit-insight", "business-assistant", "owner-assistant"].contains(key)
     }
 }

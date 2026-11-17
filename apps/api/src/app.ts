@@ -39,6 +39,14 @@ export function createApp() {
   app.use(
     pinoHttp({
       logger,
+      serializers: {
+        req: (req) => ({
+          ...req,
+          url: req.url?.startsWith("/api/notifications/whatsapp/webhook?")
+            ? "/api/notifications/whatsapp/webhook"
+            : req.url,
+        }),
+      },
       genReqId: (req, res) => {
         const id =
           req.headers["x-request-id"]?.toString() ?? crypto.randomUUID();

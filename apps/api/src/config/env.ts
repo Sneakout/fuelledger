@@ -18,6 +18,8 @@ const envSchema = z.object({
   GOOGLE_CLIENT_ID: z.string().min(20).optional(),
   WHATSAPP_ACCESS_TOKEN: z.string().min(20).optional(),
   WHATSAPP_PHONE_NUMBER_ID: z.string().min(5).optional(),
+  WHATSAPP_BUSINESS_ACCOUNT_ID: z.string().regex(/^\d+$/).optional(),
+  WHATSAPP_DELIVERY_ENABLED: z.enum(["true","false"]).default("false").transform(value => value === "true"),
   WHATSAPP_API_VERSION: z.string().regex(/^v\d+\.\d+$/).optional(),
   WHATSAPP_TEMPLATE_NAME: z.string().regex(/^[a-z0-9_]+$/).optional(),
   WHATSAPP_TEMPLATE_LANGUAGE: z.string().min(2).default("en"),

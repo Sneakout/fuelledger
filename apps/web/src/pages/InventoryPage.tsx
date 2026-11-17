@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AlertTriangle, Boxes, CheckCircle2, Droplets, History, Info, PackageCheck, ReceiptText, Scale, ShoppingCart } from 'lucide-react';
+import { useStation } from '../components/StationProvider';
 import { ApiRequestError, api, type InventoryBootstrap, type ReconciliationLine } from '../lib/api';
 
 const quantity = (value: number) => value.toLocaleString('en-IN', { maximumFractionDigits: 3 });
@@ -23,16 +24,24 @@ function checkAge(readAt: string | null) {
 const needsReview = (line: ReconciliationLine) => Boolean(line.tank) && (line.variance === null || Math.abs(line.variance) > .001 || checkAge(line.readAt).stale);
 
 export function InventoryPage() {
+  const requestedTankId = new URLSearchParams(window.location.search).get('tankId');
   const [data, setData] = useState<InventoryBootstrap | null>(null);
-  const [stationId, setStationId] = useState('');
+  const { selectedStationId, selectStation } = useStation();
+  const [localStationId, setLocalStationId] = useState('');
+  const evidenceStationId = data?.tanks.find(line => line.tank?.id === requestedTankId)?.station?.id;
+  const stationId = localStationId || evidenceStationId || selectedStationId || data?.stations[0]?.id || '';
   const [view, setView] = useState<View>('all');
   const [error, setError] = useState('');
 
   useEffect(() => {
     api.inventoryBootstrap()
-      .then(result => { setData(result); setStationId(current => current || result.stations[0]?.id || ''); })
+      .then(setData)
       .catch(error => setError(error instanceof ApiRequestError ? error.message : 'Unable to load inventory.'));
-  }, []);
+  }, [requestedTankId]);
+  useEffect(() => {
+    if (!requestedTankId || !data || !stationId) return;
+    document.getElementById(`inventory-tank-${requestedTankId}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [requestedTankId, data, stationId]);
 
   const lines = useMemo(() => data ? [...data.tanks, ...data.untanked].filter(line => line.station?.id === stationId) : [], [data, stationId]);
   const fuelLines = lines.filter(line => Boolean(line.tank) || ['FUEL', 'DEF'].includes(line.product.category ?? '')).sort((left, right) => productOrder(left.product.code) - productOrder(right.product.code) || left.product.code.localeCompare(right.product.code) || (left.tank?.code ?? '').localeCompare(right.tank?.code ?? ''));
@@ -57,7 +66,7 @@ export function InventoryPage() {
   const showShop = view === 'all' || view === 'shop';
 
   return <main className="page inventory-page">
-    <div className="page-heading"><div><span className="eyebrow">Inventory control room</span><h1>Know what is in every tank.</h1><p>Start with the answer. Open the calculation only when you need to audit it.</p></div><label className="station-switch"><span>Fuel station</span><select value={stationId} onChange={event => setStationId(event.target.value)}>{data.stations.map(station => <option key={station.id} value={station.id}>{station.name}</option>)}</select></label></div>
+    <div className="page-heading"><div><span className="eyebrow">Inventory control room</span><h1>Know what is in every tank.</h1><p>Start with the answer. Open the calculation only when you need to audit it.</p></div><label className="station-switch"><span>Fuel station</span><select value={stationId} onChange={event => { setLocalStationId(event.target.value); selectStation(event.target.value); }}>{data.stations.map(station => <option key={station.id} value={station.id}>{station.name}</option>)}</select></label></div>
     {error && <div className="form-error">{error}</div>}
 
     <section className="inventory-product-board" aria-label="Inventory by product">
@@ -117,7 +126,7 @@ function StockCard({ line, sequence }: { line: ReconciliationLine; sequence: num
 
   const colour = ['HSD'].includes(line.product.code) ? 'hsd' : line.product.code === 'DEF' ? 'def' : 'ms';
   const stockValue = line.bookStock * line.product.purchasePrice;
-  return <article className={`inventory-tank-card inventory-orb-card ${colour} ${review ? 'review' : 'clear'}`}>
+  return <article id={`inventory-tank-${line.tank?.id}`} className={`inventory-tank-card inventory-orb-card ${colour} ${review ? 'review' : 'clear'}`}>
     <div className="inventory-tank-visual"><div className="fuel-orb" aria-label={`${line.product.code} Tank ${sequence}: ${percentage(fill)} full`}><span className="fuel-liquid" style={{ height: `${clamp(fill)}%` }}/><span className="fuel-percent">{percentage(fill)}</span></div><small>{quantity(capacity)} L safe capacity</small></div>
     <div className="inventory-tank-intel">
       <header><div><span className="fuel-product">{line.product.code}</span><h3>{line.product.code} Tank {sequence}</h3><small>Equipment ID {line.tank?.code}</small></div><span className={`tank-health ${review ? 'review' : 'clear'}`}>{review ? <AlertTriangle/> : <CheckCircle2/>}{variance === null ? 'Dip needed' : age.stale ? 'Check is old' : Math.abs(variance) < .001 ? 'Verified' : 'Review difference'}</span></header>
