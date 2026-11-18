@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { OwnerWhatsAppWorkspace } from './OwnerWhatsAppWorkspace';
+import { WhatsAppInbox } from './WhatsAppInbox';
 import { ChevronDown, Eye, Pause, RefreshCw, Send, ShieldCheck } from 'lucide-react';
 import { api, ApiRequestError, type PlatformCustomer, type WhatsAppRolloutPolicy, type WhatsAppRolloutSnapshot } from '../lib/api';
 
@@ -56,7 +56,7 @@ export function WhatsAppRolloutPanel({ customers, onRefreshCustomers }: { custom
     <div className="rollout-body">
       {error && <p className="form-error" role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}
-      {snapshot && <OwnerWhatsAppWorkspace customers={customers} policy={snapshot.policy} onRefresh={refresh} onTestSetup={async (ownerId, category) => {
+      {snapshot && <WhatsAppInbox policy={snapshot.policy} onRefresh={refresh} onTestSetup={async (ownerId, category) => {
         await api.saveWhatsAppRollout({ ...snapshot.policy, stage: 'INTERNAL', paused: false, organizationIds: [ownerId], enabledCategories: category ? [category] : ['SYSTEM_TEST', 'OWNER_WELCOME'] });
         await refresh();
       }} />}

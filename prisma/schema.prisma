@@ -345,6 +345,8 @@ model OwnerNotificationDelivery {
   @@index([organizationId, createdAt])
   @@index([stationId, createdAt])
   @@index([status, availableAt], map: "owner_whatsapp_queue_idx")
+  @@index([createdAt, id], map: "whatsapp_delivery_history_idx")
+  @@index([status, createdAt, id], map: "whatsapp_delivery_attention_idx")
   @@map("owner_notification_deliveries")
 }
 

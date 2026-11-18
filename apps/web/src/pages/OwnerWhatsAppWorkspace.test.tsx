@@ -44,6 +44,7 @@ it('refreshes consent, destination and rollout settings alongside delivery histo
   await screen.findByText('Owner consent, WhatsApp number, delivery settings and message status refreshed.');
   expect(onRefresh).toHaveBeenCalledOnce();
   expect(screen.getByText('+918888888888')).toBeInTheDocument();
+  fireEvent.click(screen.getByText('Set up & test WhatsApp'));
   expect(screen.getByRole('button',{name:'Welcome preview'})).toBeDisabled();
   expect(screen.getByRole('button',{name:'Send this message'})).toBeDisabled();
   expect(screen.getByRole('heading',{name:'Sending paused'})).toBeInTheDocument();
@@ -61,6 +62,7 @@ it('enables preparation after renewed consent without reviving a suppressed mess
   const revoked = owners.map(owner => ({...owner,notificationSettings:{...owner.notificationSettings,whatsappOptedIn:false}}));
   const view = render(<OwnerWhatsAppWorkspace customers={revoked} policy={policy} onRefresh={onRefresh} onTestSetup={vi.fn()}/>);
   await screen.findByText('Welcome owner a');
+  fireEvent.click(screen.getByText('Set up & test WhatsApp'));
   expect(screen.getByRole('button',{name:'Welcome preview'})).toBeDisabled();
   onRefresh.mockImplementation(async () => { view.rerender(<OwnerWhatsAppWorkspace customers={owners} policy={policy} onRefresh={onRefresh} onTestSetup={vi.fn()}/>); });
   fireEvent.click(screen.getByRole('button',{name:'Refresh status'}));
@@ -74,6 +76,7 @@ it('prepares a selected operational preview and enables only its owner category'
   const setup=vi.fn().mockResolvedValue(undefined);
   render(<OwnerWhatsAppWorkspace customers={owners} policy={policy} onRefresh={vi.fn().mockResolvedValue(undefined)} onTestSetup={setup}/>);
   await screen.findByText('Welcome owner a');
+  fireEvent.click(screen.getByText('Set up & test WhatsApp'));
   fireEvent.change(screen.getByRole('combobox',{name:'Message to preview'}),{target:{value:'PURCHASE_RECEIPT_SUMMARY'}});
   fireEvent.click(screen.getByRole('button',{name:'Prepare operational preview'}));
   await waitFor(()=>expect(mock.test).toHaveBeenCalledWith('a',false,'PURCHASE_RECEIPT_SUMMARY'));

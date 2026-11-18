@@ -595,8 +595,16 @@ export const api = {
   approveWhatsAppPreview: (organizationId: string, deliveryId: string, hash: string) =>
     request<void>(`/platform/customers/${organizationId}/notifications/deliveries/${deliveryId}/approve-preview`,
       { method: "POST", body: JSON.stringify({ hash }) }),
-  customerWhatsAppDeliveries: (id: string) =>
-    request<{ deliveries: AdminWhatsAppDelivery[] }>(`/platform/customers/${id}/notifications/deliveries`),
+  adminWhatsAppOwners: (filters: Record<string, string>) =>
+    request<{ owners: WhatsAppOwnerSummary[]; nextCursor: string | null }>(`/platform/whatsapp/owners?${new URLSearchParams(filters)}`),
+  adminWhatsAppMessages: (filters: Record<string, string>) =>
+    request<{ messages: WhatsAppMessageSummary[]; nextCursor: string | null }>(`/platform/whatsapp/messages?${new URLSearchParams(filters)}`),
+  customerWhatsAppDeliveries: (id: string, options?: { recent: boolean; message?: string }) => {
+    const query = new URLSearchParams();
+    if (options?.recent) query.set("recent", "true");
+    if (options?.message) query.set("message", options.message);
+    return request<{ deliveries: AdminWhatsAppDelivery[] }>(`/platform/customers/${id}/notifications/deliveries${query.size ? `?${query}` : ""}`);
+  },
   retryCustomerWhatsAppDelivery: (id: string, deliveryId: string) =>
     request<{ queued: boolean }>(`/platform/customers/${id}/notifications/deliveries/${deliveryId}/retry`, { method: "POST" }),
   serviceTickets: () => request<{ tickets: ServiceTicket[] }>("/support/tickets"),
@@ -638,6 +646,19 @@ export type WhatsAppRolloutSnapshot = {
   policy: WhatsAppRolloutPolicy;
   outcomes: Array<{ status: string; rolloutHold: string | null; suppressionReason: string | null; failureKind: string | null; count: number }>;
   audit: Array<{ id: string; action: string; createdAt: string }>;
+};
+export type WhatsAppOwnerSummary = {
+  id: string;
+  name: string;
+  owner: { name: string; email: string } | null;
+  notificationSettings: Pick<NotificationSettings, "whatsappNumber" | "whatsappOptedIn">;
+  lastDeliveredAt: string | null;
+  failedCount: number;
+};
+export type WhatsAppMessageSummary = Pick<AdminWhatsAppDelivery, "id" | "type" | "status" | "createdAt" | "rolloutHold" | "errorMessage" | "suppressionReason"> & {
+  organizationId: string;
+  organization: { name: string };
+  needsApproval: boolean;
 };
 export type AdminWhatsAppDelivery = {
   id: string;

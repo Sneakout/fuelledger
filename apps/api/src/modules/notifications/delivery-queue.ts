@@ -298,11 +298,17 @@ export async function retryWhatsAppDelivery(organizationId: string, id: string, 
   if (!result.count) throw new AppError(409, 'DELIVERY_NOT_RETRYABLE', 'This message cannot be safely retried. Check its delivery history.');
 }
 
-export async function adminWhatsAppDeliveries(organizationId: string) {
-  const entries = await prisma.ownerNotificationDelivery.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' }, take: 30,
-    select: { id: true, type: true, status: true, createdAt: true, attempts: true, failureKind: true, errorMessage: true, suppressionReason: true, retriedAt: true, eventKey: true, providerMessageId: true,
-      rolloutHold: true, previewBody: true, previewTemplate: true, previewHash: true, previewAt: true, approvedPreviewHash: true,
-      destination: true, recordType: true, guard: true, stationId: true } });
+export async function adminWhatsAppDeliveries(organizationId: string, limit = 30, messageId?: string) {
+  const select = {
+    id: true, type: true, status: true, createdAt: true, attempts: true, failureKind: true, errorMessage: true, suppressionReason: true, retriedAt: true, eventKey: true, providerMessageId: true,
+    rolloutHold: true, previewBody: true, previewTemplate: true, previewHash: true, previewAt: true, approvedPreviewHash: true,
+    destination: true, recordType: true, guard: true, stationId: true,
+  } satisfies Prisma.OwnerNotificationDeliverySelect;
+  const [recent, selected] = await Promise.all([
+    prisma.ownerNotificationDelivery.findMany({ where: { organizationId }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit, select }),
+    messageId ? prisma.ownerNotificationDelivery.findFirst({ where: { id: messageId, organizationId }, select }) : null,
+  ]);
+  const entries = selected ? [selected, ...recent.filter(row => row.id !== selected.id)] : recent;
   return entries.map(({ providerMessageId, eventKey, destination, guard, ...entry }) => ({
     ...entry, recipientEnding: destination.slice(-4),
     sourceId: (guard as Guard | null)?.sourceId ?? null,

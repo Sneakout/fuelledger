@@ -14,6 +14,8 @@ import { adminWhatsAppDeliveries, drainWhatsAppQueue, retryWhatsAppDelivery } fr
 
 import { operationalPreviewTypes, prepareOperationalPreview } from '../modules/notifications/operational-preview.js';
 
+import { adminWhatsAppInbox, adminWhatsAppOwners, deliveryInboxInput, ownerDirectoryInput } from '../modules/notifications/admin-inbox.js';
+
 export const platformRouter = Router();
 const planPricesPaise = {
   CORE: { MONTHLY: 69_900, YEARLY: 598_800, LIFETIME: 2_400_000 },
@@ -183,9 +185,23 @@ platformRouter.post("/customers/:id/notifications/test", async (req, res) => {
   }
   res.json({ delivery });
 });
+platformRouter.get("/whatsapp/owners", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const input = ownerDirectoryInput.safeParse(req.query);
+  if (!input.success) throw new AppError(400, "INVALID_FILTER", "Check the owner search and try again.");
+  res.json(await adminWhatsAppOwners(input.data));
+});
+platformRouter.get("/whatsapp/messages", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const input = deliveryInboxInput.safeParse(req.query);
+  if (!input.success) throw new AppError(400, "INVALID_FILTER", input.error.issues[0]?.message ?? "Check the message filters.");
+  res.json(await adminWhatsAppInbox(input.data));
+});
 platformRouter.get("/customers/:id/notifications/deliveries", async (req, res) => {
   requirePlatformAdmin(req.user!.email);
-  res.json({ deliveries: await adminWhatsAppDeliveries(req.params.id!) });
+  const input = z.object({ recent: z.enum(['true']).optional(), message: z.string().cuid().optional() }).safeParse(req.query);
+  if (!input.success) throw new AppError(400, "INVALID_FILTER", "Check the selected message.");
+  res.json({ deliveries: await adminWhatsAppDeliveries(req.params.id!, input.data.recent ? 5 : 30, input.data.message) });
 });
 platformRouter.post("/customers/:id/notifications/deliveries/:deliveryId/retry", async (req, res) => {
   requirePlatformAdmin(req.user!.email);
