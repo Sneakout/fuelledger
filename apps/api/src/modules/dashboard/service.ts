@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
-import { tankBookStocksAt, tankMovementDeltasBetween } from '../../lib/stock.js';
+import { tankBookStocksAt, tankOpeningBalances } from '../../lib/stock.js';
 import { addIndiaDays, indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { buildReport } from '../reports/service.js';
 import { historicalRowsWithSellingPrice, importRows } from '../historical-sales/service.js';
@@ -78,10 +78,11 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
   await Promise.all(lastClosings.map(async closing=>{
     if(!closing.closedAt)return;
     const stationTanks=tanks.filter(tank=>tank.configuration.station.id===closing.stationId).map(tank=>({id:tank.id,stationId:closing.stationId,productId:tank.productId,openingStock:tank.openingStock}));
-    const changes=await tankMovementDeltasBetween(prisma,organizationId,stationTanks,closing.closedAt,now);
+    const changes=await tankOpeningBalances(prisma,organizationId,stationTanks,now,closing,true);
     for(const reading of closing.tankReadings){
-      if(reading.closingDip===null)continue;
-      expectedFromLastDip.set(reading.tankId,{stock:number(reading.closingDip)+number(changes.get(reading.tankId)),closedAt:closing.closedAt.toISOString()});
+      const balance=changes.get(reading.tankId);
+      if(balance?.lastActual==null)continue;
+      expectedFromLastDip.set(reading.tankId,{stock:number(balance.expectedOpening),closedAt:closing.closedAt.toISOString()});
     }
   }));
   const timeline=dashboardSalesTimeline(recentSales,historicalImports,previousStartDate,todayDate);

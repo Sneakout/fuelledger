@@ -75,7 +75,7 @@ describe('authoritative stock timeline', () => {
     expect(balances.get('tank-a')).toEqual(d(8500));
     expect(balances.get('tank-b')).toEqual(d(8750));
     expect(groupBy).toHaveBeenCalledWith(expect.objectContaining({
-      by: ['tankId', 'stationId', 'productId'],
+      by: ['tankId', 'stationId', 'productId', 'type'],
       where: { organizationId: 'org', tankId: { in: ['tank-a', 'tank-b'] }, occurredAt: { lte: at } },
     }));
 

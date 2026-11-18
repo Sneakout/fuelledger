@@ -11,6 +11,16 @@ export type ShiftAtInstant = {
   closedAt: Date | null;
 };
 
+type ShiftBounds = Pick<ShiftAtInstant, 'openedAt' | 'closedAt'>;
+
+export const shiftContains = (shift: ShiftBounds, instant: Date) =>
+  shift.openedAt <= instant && (!shift.closedAt || instant < shift.closedAt);
+
+export const shiftMovementWindow = (shift: ShiftBounds, asOf: Date): Prisma.DateTimeFilter => ({
+  gte: shift.openedAt,
+  ...(shift.closedAt ? { lt: shift.closedAt } : { lte: asOf }),
+});
+
 /** Shift intervals are half-open: openedAt <= instant < closedAt. */
 export async function shiftAtInstant(
   db: ShiftReader,

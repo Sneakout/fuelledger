@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Beaker, CheckCircle2, Clock3, Fuel, LockKeyhole, Play } from "lucide-react";
+import { Beaker, CheckCircle2, Clock3, Fuel, LockKeyhole, Play, RefreshCw } from "lucide-react";
 import {
   ApiRequestError,
   api,
@@ -8,6 +8,8 @@ import {
   type Reading,
   type Shift,
   type ShiftBootstrap,
+  type ShiftReceipt,
+  type ShiftDetail,
   type ShiftStation,
 } from "../lib/api";
 import { useStation } from "../components/StationProvider";
@@ -41,8 +43,8 @@ function bridgeValues(shift: Shift, tankId: string, actual: number, closingMeter
       testingLoss: test?.testingReturned === false ? quantity : 0,
     };
   });
-  const sales = Number(tank.stockBridge.counterSales ?? 0) + contributions.reduce((sum, item) => sum + item.sales, 0);
-  const testingLoss = contributions.reduce((sum, item) => sum + item.testingLoss, 0);
+  const sales = tank.stockBridge.postedSales !== undefined ? Number(tank.stockBridge.postedSales) : Number(tank.stockBridge.counterSales ?? 0) + contributions.reduce((sum, item) => sum + item.sales, 0);
+  const testingLoss = tank.stockBridge.postedTestingLoss !== undefined ? Number(tank.stockBridge.postedTestingLoss) : contributions.reduce((sum, item) => sum + item.testingLoss, 0);
   const expected = Number(tank.openingDip) + Number(tank.stockBridge.received) + Number(tank.stockBridge.adjustments) - sales - testingLoss;
   return { tank, contributions, sales, testingLoss, expected, difference: actual - expected };
 }
@@ -103,6 +105,7 @@ function ShiftTimes({
 export function OperationsPage() {
   const navigate = useNavigate();
   const { selectedStationId, selectStation: selectWorkspaceStation } = useStation();
+  const editedOpeningTanks = useRef(new Set<string>());
   const requestedShiftId = new URLSearchParams(window.location.search).get("shiftId");
   const [data, setData] = useState<ShiftBootstrap | null>(null),
     [stationId, setStationId] = useState(""),
@@ -122,7 +125,8 @@ export function OperationsPage() {
     [notes, setNotes] = useState(""),
     [error, setError] = useState(""),
     [loadError, setLoadError] = useState(""),
-    [saving, setSaving] = useState(false);
+    [saving, setSaving] = useState(false),
+    [refreshingStock, setRefreshingStock] = useState(false);
   const load = async () => {
     setLoadError("");
     let timeoutId: number | undefined;
@@ -157,11 +161,12 @@ export function OperationsPage() {
     void load();
   }, []);
   const selectStation = (station: ShiftStation, source = data) => {
+    editedOpeningTanks.current.clear();
     setStationId(station.id);
     const config = station.configurations[0];
     const last = station.lastClosing;
     setOpenTanks(
-      config?.tanks.map((t) => ({ id: t.id, value: Number(last?.tankReadings.find(reading=>reading.id===t.id)?.expectedOpening??station.availableTankStock.find(reading=>reading.id===t.id)?.value??t.openingStock) })) ??
+      config?.tanks.map((t) => ({ id: t.id, value: Number(station.availableTankStock.find(reading => reading.id === t.id)?.expectedOpening ?? t.openingStock) })) ??
         [],
     );
     setOpenNozzles(
@@ -192,8 +197,8 @@ export function OperationsPage() {
     }
   };
   const active = useMemo(
-    () => data?.shifts.find(s => s.status === "OPEN" && (!requestedShiftId || s.station.id === stationId)),
-    [data, requestedShiftId, stationId],
+    () => data?.shifts.find(s => s.status === "OPEN" && s.station.id === stationId),
+    [data, stationId],
   );
   const selected = data?.stations.find((s) => s.id === stationId);
   const config = selected?.configurations[0];
@@ -233,6 +238,28 @@ export function OperationsPage() {
       setCloseCash(Number(active.openingCash));
     }
   }, [active?.id]);
+  const refreshStock = async (validationMessage?: string) => {
+    setRefreshingStock(true);
+    if (!validationMessage) setError("");
+    try {
+      const updated = await api.shiftBootstrap();
+      const station = updated.stations.find(item => item.id === stationId);
+      if (!station) throw new Error("This fuel station is no longer available.");
+      setData(updated);
+      setOpenTanks(current => current.map(reading => {
+        const after = station.availableTankStock.find(tank => tank.id === reading.id);
+        if (!after || editedOpeningTanks.current.has(reading.id)) return reading;
+        return { ...reading, value: Number(after.expectedOpening) };
+      }));
+    } catch (error) {
+      setError(validationMessage ?? (error instanceof ApiRequestError ? error.message : "Unable to refresh stock. Try again."));
+    } finally {
+      setRefreshingStock(false);
+    }
+  };
+  const refreshStockButton = <button type="button" className="secondary small" disabled={refreshingStock || saving || !stationId} onClick={() => void refreshStock()}>
+    <RefreshCw size={15} /> {refreshingStock ? "Refreshing stock…" : "Refresh stock"}
+  </button>;
   const replace = (
     items: Reading[],
     id: string,
@@ -274,32 +301,15 @@ export function OperationsPage() {
       setNotes("");
       load();
     } catch (e) {
-      setError(
-        e instanceof ApiRequestError ? e.message : "Unable to open shift.",
-      );
+      const message = e instanceof ApiRequestError ? e.message : "Unable to open shift.";
+      setError(message);
+      if (e instanceof ApiRequestError && e.code === "OPENING_TANK_VARIANCE_NOTE_REQUIRED") await refreshStock(message);
     } finally {
       setSaving(false);
     }
   }
   async function close() {
     if (!active) return;
-    const unchangedTank = active.tankReadings.find((reading) => {
-      const actual = closeTanks.find((item) => item.id === reading.tankId)?.value ?? Number(reading.openingDip);
-      const bridge = bridgeValues(active, reading.tankId, actual, closeNozzles, testingReadings);
-      return bridge.sales + bridge.testingLoss > 0.001 && Math.abs(actual - Number(reading.openingDip)) <= 0.001 && Math.abs(bridge.difference) > 0.001;
-    });
-    if (unchangedTank) {
-      setError(`${unchangedTank.tank.code} still has its opening dip even though fuel moved through its nozzles. Remeasure the tank and enter the actual closing dip.`);
-      return;
-    }
-    const needsStockNote = active.tankReadings.some((reading) => {
-      const actual = closeTanks.find((item) => item.id === reading.tankId)?.value ?? Number(reading.openingDip);
-      return Math.abs(bridgeValues(active, reading.tankId, actual, closeNozzles, testingReadings).difference) > (data?.stockVarianceTolerance ?? 50) + 0.001;
-    });
-    if (needsStockNote && !notes.trim()) {
-      setError("Add a closing note explaining the highlighted tank difference.");
-      return;
-    }
     setSaving(true);
     setError("");
     try {
@@ -322,9 +332,9 @@ export function OperationsPage() {
       });
       navigate(`/reconciliation?shiftId=${encodeURIComponent(shift.id)}`);
     } catch (e) {
-      setError(
-        e instanceof ApiRequestError ? e.message : "Unable to close shift.",
-      );
+      const message = e instanceof ApiRequestError ? e.message : "Unable to close shift.";
+      setError(message);
+      if (e instanceof ApiRequestError && ["TANK_READING_UNCHANGED", "STOCK_VARIANCE_NOTE_REQUIRED"].includes(e.code)) await refreshStock(message);
     } finally {
       setSaving(false);
     }
@@ -364,7 +374,7 @@ export function OperationsPage() {
             <Clock3 size={15} /> Open now
           </span>
         </div>
-        {error && <div className="form-error">{error}</div>}
+        {error && <div className="form-error" role="alert">{error}</div>}
         <ShiftTimes shift={active} closing />
         <section className="shift-grid">
           <article className="reading-panel">
@@ -511,6 +521,7 @@ export function OperationsPage() {
               </div>
             </div>
             <ClosingStockBridge
+              action={refreshStockButton}
               shift={active}
               actuals={closeTanks}
               closingMeters={closeNozzles}
@@ -527,7 +538,7 @@ export function OperationsPage() {
             </label>
             <button
               className="primary"
-              disabled={saving}
+              disabled={saving || refreshingStock}
               onClick={() => void close()}
             >
               <LockKeyhole size={17} /> Close & review shift
@@ -540,6 +551,7 @@ export function OperationsPage() {
             staffCollections={closeCollections.reduce((sum, item) => sum + item.value, 0)}
           />
         </section>
+        <ReceiptHistory key={active.station.id} stationId={active.station.id} tolerance={data.stockVarianceTolerance} />
       </main>
     );
   return (
@@ -557,7 +569,7 @@ export function OperationsPage() {
           <CheckCircle2 size={15} /> Ready to open
         </span>
       </div>
-      {error && <div className="form-error">{error}</div>}
+      {error && <div className="form-error" role="alert">{error}</div>}
       <section className="shift-grid">
         <article className="reading-panel">
           <h2>Open shift</h2>
@@ -570,6 +582,7 @@ export function OperationsPage() {
               <span>Fuel station</span>
               <select
                 value={stationId}
+                disabled={refreshingStock || saving}
                 onChange={(e) => {
                   const next = data.stations.find(
                     (s) => s.id === e.target.value,
@@ -664,19 +677,19 @@ export function OperationsPage() {
           </section>
           <Readings
             title="Opening tank readings"
-            items={
-              config?.tanks.map((t) => ({
-                id: t.id,
-                label: `${t.code} · ${t.product.code}`,
-                opening: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.expectedOpening??selected?.availableTankStock.find(reading=>reading.id===t.id)?.value??t.openingStock),
-                lastActual: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.lastActual ?? 0),
-                receivedBetween: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.receivedBetween ?? 0),
-                adjustmentsBetween: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.adjustmentsBetween ?? 0),
-                expectedOpening: Number(selected?.lastClosing?.tankReadings.find(reading=>reading.id===t.id)?.expectedOpening ?? 0),
-              })) ?? []
-            }
+            action={refreshStockButton}
+            items={config?.tanks.map(tank => ({
+              id: tank.id,
+              label: `${tank.code} · ${tank.product.code}`,
+              opening: Number(tank.openingStock),
+              balance: selected?.availableTankStock.find(reading => reading.id === tank.id),
+              lastClosingAt: selected?.lastClosing?.closedAt,
+            })) ?? []}
             values={openTanks}
-            onChange={(v) => replace(openTanks, v.id, v.value, setOpenTanks)}
+            onChange={v => {
+              editedOpeningTanks.current.add(v.id);
+              replace(openTanks, v.id, v.value, setOpenTanks);
+            }}
           />
           <label className="field">
             <span>Opening note (optional)</span>
@@ -684,7 +697,7 @@ export function OperationsPage() {
           </label>
           <button
             className="primary"
-            disabled={saving || !stationId}
+            disabled={saving || refreshingStock || !stationId}
             onClick={() => void open()}
           >
             <Play size={17} /> Open shift
@@ -702,6 +715,7 @@ export function OperationsPage() {
           </p>
         </article>
       </section>
+      {stationId && <ReceiptHistory key={stationId} stationId={stationId} tolerance={data.stockVarianceTolerance} />}
       <section className="recent-shifts">
         <h2>Recent shifts</h2>
         {data.shifts
@@ -726,17 +740,119 @@ export function OperationsPage() {
     </main>
   );
 }
-function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance, onChange }: {
+function receiptPeriod(receipt: ShiftReceipt) {
+  if (receipt.period === "OVERLAP") return "Overlapping shifts · review timing";
+  if (receipt.period === "DURING") return `Received during shift #${receipt.shiftNumber}`;
+  if (receipt.shiftNumber !== null) {
+    return receipt.period === "BEFORE_FIRST" ? `Before the first shift · #${receipt.shiftNumber}` : `Between shifts · before shift #${receipt.shiftNumber}`;
+  }
+  return receipt.period === "BEFORE_FIRST" ? "Before the first shift" : "Between shifts · awaiting next opening";
+}
+
+function ReceiptHistory({ stationId, tolerance }: { stationId: string; tolerance: number }) {
+  const [receipts, setReceipts] = useState<ShiftReceipt[] | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [shift, setShift] = useState<ShiftDetail | null>(null);
+  const [loadingShift, setLoadingShift] = useState(false);
+
+  async function load(before?: string) {
+    setLoading(true);
+    setError("");
+    if (!before) setShift(null);
+    try {
+      const page = await api.tankReceiptHistory(stationId, before);
+      setReceipts(current => before ? [...(current ?? []), ...page.receipts.filter(receipt => !current?.some(row => row.id === receipt.id))] : page.receipts);
+      setNextCursor(page.nextCursor);
+    } catch (error) {
+      setError(error instanceof ApiRequestError ? error.message : "Unable to load tank receipts. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function viewShift(shiftId: string) {
+    setLoadingShift(true);
+    setError("");
+    try {
+      setShift(await api.shiftDetails(shiftId));
+    } catch (error) {
+      setError(error instanceof ApiRequestError ? error.message : "Unable to load the shift readings. Try again.");
+    } finally {
+      setLoadingShift(false);
+    }
+  }
+
+  return <details className="recent-shifts operations-receipts" onToggle={event => {
+    if (event.currentTarget.open && receipts === null && !loading && !error) void load();
+  }}>
+    <summary>Tank receipt history</summary>
+    <p>See which deliveries arrived during a shift or between shifts, using their physical receipt times.</p>
+    <section className="operations-receipt-content" aria-busy={loading || loadingShift}>
+      {error && <p role="alert">{error}</p>}
+      <button className="secondary small" type="button" disabled={loading} onClick={() => void load()}>
+        <RefreshCw size={15} /> {loading ? "Loading receipts…" : "Refresh receipts"}
+      </button>
+      {receipts?.length === 0 && <p>No posted tank receipts for this fuel station.</p>}
+      {receipts?.length ? <ul>{receipts.map(receipt => <li key={receipt.id}>
+        <div>
+          <strong>{receipt.tank && receipt.product ? `${receipt.tank} · ${receipt.product}` : "Tank mapping needs review"} · {receipt.unit === "LITRE" ? litres(Number(receipt.quantity)) : Number(receipt.quantity).toLocaleString("en-IN")}</strong>
+          <small>{[receipt.reference, receipt.supplier, captured(receipt.occurredAt)].filter(Boolean).join(" · ")}</small>
+          <small>{receiptPeriod(receipt)}{receipt.correctedLate ? " · Receipt time corrected after readings were saved" : receipt.recordedLate ? " · Recorded after readings were saved" : ""}</small>
+          {receipt.tankInShift === false && <small>That shift has no saved reading for this tank. The receipt is in book stock.</small>}
+          {receipt.receiptScopeMismatch && <small>The linked receipt belongs to a different fuel station or account. Review this stock movement.</small>}
+          {receipt.timingMismatch && <small>The purchase receipt time differs from the stock movement time. Review the source.</small>}
+        </div>
+        <div className="operations-receipt-actions">
+          {receipt.shiftId && <button className="secondary small" type="button" disabled={loadingShift} onClick={() => void viewShift(receipt.shiftId!)}>
+            View shift #{receipt.shiftNumber}
+          </button>}
+          {receipt.previousShift && <button className="secondary small" type="button" disabled={loadingShift} onClick={() => void viewShift(receipt.previousShift!.id)}>
+            View previously affected shift #{receipt.previousShift.number}
+          </button>}
+        </div>
+      </li>)}</ul> : null}
+      {nextCursor && <button className="secondary small" type="button" disabled={loading} onClick={() => void load(nextCursor)}>Show older receipts</button>}
+      {shift && <section className="operations-receipt-shift" ref={element => element?.scrollIntoView({ block: "nearest" })}>
+        <div className="operations-section-header">
+          <h3>Shift #{shift.shiftNumber} · {captured(shift.openedAt)}</h3>
+          <button type="button" className="secondary small" onClick={() => setShift(null)}>Close shift details</button>
+        </div>
+        {shift.openingStockReview.length > 0 && <>
+          <h4>Opening tank readings</h4>
+          <ul>{shift.openingStockReview.map(reading => <li key={reading.code}>
+            <div><strong>{reading.code}</strong><small>Receipts before opening {litres(Number(reading.received))} · Expected opening {litres(Number(reading.expectedOpening))} · Saved dip {litres(Number(reading.actual))}</small></div>
+          </li>)}</ul>
+        </>}
+        {shift.receiptTimingChanges.length > 0 && <ul>{shift.receiptTimingChanges.map(change => <li key={change.id}>
+          <div><strong>{change.receipt.referenceNo ?? "Stock receipt"} · Receipt time moved out of this shift</strong>
+          <small>Previously {captured(change.previousReceivedAt)} · Corrected to {captured(change.receivedAt)}</small></div>
+        </li>)}</ul>}
+        {shift.closedAt ? <ClosingStockBridge shift={shift}
+          actuals={shift.tankReadings.flatMap(reading => reading.closingDip === null ? [] : [{ id: reading.tankId, value: Number(reading.closingDip) }])}
+          closingMeters={shift.nozzleReadings.flatMap(reading => reading.closingMeter === null ? [] : [{ id: reading.nozzleId, value: Number(reading.closingMeter) }])}
+          testing={shift.nozzleReadings.map(reading => ({ id: reading.nozzleId, value: Number(reading.closingMeter), testingQuantity: Number(reading.testingQuantity), testingReturned: reading.testingReturned }))}
+          tolerance={tolerance}
+        /> : <p>This shift is open. The closing readings will be available here after it closes.</p>}
+      </section>}
+    </section>
+  </details>;
+}
+
+function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance, onChange, action }: {
   shift: Shift;
   actuals: Reading[];
   closingMeters: Reading[];
   testing: ClosingNozzleReading[];
   tolerance: number;
-  onChange(value: Reading): void;
+  onChange?(value: Reading): void;
+  action?: React.ReactNode;
 }) {
   return <section className="closing-stock-bridge">
     <div className="closing-stock-heading">
-      <div><h3>Closing tank readings</h3><p>Enter only the actual dip. The stock bridge is calculated from this shift.</p></div>
+      <div><h3>Closing tank readings</h3><p>{onChange ? "Enter the measured dip. Expected stock updates from this shift’s movements." : "Expected stock uses the saved opening dip and posted stock movements."}</p></div>
+      {action}
       <small>Allowed difference: {litres(tolerance)}</small>
     </div>
     <div className="stock-bridge-table">
@@ -744,27 +860,28 @@ function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance,
         <span>Tank</span><span>Opening</span><span>Received</span><span>Sales</span><span>Testing / loss</span><span>Expected</span><span>Actual dip</span><span>Difference</span>
       </div>
       {shift.tankReadings.map((reading) => {
-        const actual = actuals.find((item) => item.id === reading.tankId)?.value ?? Number(reading.openingDip);
-        const bridge = bridgeValues(shift, reading.tankId, actual, closingMeters, testing);
-        const outside = Math.abs(bridge.difference) > tolerance + 0.001;
+        const actual = actuals.find((item) => item.id === reading.tankId)?.value ?? (onChange ? Number(reading.openingDip) : null);
+        const bridge = bridgeValues(shift, reading.tankId, actual ?? 0, closingMeters, testing);
+        const outside = actual !== null && Math.abs(bridge.difference) > tolerance + 0.001;
         return <div className={`stock-bridge-row ${outside ? "has-variance" : ""}`} key={reading.tankId}>
           <span className="stock-bridge-tank" data-label="Tank"><b>{reading.tank.code}</b><small>{reading.tank.product.code}</small></span>
           <span data-label="Opening">{litres(Number(reading.openingDip))}</span>
           <span data-label="Received">
             <b>{litres(Number(reading.stockBridge.received))}</b>
-            {reading.stockBridge.deliveries.length > 0 && <details><summary>View {reading.stockBridge.deliveries.length} {reading.stockBridge.deliveries.length === 1 ? "delivery" : "deliveries"}</summary>{reading.stockBridge.deliveries.map((delivery) => <small key={delivery.id}>{delivery.reference} · {delivery.supplier} · {litres(Number(delivery.quantity))}</small>)}</details>}
+            {reading.stockBridge.deliveries.length > 0 && <details><summary>View {reading.stockBridge.deliveries.length} {reading.stockBridge.deliveries.length === 1 ? "delivery" : "deliveries"}</summary>{reading.stockBridge.deliveries.map((delivery) => <small key={delivery.id}>{[delivery.reference, delivery.supplier, litres(Number(delivery.quantity)), captured(delivery.occurredAt), delivery.correctedLate ? "Time corrected after closing" : delivery.recordedLate ? "Recorded after closing" : null].filter(Boolean).join(" · ")}</small>)}</details>}
           </span>
           <span data-label="Sales">
             <b>{litres(bridge.sales)}</b>
-            {bridge.contributions.length > 0 && <details><summary>View nozzles</summary>{bridge.contributions.map((item) => <small key={item.id}>{item.code} · {litres(item.sales)}</small>)}</details>}
+            {onChange && bridge.contributions.length > 0 && <details><summary>View nozzles</summary>{bridge.contributions.map((item) => <small key={item.id}>{item.code} · {litres(item.sales)}</small>)}</details>}
           {Number(reading.stockBridge.counterSales ?? 0) > 0 && <small>Includes {litres(Number(reading.stockBridge.counterSales))} counter sales</small>}</span>
           <span data-label="Testing / loss">
             <b>{litres(bridge.testingLoss)}</b>
             <small>{bridge.testingLoss > 0 ? "Not returned" : "No stock consumed"}</small>
           </span>
           <span data-label="Expected"><b>{litres(bridge.expected)}</b>{Math.abs(Number(reading.stockBridge.adjustments)) > 0.001 && <small>Includes {Number(reading.stockBridge.adjustments) > 0 ? "+" : ""}{litres(Number(reading.stockBridge.adjustments))} approved adjustments</small>}</span>
-          <label data-label="Actual dip"><input aria-label={`Actual closing dip in litres for ${reading.tank.code}`} type="number" min="0" step="0.001" value={actual} onChange={(event) => onChange({ id: reading.tankId, value: Number(event.target.value) })}/></label>
-          <span className={outside ? "stock-difference variance" : "stock-difference"} data-label="Difference"><b>{bridge.difference > 0 ? "+" : ""}{litres(bridge.difference)}</b><small>{outside ? "Explain in closing note" : "Within tolerance"}</small></span>
+          {onChange ? <label data-label="Actual dip"><input aria-label={`Actual closing dip in litres for ${reading.tank.code}`} type="number" min="0" step="0.001" value={actual ?? ""} onChange={(event) => onChange({ id: reading.tankId, value: Number(event.target.value) })}/></label>
+            : <span data-label="Actual dip">{actual === null ? "Unavailable" : litres(actual)}</span>}
+          <span className={outside ? "stock-difference variance" : "stock-difference"} data-label="Difference"><b>{actual === null ? "—" : `${bridge.difference > 0 ? "+" : ""}${litres(bridge.difference)}`}</b>{actual !== null && <small>{outside ? (onChange ? "Explain in closing note" : "Outside tolerance") : "Within tolerance"}</small>}</span>
         </div>;
       })}
     </div>
@@ -777,36 +894,39 @@ function Readings({
   values,
   onChange,
   locked = false,
+  action,
 }: {
   title: string;
-  items: Array<{ id: string; label: string; opening: number; received?: number; lastActual?: number; receivedBetween?: number; adjustmentsBetween?: number; expectedOpening?: number }>;
+  items: Array<{ id: string; label: string; opening: number; balance?: ShiftStation["availableTankStock"][number] | undefined; lastClosingAt?: string | undefined }>;
   values: Reading[];
   onChange(value: Reading): void;
   locked?: boolean;
+  action?: React.ReactNode;
 }) {
   return (
     <section className="shift-readings">
-      <h3>{title}</h3>
+      <div className="operations-section-header"><h3>{title}</h3>{action}</div>
       {items.map((item) => {
         const value = values.find((v) => v.id === item.id)?.value ?? 0;
         return (
           <label key={item.id}>
             <span>
               <strong>{item.label}</strong>
-              <small>
-                {locked
-                  ? "Automatically from previous shift closing"
-                  : `Opening: ${item.opening.toLocaleString()}`}
-              </small>
-              {!locked && (item.received ?? 0) > 0 && <small>Received during shift: {item.received!.toLocaleString("en-IN")} L</small>}
-              {!locked && item.lastActual !== undefined && item.lastActual > 0 && <small>Last actual: {item.lastActual.toLocaleString("en-IN")} L · Between shifts: +{(item.receivedBetween ?? 0).toLocaleString("en-IN")} L receipts · {(item.adjustmentsBetween ?? 0).toLocaleString("en-IN")} L adjustments · Expected: {(item.expectedOpening ?? 0).toLocaleString("en-IN")} L</small>}
+              {item.balance ? <>
+                <small>{item.balance.lastActual == null ? "Using book stock before opening" : `Last actual closing ${litres(Number(item.balance.lastActual))} · ${captured(item.lastClosingAt!)}`}</small>
+                <small>{item.balance.lastActual == null ? "Receipts before opening" : "Received between shifts"} {litres(Number(item.balance.received))} · Adjustments {litres(Number(item.balance.adjustments))}{Number(item.balance.netOther) !== 0 && ` · Other movements ${litres(Number(item.balance.netOther))}`}</small>
+                <small><b>Expected opening {litres(Number(item.balance.expectedOpening))}</b> · Book stock now {litres(Number(item.balance.value))}</small>
+                {Math.abs(value - Number(item.balance.expectedOpening)) > 0.001 && <small>Actual dip differs by {litres(value - Number(item.balance.expectedOpening))}. Add an opening note.</small>}
+              </> : <small>{locked ? "Automatically from previous shift closing" : `Opening ${litres(item.opening)}`}</small>}
             </span>
             {locked ? (
               <output>{value.toLocaleString("en-IN")} L</output>
             ) : (
               <input
+                aria-label={`Actual opening dip in litres for ${item.label}`}
                 type="number"
                 min="0"
+                step="0.001"
                 value={value}
                 onChange={(e) =>
                   onChange({ id: item.id, value: Number(e.target.value) })

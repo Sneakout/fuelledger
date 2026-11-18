@@ -60,3 +60,29 @@
 @container(max-width:760px){.nozzle-closing-table{border:0;background:transparent}.nozzle-closing-head{display:none}.nozzle-closing-row{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:10px;padding:15px;border:1px solid var(--line);border-radius:12px;background:#fff}.nozzle-closing-row:last-child{margin-bottom:0}.nozzle-closing-row>span,.nozzle-closing-row>label{margin-right:0}.nozzle-identity{grid-column:1/2}.nozzle-attendant{grid-column:2/4}.nozzle-closing-row [data-label]::before{content:attr(data-label);display:block;margin-bottom:5px;color:var(--muted);font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:.05em}.nozzle-closing-row label[data-label]{display:grid;overflow:visible;border:0}.nozzle-closing-row label[data-label] input{height:38px;border:1px solid #bfd3c8;border-radius:9px}.opening-meter::before{content:"Opening meter (L)";display:block;margin-bottom:5px;color:var(--muted);font-size:7px;font-weight:900;text-transform:uppercase;letter-spacing:.05em}.opening-meter{align-self:end;padding:0 2px 10px}.testing-entry-fields{grid-template-columns:1fr 1.5fr}.testing-entry-fields p{grid-column:1/-1}}
 @media(max-width:520px){.nozzle-closing-heading{align-items:flex-start;flex-direction:column}.nozzle-closing-heading>span{align-items:flex-start}}
 @container(max-width:430px){.nozzle-closing-row{grid-template-columns:1fr 1fr}.nozzle-identity{grid-column:1/-1}.nozzle-attendant{grid-column:1/-1}.collection-field{grid-column:1/-1}.testing-entry-fields{grid-template-columns:1fr}.testing-entry-fields p{grid-column:auto}.testing-entry-fields fieldset{flex-wrap:wrap}}
+
+.operations-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.operations-receipts > summary { cursor: pointer; color: var(--ink); font-size: 18px; font-weight: 800; }
+.operations-receipt-content { color: var(--muted); font-size: 13px; }
+.operations-receipt-content ul { list-style: none; margin: 14px 0; padding: 0; }
+.operations-receipt-content li {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  overflow-wrap: anywhere;
+}
+.operations-receipt-content li strong { display: block; color: var(--ink); }
+.operations-receipt-content li small { display: block; font-size: 12px; line-height: 1.5; }
+.operations-receipt-shift { margin-top: 18px; color: var(--ink); }
+.operations-receipt-shift .closing-stock-bridge { margin-top: 4px; }
+.operations-receipt-actions { display: flex; flex-wrap: wrap; gap: 8px; }

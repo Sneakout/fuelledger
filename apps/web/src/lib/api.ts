@@ -319,6 +319,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  shiftDetails: (id: string) => request<ShiftDetail>(`/shifts/${encodeURIComponent(id)}`),
+  tankReceiptHistory: (stationId: string, before?: string) => request<{ receipts: ShiftReceipt[]; nextCursor: string | null }>(
+    `/shifts/stations/${encodeURIComponent(stationId)}/receipts${before ? `?before=${encodeURIComponent(before)}` : ""}`,
+  ),
   shiftBootstrap: () => request<ShiftBootstrap>("/shifts/bootstrap"),
   openShift: (input: ShiftOpenForm) =>
     request<{ shift: Shift }>("/shifts/open", {
@@ -822,7 +826,15 @@ export type ShiftStation = {
   id: string;
   name: string;
   code: string;
-  availableTankStock: Array<{ id: string; value: string }>;
+  availableTankStock: Array<{
+    id: string;
+    value: string;
+    lastActual: string | null;
+    received: string;
+    adjustments: string;
+    netOther: string;
+    expectedOpening: string;
+  }>;
   lastClosing: {
     nozzleAssignments: Array<{ nozzleId: string; userId: string }>;
     shiftId: string;
@@ -854,6 +866,27 @@ export type ShiftStation = {
     }>;
   }>;
 };
+export type ShiftDelivery = {
+  id: string;
+  quantity: string;
+  occurredAt: string;
+  reference: string;
+  supplier: string | null;
+  recordedLate: boolean;
+  correctedLate: boolean;
+};
+export type ShiftReceipt = ShiftDelivery & {
+  period: "DURING" | "GAP" | "BEFORE_FIRST" | "OVERLAP";
+  shiftId: string | null;
+  shiftNumber: number | null;
+  tankInShift: boolean | null;
+  previousShift: { id: string; number: number } | null;
+  receiptScopeMismatch: boolean;
+  tank: string | null;
+  product: string | null;
+  unit: string | null;
+  timingMismatch: boolean;
+};
 export type Shift = {
   id: string;
   shiftNumber: number;
@@ -883,9 +916,11 @@ export type Shift = {
     receivedDuringShift: string;
     stockBridge: {
       counterSales?: string;
+      postedSales?: string;
+      postedTestingLoss?: string;
       received: string;
       adjustments: string;
-      deliveries: Array<{ id: string; quantity: string; occurredAt: string; reference: string; supplier: string }>;
+      deliveries: ShiftDelivery[];
       adjustmentDetails: Array<{ id: string; quantity: string; note: string | null; occurredAt: string }>;
       nozzles: Array<{ id: string; code: string; counter?: boolean }>;
     };
@@ -908,6 +943,10 @@ export type Shift = {
     tanksCaptured: number;
     nozzlesCaptured: number;
   };
+};
+export type ShiftDetail = Shift & {
+  openingStockReview: Array<{ code: string; actual: string; received: string; expectedOpening: string }>;
+  receiptTimingChanges: Array<{ id: string; previousReceivedAt: string; receivedAt: string; receipt: { referenceNo: string | null } }>;
 };
 export type ShiftBootstrap = {
   stockVarianceTolerance: number;
