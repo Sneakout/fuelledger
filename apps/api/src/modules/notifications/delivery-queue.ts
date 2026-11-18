@@ -103,9 +103,10 @@ async function approval(name: string, expectedBody: string) {
   return 'unavailable';
 }
 
-export async function drainWhatsAppQueue(now = new Date(), options: { previewOnly?: boolean } = {}) {
+export async function drainWhatsAppQueue(now = new Date(), options: { previewOnly?: boolean; organizationId?: string; deliveryId?: string } = {}) {
   const totals = { accepted: 0, retried: 0, failed: 0, suppressed: 0, recovered: 0, deferred: 0 };
-  const expired = { status: 'PROCESSING' as const, leaseUntil: { lte: now } };
+  const scope = { ...(options.organizationId ? { organizationId: options.organizationId } : {}), ...(options.deliveryId ? { id: options.deliveryId } : {}) };
+  const expired = { ...scope, status: 'PROCESSING' as const, leaseUntil: { lte: now } };
   totals.failed += (await prisma.ownerNotificationDelivery.updateMany({
     where: { ...expired, dispatchStartedAt: { not: null } },
     data: { status: 'FAILED', failureKind: 'UNCERTAIN', failedAt: now, leaseUntil: null, errorMessage: 'The sender stopped after dispatch began. Await a verified Meta update.' },
@@ -115,7 +116,7 @@ export async function drainWhatsAppQueue(now = new Date(), options: { previewOnl
     data: { status: 'PENDING', leaseUntil: null, callbackKey: null },
   })).count;
   const jobs = await prisma.ownerNotificationDelivery.findMany({
-    where: { status: 'PENDING', availableAt: { lte: now } }, orderBy: [{ availableAt: 'asc' }, { id: 'asc' }], take: 5,
+    where: { ...scope, status: 'PENDING', availableAt: { lte: now } }, orderBy: [{ availableAt: 'asc' }, { id: 'asc' }], take: 5,
   });
   for (const job of jobs) {
     const callbackKey = randomUUID();

@@ -162,11 +162,21 @@ platformRouter.post("/customers/:id/notifications/deliveries/:deliveryId/approve
   await approveRolloutPreview(req.params.id!, req.params.deliveryId!, input.data.hash, req.user!.id);
   res.status(204).end();
 });
+platformRouter.post("/customers/:id/notifications/deliveries/:deliveryId/process", async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const job = await prisma.ownerNotificationDelivery.findFirst({ where: { id: req.params.deliveryId!, organizationId: req.params.id! }, select: { id: true } });
+  if (!job) throw new AppError(404, "DELIVERY_NOT_FOUND", "This message was not found for this owner.");
+  res.json(await drainWhatsAppQueue(new Date(), { organizationId: req.params.id!, deliveryId: job.id }));
+});
 platformRouter.post("/customers/:id/notifications/test", async (req, res) => {
   requirePlatformAdmin(req.user!.email);
   const customer = await prisma.organization.findUnique({ where: { id: req.params.id! }, select: { id: true } });
   if (!customer) throw new AppError(404, "CUSTOMER_NOT_FOUND", "This customer account was not found.");
-  res.json({ delivery: await (req.body?.welcome === true ? sendWelcomeTest(customer.id) : sendTestNotification(customer.id)) });
+  const delivery = await (req.body?.welcome === true ? sendWelcomeTest(customer.id) : sendTestNotification(customer.id));
+  if (delivery.status === 'QUEUED' && delivery.id) {
+    await drainWhatsAppQueue(new Date(), { previewOnly: true, organizationId: customer.id, deliveryId: delivery.id });
+  }
+  res.json({ delivery });
 });
 platformRouter.get("/customers/:id/notifications/deliveries", async (req, res) => {
   requirePlatformAdmin(req.user!.email);

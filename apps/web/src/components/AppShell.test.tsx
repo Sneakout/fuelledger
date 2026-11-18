@@ -72,6 +72,13 @@ describe('workspace navigation', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('shows Growth Desk as a primary destination only for administrators', () => {
+    mocks.user.isPlatformAdmin = true;
+    openAt('/demo-leads');
+    expect(primary().getByRole('link', { name: 'Growth Desk' })).toHaveAttribute('aria-current', 'location');
+    expect(screen.queryByRole('navigation', { name: 'Settings navigation' })).toBeNull();
+  });
+
   it('keeps nested routes in their section and exposes mobile More', () => {
     mocks.user.role = 'MANAGER';
     openAt('/sales/history/import');

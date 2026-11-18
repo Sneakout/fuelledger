@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import { OwnerWhatsAppWorkspace } from './OwnerWhatsAppWorkspace';
 import { ChevronDown, Eye, Pause, RefreshCw, Send, ShieldCheck } from 'lucide-react';
 import { api, ApiRequestError, type PlatformCustomer, type WhatsAppRolloutPolicy, type WhatsAppRolloutSnapshot } from '../lib/api';
 
-const stages = { SHADOW: 'Shadow', INTERNAL: 'Internal test', PILOT: 'Owner pilot', EXPANDED: 'Expanded delivery' };
+const stages = { SHADOW: 'Preview only (no sending)', INTERNAL: 'Test with one owner', PILOT: 'Pilot with up to five owners', EXPANDED: 'Enabled owner accounts' };
 const auditLabels: Record<string, string> = { SET_ROLLOUT: 'Delivery settings saved', PAUSE_ALL: 'All WhatsApp delivery paused', APPROVE_MESSAGE: 'Message preview approved' };
 const labels = {
   LOW_STOCK: 'Low stock', SHIFT_CLOSED_SUMMARY: 'Shift summaries', PURCHASE_RECEIPT_SUMMARY: 'Receipt summaries',
@@ -47,7 +48,7 @@ export function WhatsAppRolloutPanel({ customers }: { customers: PlatformCustome
   const accounts = customers.filter(account => account.notificationSettings.whatsappOptedIn || draft?.organizationIds.includes(account.id));
   const deliveryPaused = !snapshot || snapshot.policy.paused || snapshot.policy.stage === 'SHADOW';
   return <section className="leads-list whatsapp-rollout" aria-label="WhatsApp rollout">
-    <header><div><h2>WhatsApp rollout</h2>{snapshot && <span className="rollout-status" data-paused={deliveryPaused}>
+    <header><div><h2>Owner WhatsApp</h2><p>Choose an owner, preview a message and check delivery in one place.</p>{snapshot && <span className="rollout-status" data-paused={deliveryPaused}>
       <ShieldCheck size={14} aria-hidden="true" />{stages[snapshot.policy.stage]} · {deliveryPaused ? 'Sending paused' : 'Approved messages can send'}
     </span>}</div>
       <button type="button" className="secondary small rollout-pause" disabled={pausing} onClick={() => void pause()}><Pause size={16} aria-hidden="true" />{pausing ? 'Pausing…' : 'Pause all WhatsApp'}</button>
@@ -55,6 +56,12 @@ export function WhatsAppRolloutPanel({ customers }: { customers: PlatformCustome
     <div className="rollout-body">
       {error && <p className="form-error" role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}
+      {snapshot && <OwnerWhatsAppWorkspace customers={customers} policy={snapshot.policy} onTestSetup={async ownerId => {
+        await api.saveWhatsAppRollout({ ...snapshot.policy, stage: 'INTERNAL', paused: false, organizationIds: [ownerId], enabledCategories: ['SYSTEM_TEST', 'OWNER_WELCOME'] });
+        await refresh();
+      }} />}
+      <details className="wa-advanced"><summary>Advanced settings · live alerts & rollout <ChevronDown size={16}/></summary>
+      <p>These controls apply across the platform. Choose enabled owners and categories here when moving beyond a single-owner test. Owner preferences and plan eligibility still apply.</p>
       {draft && <form onSubmit={event => { event.preventDefault(); void act(async () => { await api.saveWhatsAppRollout(draft); return 'Delivery settings saved.'; }); }}>
         <div className="rollout-fields">
           <div className="rollout-accounts">
@@ -91,6 +98,7 @@ export function WhatsAppRolloutPanel({ customers }: { customers: PlatformCustome
         })}><Send size={16} aria-hidden="true" />Process approved messages</button>
         <button type="button" className="secondary small" disabled={busy} onClick={() => void act(async () => 'Delivery results refreshed.')}><RefreshCw size={16} aria-hidden="true" />Refresh results</button>
       </div>
+      </details>
       {snapshot && <details><summary>Delivery outcomes in the last 24 hours <ChevronDown size={16} aria-hidden="true" /></summary>
         {snapshot.outcomes.length ? <ul>{snapshot.outcomes.map(outcome => {
           const reason = outcome.rolloutHold ?? outcome.suppressionReason ?? outcome.failureKind;

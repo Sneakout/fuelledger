@@ -589,6 +589,8 @@ export const api = {
   pauseWhatsAppRollout: () =>
     request<{ policy: WhatsAppRolloutPolicy }>("/platform/whatsapp-rollout/pause", { method: "POST" }),
   generateWhatsAppPreviews: () => request<{ previews: { deferred: number } }>("/platform/whatsapp-rollout/preview", { method: "POST" }),
+  processOwnerWhatsApp: (organizationId: string, deliveryId: string) =>
+    request<{ accepted: number; failed: number; deferred: number; suppressed: number }>(`/platform/customers/${organizationId}/notifications/deliveries/${deliveryId}/process`, { method: "POST" }),
   processApprovedWhatsApp: () => request<{ accepted: number; failed: number; deferred: number; suppressed: number }>("/platform/whatsapp-rollout/process-approved", { method: "POST" }),
   approveWhatsAppPreview: (organizationId: string, deliveryId: string, hash: string) =>
     request<void>(`/platform/customers/${organizationId}/notifications/deliveries/${deliveryId}/approve-preview`,

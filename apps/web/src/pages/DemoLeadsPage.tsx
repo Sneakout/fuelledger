@@ -1,84 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
-import { BadgeCheck, Building2, Clipboard, ExternalLink, LifeBuoy, Mail, MessageCircleMore, Phone, Save, Sparkles, Users } from "lucide-react";
+import { BadgeCheck, Building2, Clipboard, ExternalLink, LifeBuoy, Mail, Phone, Save, Sparkles, Users } from "lucide-react";
 import { ApiRequestError, api, type DemoLeadsBootstrap, type PlatformCustomer, type PlatformCustomersBootstrap, type PlatformServiceTicket, type ServiceTicketStatus, type SubscriptionBillingPeriod, type SubscriptionPlan } from "../lib/api";
 import { WhatsAppRolloutPanel } from "./WhatsAppRolloutPanel";
 import { useAuth } from "../components/AuthProvider";
-import type { AdminWhatsAppDelivery } from "../lib/api";
 
 const dateTime = (value: string) => new Date(value).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
-
-function CustomerWhatsAppSettings({ customer }: { customer: PlatformCustomer }) {
-  const settings = customer.notificationSettings;
-  const [testing, setTesting] = useState(false);
-  const [message, setMessage] = useState("");
-  const [deliveries, setDeliveries] = useState<AdminWhatsAppDelivery[]>([]);
-  const [retrying, setRetrying] = useState<string | null>(null);
-  async function refreshDeliveries() {
-    try { setDeliveries((await api.customerWhatsAppDeliveries(customer.id)).deliveries); }
-    catch { setMessage("Could not load WhatsApp delivery history."); }
-  }
-  async function approve(delivery: AdminWhatsAppDelivery) {
-    if (!delivery.previewHash) return;
-    setRetrying(delivery.id);
-    try {
-      await api.approveWhatsAppPreview(customer.id, delivery.id, delivery.previewHash);
-      setMessage("Preview approved. The rollout controls govern when it can send.");
-      await refreshDeliveries();
-    } catch (error) { setMessage(error instanceof ApiRequestError ? error.message : "Could not approve this preview."); }
-    finally { setRetrying(null); }
-  }
-  async function retry(deliveryId: string) {
-    setRetrying(deliveryId);
-    try {
-      await api.retryCustomerWhatsAppDelivery(customer.id, deliveryId);
-      setMessage("Retry queued.");
-      await refreshDeliveries();
-    } catch (error) {
-      setMessage(error instanceof ApiRequestError ? error.message : "Could not queue a safe retry.");
-    } finally { setRetrying(null); }
-  }
-  async function test(welcome = false) {
-    setTesting(true); setMessage("");
-    try {
-      const result = await api.testCustomerWhatsApp(customer.id, welcome);
-      setMessage(result.delivery.status === "QUEUED" ? "Test message queued. Check delivery history for its status." : result.delivery.reason ?? "Test message was not queued");
-      await refreshDeliveries();
-    } catch (error) {
-      setMessage(error instanceof ApiRequestError ? error.message : "Unable to send the test message.");
-    } finally { setTesting(false); }
-  }
-  return <details className="admin-whatsapp" onToggle={event => { if (event.currentTarget.open) void refreshDeliveries(); }}>
-    <summary><MessageCircleMore/><span><b>WhatsApp alerts</b><small>{settings.whatsappOptedIn && settings.whatsappNumber ? `Active · +${settings.whatsappNumber}` : "Not active"}</small></span></summary>
-    <div className="admin-whatsapp-body">
-      <p>Owners manage WhatsApp preferences in their account.</p>
-      <div className="admin-whatsapp-action">
-        {settings.whatsappOptedIn && settings.whatsappNumber && <>
-          <button type="button" className="secondary small" disabled={testing} onClick={() => void test()}><MessageCircleMore size={14}/>Prepare test preview</button>
-          <button type="button" className="secondary small" disabled={testing} onClick={() => void test(true)}><MessageCircleMore size={14}/>Prepare welcome preview</button>
-        </>}
-        {(testing || message) && <small role="status">{testing ? "Queuing preview…" : message}</small>}
-      </div>
-      <div>
-        <button type="button" className="secondary small" onClick={() => void refreshDeliveries()}>Refresh delivery history</button>
-        {deliveries.map(delivery => <div key={delivery.id}>
-          <b>{delivery.type.toLowerCase().replaceAll("_", " ")}</b>
-          <span> · {delivery.status === "SENT" ? "Accepted (legacy)" : delivery.status.toLowerCase()} · {dateTime(delivery.createdAt)} · {delivery.attempts} attempts</span>
-          {(delivery.errorMessage || delivery.suppressionReason) && <p>{delivery.errorMessage ?? delivery.suppressionReason?.replaceAll("_", " ")}</p>}
-          {delivery.rolloutHold && <p>{delivery.rolloutHold.replaceAll("_", " ")}</p>}
-          {delivery.previewTemplate && <details open={delivery.status === "PENDING"}>
-            <summary>Message preview · recipient ending {delivery.recipientEnding}</summary>
-            <p>{delivery.previewTemplate}{delivery.sourceId ? ` · Source record ${delivery.sourceId}` : ""}</p>
-            <p className="admin-whatsapp-preview">{delivery.previewBody || "Uses the configured test template with no inserted text."}</p>
-            {delivery.status === "PENDING" && delivery.previewHash && (delivery.previewHash === delivery.approvedPreviewHash
-              ? <small>Preview approved</small>
-              : <button type="button" className="secondary small" disabled={retrying !== null} onClick={() => void approve(delivery)}>Approve preview</button>)}
-          </details>}
-          {delivery.canRetry && <button type="button" className="secondary small" disabled={retrying !== null} onClick={() => void retry(delivery.id)}>Retry delivery</button>}
-        </div>)}
-      </div>
-    </div>
-  </details>;
-}
 
 function CustomerActivation({ customer, onSaved }: { customer: PlatformCustomer; onSaved(): Promise<void> }) {
   const initialPlan: SubscriptionPlan = customer.subscriptionPlan ?? (customer.intelligenceEnabledAt ? "CORE_INTELLIGENCE" : "CORE");
@@ -121,7 +47,7 @@ function CustomerActivation({ customer, onSaved }: { customer: PlatformCustomer;
         <label><input type="checkbox" checked={setupFeePaid} onChange={(event) => setSetupFeePaid(event.target.checked)} /><span><b>Optional assisted setup paid</b><small>{customer.setupFeePaidAt ? `Confirmed ${dateTime(customer.setupFeePaidAt)}` : "₹2,000 once"}</small></span></label>
         <label className="payment-confirm"><input type="checkbox" checked={paymentConfirmed} onChange={(event) => setPaymentConfirmed(event.target.checked)} /><span><b>Plan payment verified</b><small>Activates exactly the plan and billing choice above</small></span></label>
       </div>
-      <CustomerWhatsAppSettings customer={customer}/>
+
     </div>
     <div className="activation-action">
       {customer.subscriptionActivatedAt || customer.lifetimeAccessPaidAt || customer.intelligenceEnabledAt ? <em><BadgeCheck /> {customer.subscriptionPlan === "CORE_INTELLIGENCE" || customer.intelligenceEnabledAt ? "Intelligence active" : "Core active"}</em> : <em className="pending">Awaiting approval</em>}

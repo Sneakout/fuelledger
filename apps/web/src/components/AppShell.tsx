@@ -15,6 +15,7 @@ type Section = { label: string; icon: typeof Fuel; links: Destination[]; access?
 
 const sections: Section[] = [
   { label: 'Dashboard', icon: LayoutDashboard, mobile: true, links: [{ label: 'Dashboard', to: '/' }] },
+  { label: 'Growth Desk', icon: Building2, access: 'admin', links: [{ label: 'Growth Desk', to: '/demo-leads' }] },
   { label: 'Nerve Intelligence', icon: Lightbulb, access: 'intelligence', links: [
     { label: 'Daily Brief', to: '/insights/daily-brief' }, { label: 'Agents', to: '/insights' },
   ] },
@@ -33,7 +34,7 @@ const sections: Section[] = [
   { label: 'Settings', icon: Settings, links: [
     { label: 'Fuel stations & equipment', to: '/stations' }, { label: 'Staff & access', to: '/staff', access: 'owner' },
     { label: 'WhatsApp alerts', to: '/notifications', access: 'liveOwner' }, { label: 'Subscription', to: '/subscription', access: 'owner' },
-    { label: 'My account', to: '/account', access: 'liveAccount' }, { label: 'User guide', to: '/help/guide' }, { label: 'Help & support', to: '/help' }, { label: 'Growth Desk', to: '/demo-leads', access: 'admin' },
+    { label: 'My account', to: '/account', access: 'liveAccount' }, { label: 'User guide', to: '/help/guide' }, { label: 'Help & support', to: '/help' },
   ] },
 ];
 

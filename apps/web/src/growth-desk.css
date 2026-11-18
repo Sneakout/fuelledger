@@ -97,3 +97,28 @@
 
 .admin-whatsapp-action { flex-wrap: wrap; }
 .admin-whatsapp-preview { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Owner-first WhatsApp workflow */
+.whatsapp-rollout > header p,.wa-history-heading p,.wa-advanced > p { color:var(--muted);font-size:13px;line-height:1.6;margin:6px 0; }
+.owner-whatsapp-workspace { display:grid;gap:20px; }
+.owner-whatsapp-workspace > .field { max-width:720px; }
+.wa-steps { display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px; }
+.wa-steps > section,.wa-message { padding:20px;border:1px solid var(--line);border-radius:16px;background:#fbfdfc;min-width:0; }
+.wa-steps h3,.wa-history-heading h3 { margin:10px 0 8px;color:var(--forest);font-size:18px;line-height:1.35; }
+.wa-steps p,.wa-message p { color:var(--muted);font-size:13px;line-height:1.65;overflow-wrap:anywhere; }
+.wa-steps strong { color:var(--forest);font-size:15px; }
+.wa-steps .eyebrow { font-size:11px; }
+.wa-steps .rollout-actions { border:0;padding:0; }
+.wa-feedback { padding:12px 15px;border-radius:10px;background:var(--mint);color:var(--forest);font-size:13px;line-height:1.6; }
+.wa-history-heading,.wa-message > header { display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap; }
+.wa-message-list { display:grid;gap:12px; }
+.wa-message h4 { margin:0;font-size:16px;color:var(--forest); }
+.wa-message .wa-message-meta { font-size:12px; }
+.wa-message .admin-whatsapp-preview { padding:18px;background:#eef7f1;border-radius:12px;color:var(--forest);white-space:pre-wrap; }
+.wa-message details,.wa-advanced { font-size:13px;color:var(--muted); }
+.wa-message summary,.wa-advanced > summary { cursor:pointer;font-weight:750;color:var(--forest); }
+.wa-advanced { margin-top:24px;padding-top:16px;border-top:1px solid var(--line); }
+.wa-advanced > summary { display:flex;justify-content:space-between;gap:12px;padding:10px 0;font-size:14px; }
+.wa-advanced form { margin-top:16px; }
+@media(max-width:1100px) { .wa-steps { grid-template-columns:1fr; } }
+@media(prefers-reduced-motion:reduce) { .owner-whatsapp-workspace * { transition:none!important;animation:none!important; } }
