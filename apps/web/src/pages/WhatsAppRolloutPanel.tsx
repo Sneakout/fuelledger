@@ -12,7 +12,7 @@ const labels = {
   OWNER_WELCOME: 'Owner welcome',
 };
 
-export function WhatsAppRolloutPanel({ customers }: { customers: PlatformCustomer[] }) {
+export function WhatsAppRolloutPanel({ customers, onRefreshCustomers }: { customers: PlatformCustomer[]; onRefreshCustomers(): Promise<void> }) {
   const [snapshot, setSnapshot] = useState<WhatsAppRolloutSnapshot>();
   const [draft, setDraft] = useState<WhatsAppRolloutPolicy>();
   const [busy, setBusy] = useState(false);
@@ -20,7 +20,7 @@ export function WhatsAppRolloutPanel({ customers }: { customers: PlatformCustome
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const refresh = async () => {
-    const result = await api.whatsappRollout();
+    const [result] = await Promise.all([api.whatsappRollout(), onRefreshCustomers()]);
     setSnapshot(result);
     setDraft(result.policy);
   };
@@ -56,7 +56,7 @@ export function WhatsAppRolloutPanel({ customers }: { customers: PlatformCustome
     <div className="rollout-body">
       {error && <p className="form-error" role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}
-      {snapshot && <OwnerWhatsAppWorkspace customers={customers} policy={snapshot.policy} onTestSetup={async ownerId => {
+      {snapshot && <OwnerWhatsAppWorkspace customers={customers} policy={snapshot.policy} onRefresh={refresh} onTestSetup={async ownerId => {
         await api.saveWhatsAppRollout({ ...snapshot.policy, stage: 'INTERNAL', paused: false, organizationIds: [ownerId], enabledCategories: ['SYSTEM_TEST', 'OWNER_WELCOME'] });
         await refresh();
       }} />}

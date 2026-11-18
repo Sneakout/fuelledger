@@ -10,7 +10,7 @@ const job = { id:'job-a',type:'OWNER_WELCOME',status:'PENDING',createdAt:new Dat
 beforeEach(() => { vi.resetAllMocks(); mock.history.mockResolvedValue({deliveries:[job]}); mock.send.mockResolvedValue({accepted:1}); });
 afterEach(cleanup);
 it('requires preview approval and sends only the selected owner message', async () => {
-  render(<OwnerWhatsAppWorkspace customers={owners} policy={policy} onTestSetup={vi.fn()}/>);
+  render(<OwnerWhatsAppWorkspace customers={owners} policy={policy} onRefresh={vi.fn().mockResolvedValue(undefined)} onTestSetup={vi.fn()}/>);
   expect(await screen.findByText('Welcome owner a')).toBeInTheDocument();
   expect(screen.getByRole('button',{name:'Send this message'})).toBeDisabled();
   mock.history.mockResolvedValue({deliveries:[{...job,approvedPreviewHash:'hash'}]});
@@ -21,13 +21,51 @@ it('requires preview approval and sends only the selected owner message', async 
 });
 it('does not offer sending while the platform is paused', async () => {
   mock.history.mockResolvedValue({deliveries:[{...job,approvedPreviewHash:'hash'}]});
-  render(<OwnerWhatsAppWorkspace customers={owners} policy={{...policy,paused:true}} onTestSetup={vi.fn()}/>);
+  render(<OwnerWhatsAppWorkspace customers={owners} policy={{...policy,paused:true}} onRefresh={vi.fn().mockResolvedValue(undefined)} onTestSetup={vi.fn()}/>);
   expect(await screen.findByRole('button',{name:'Send this message'})).toBeDisabled();
 });
 it('clears the preceding owner history while switching accounts', async () => {
-  render(<OwnerWhatsAppWorkspace customers={owners} policy={policy} onTestSetup={vi.fn()}/>);
+  render(<OwnerWhatsAppWorkspace customers={owners} policy={policy} onRefresh={vi.fn().mockResolvedValue(undefined)} onTestSetup={vi.fn()}/>);
   await screen.findByText('Welcome owner a');
   mock.history.mockReturnValue(new Promise(() => {}));
   fireEvent.change(screen.getByRole('combobox',{name:'Choose owner account'}),{target:{value:'b'}});
   expect(screen.queryByText('Welcome owner a')).not.toBeInTheDocument();
+});
+
+it('refreshes consent, destination and rollout settings alongside delivery history', async () => {
+  const onRefresh = vi.fn();
+  const view = render(<OwnerWhatsAppWorkspace customers={owners} policy={policy} onRefresh={onRefresh} onTestSetup={vi.fn()}/>);
+  await screen.findByText('Welcome owner a');
+  const changedOwners = owners.map(owner => owner.id === 'a' ? {...owner, notificationSettings:{...owner.notificationSettings,whatsappOptedIn:false,whatsappNumber:'918888888888'}} : owner);
+  onRefresh.mockImplementation(async () => {
+    view.rerender(<OwnerWhatsAppWorkspace customers={changedOwners} policy={{...policy,paused:true}} onRefresh={onRefresh} onTestSetup={vi.fn()}/>);
+  });
+  fireEvent.click(screen.getByRole('button',{name:'Refresh status'}));
+  await screen.findByText('Owner consent, WhatsApp number, delivery settings and message status refreshed.');
+  expect(onRefresh).toHaveBeenCalledOnce();
+  expect(screen.getByText('+918888888888')).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Welcome preview'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Send this message'})).toBeDisabled();
+  expect(screen.getByRole('heading',{name:'Sending paused'})).toBeInTheDocument();
+});
+it('does not report refresh success when owner settings fail to load', async () => {
+  render(<OwnerWhatsAppWorkspace customers={owners} policy={policy} onRefresh={vi.fn().mockRejectedValue(new Error('offline'))} onTestSetup={vi.fn()}/>);
+  await screen.findByText('Welcome owner a');
+  fireEvent.click(screen.getByRole('button',{name:'Refresh status'}));
+  await screen.findByRole('alert');
+  expect(screen.queryByText('Owner consent, WhatsApp number, delivery settings and message status refreshed.')).not.toBeInTheDocument();
+});
+it('enables preparation after renewed consent without reviving a suppressed message', async () => {
+  mock.history.mockResolvedValue({deliveries:[{...job,status:'SUPPRESSED',suppressionReason:'owner_not_opted_in'}]});
+  const onRefresh = vi.fn();
+  const revoked = owners.map(owner => ({...owner,notificationSettings:{...owner.notificationSettings,whatsappOptedIn:false}}));
+  const view = render(<OwnerWhatsAppWorkspace customers={revoked} policy={policy} onRefresh={onRefresh} onTestSetup={vi.fn()}/>);
+  await screen.findByText('Welcome owner a');
+  expect(screen.getByRole('button',{name:'Welcome preview'})).toBeDisabled();
+  onRefresh.mockImplementation(async () => { view.rerender(<OwnerWhatsAppWorkspace customers={owners} policy={policy} onRefresh={onRefresh} onTestSetup={vi.fn()}/>); });
+  fireEvent.click(screen.getByRole('button',{name:'Refresh status'}));
+  await waitFor(() => expect(screen.getByRole('button',{name:'Welcome preview'})).toBeEnabled());
+  expect(screen.queryByRole('button',{name:'Send this message'})).not.toBeInTheDocument();
+  expect(screen.getByText(/This message was stopped using the settings at that time/)).toBeInTheDocument();
+  expect(mock.send).not.toHaveBeenCalled();
 });
