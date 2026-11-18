@@ -538,7 +538,7 @@ async function notifyUnclosedShifts(organizationId: string, date: string) {
   return sendOwnerNotification({ organizationId, type: 'SHIFT_OPEN', dedupeKey: `open-shifts:${organizationId}:${date}`, title: () => scenario.title, packet: scenario.facts, message: () => scenario.sentence });
 }
 
-async function notifyDailySummary(organizationId: string, date: string, now: Date) {
+export async function notifyDailySummary(organizationId: string, date: string, now: Date) {
   const facts = await readDailyOperatingFacts({ organizationId }, date, now);
   const collected = facts.collections.actual?.toNumber() ?? null;
   const title = 'Daily operating summary';
@@ -555,7 +555,7 @@ async function notifyDailySummary(organizationId: string, date: string, now: Dat
   });
 }
 
-async function notifyOverdueCustomers(organizationId: string, date: string, now: Date) {
+export async function notifyOverdueCustomers(organizationId: string, date: string, now: Date) {
   const readReport = async (asOf: Date) => {
     const { facts, snapshot } = await creditDeliverySnapshot(organizationId, asOf);
     const customers = facts

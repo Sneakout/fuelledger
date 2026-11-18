@@ -69,3 +69,15 @@ it('enables preparation after renewed consent without reviving a suppressed mess
   expect(screen.getByText(/This message was stopped using the settings at that time/)).toBeInTheDocument();
   expect(mock.send).not.toHaveBeenCalled();
 });
+it('prepares a selected operational preview and enables only its owner category', async () => {
+  mock.test.mockResolvedValue({delivery:{status:'QUEUED'}});
+  const setup=vi.fn().mockResolvedValue(undefined);
+  render(<OwnerWhatsAppWorkspace customers={owners} policy={policy} onRefresh={vi.fn().mockResolvedValue(undefined)} onTestSetup={setup}/>);
+  await screen.findByText('Welcome owner a');
+  fireEvent.change(screen.getByRole('combobox',{name:'Message to preview'}),{target:{value:'PURCHASE_RECEIPT_SUMMARY'}});
+  fireEvent.click(screen.getByRole('button',{name:'Prepare operational preview'}));
+  await waitFor(()=>expect(mock.test).toHaveBeenCalledWith('a',false,'PURCHASE_RECEIPT_SUMMARY'));
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Enable selected message for this owner only'})).toBeEnabled());
+  fireEvent.click(screen.getByRole('button',{name:'Enable selected message for this owner only'}));
+  await waitFor(()=>expect(setup).toHaveBeenCalledWith('a','PURCHASE_RECEIPT_SUMMARY'));
+});

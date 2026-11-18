@@ -12,6 +12,8 @@ import { prepareNotificationPreviews, runScheduledNotifications } from "../modul
 import { approveRolloutPreview, pauseRollout, readRollout, rolloutInput, updateRollout } from "../modules/notifications/whatsapp-rollout.js";
 import { adminWhatsAppDeliveries, drainWhatsAppQueue, retryWhatsAppDelivery } from "../modules/notifications/delivery-queue.js";
 
+import { operationalPreviewTypes, prepareOperationalPreview } from '../modules/notifications/operational-preview.js';
+
 export const platformRouter = Router();
 const planPricesPaise = {
   CORE: { MONTHLY: 69_900, YEARLY: 598_800, LIFETIME: 2_400_000 },
@@ -172,7 +174,10 @@ platformRouter.post("/customers/:id/notifications/test", async (req, res) => {
   requirePlatformAdmin(req.user!.email);
   const customer = await prisma.organization.findUnique({ where: { id: req.params.id! }, select: { id: true } });
   if (!customer) throw new AppError(404, "CUSTOMER_NOT_FOUND", "This customer account was not found.");
-  const delivery = await (req.body?.welcome === true ? sendWelcomeTest(customer.id) : sendTestNotification(customer.id));
+  const input = z.object({ welcome: z.boolean().optional(), operationalType: z.enum(operationalPreviewTypes).optional() }).safeParse(req.body ?? {});
+  if (!input.success) throw new AppError(400, 'PREVIEW_TYPE_INVALID', 'Choose a supported owner message.');
+  const delivery = input.data.operationalType ? await prepareOperationalPreview(customer.id, input.data.operationalType)
+    : await (input.data.welcome === true ? sendWelcomeTest(customer.id) : sendTestNotification(customer.id));
   if (delivery.status === 'QUEUED' && delivery.id) {
     await drainWhatsAppQueue(new Date(), { previewOnly: true, organizationId: customer.id, deliveryId: delivery.id });
   }

@@ -56,8 +56,8 @@ export function WhatsAppRolloutPanel({ customers, onRefreshCustomers }: { custom
     <div className="rollout-body">
       {error && <p className="form-error" role="alert">{error}</p>}
       {message && <p role="status">{message}</p>}
-      {snapshot && <OwnerWhatsAppWorkspace customers={customers} policy={snapshot.policy} onRefresh={refresh} onTestSetup={async ownerId => {
-        await api.saveWhatsAppRollout({ ...snapshot.policy, stage: 'INTERNAL', paused: false, organizationIds: [ownerId], enabledCategories: ['SYSTEM_TEST', 'OWNER_WELCOME'] });
+      {snapshot && <OwnerWhatsAppWorkspace customers={customers} policy={snapshot.policy} onRefresh={refresh} onTestSetup={async (ownerId, category) => {
+        await api.saveWhatsAppRollout({ ...snapshot.policy, stage: 'INTERNAL', paused: false, organizationIds: [ownerId], enabledCategories: category ? [category] : ['SYSTEM_TEST', 'OWNER_WELCOME'] });
         await refresh();
       }} />}
       <details className="wa-advanced"><summary>Advanced settings · live alerts & rollout <ChevronDown size={16}/></summary>

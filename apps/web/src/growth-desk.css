@@ -122,3 +122,7 @@
 .wa-advanced form { margin-top:16px; }
 @media(max-width:1100px) { .wa-steps { grid-template-columns:1fr; } }
 @media(prefers-reduced-motion:reduce) { .owner-whatsapp-workspace * { transition:none!important;animation:none!important; } }
+.wa-operational-preview { padding:20px;border:1px solid #b8d8c7;border-radius:16px;background:#f2f8f4; }
+.wa-operational-preview h3 { margin:8px 0;font-size:18px;color:var(--forest); }
+.wa-operational-preview p { color:var(--muted);font-size:13px;line-height:1.65; }
+.wa-operational-preview .field { max-width:580px; }

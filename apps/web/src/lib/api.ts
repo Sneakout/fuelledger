@@ -581,8 +581,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
-  testCustomerWhatsApp: (id: string, welcome = false) =>
-    request<{ delivery: { status: "QUEUED" | "FAILED" | "SKIPPED"; reason?: string } }>(`/platform/customers/${id}/notifications/test`, { method: "POST", body: JSON.stringify({ welcome }) }),
+  testCustomerWhatsApp: (id: string, welcome = false, operationalType?: string) =>
+    request<{ delivery: { status: "QUEUED" | "FAILED" | "SKIPPED"; reason?: string } }>(`/platform/customers/${id}/notifications/test`, { method: "POST", body: JSON.stringify({ welcome, operationalType }) }),
   whatsappRollout: () => request<WhatsAppRolloutSnapshot>("/platform/whatsapp-rollout"),
   saveWhatsAppRollout: (policy: WhatsAppRolloutPolicy) =>
     request<{ policy: WhatsAppRolloutPolicy }>("/platform/whatsapp-rollout", { method: "PUT", body: JSON.stringify(policy) }),
