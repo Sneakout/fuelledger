@@ -30,6 +30,7 @@ const blank = (): ProductForm => ({
   category: "RETAIL",
   customCategoryId: null,
   unit: "PIECE",
+  packSizeLitres: null,
   purchasePrice: 0,
   sellingPrice: 0,
   taxCategoryId: null,
@@ -87,6 +88,7 @@ export function ProductsPage() {
         | "code"
         | "category"
         | "unit"
+        | "packSizeLitres"
         | "purchasePrice"
         | "sellingPrice",
         string
@@ -137,6 +139,7 @@ export function ProductsPage() {
         | "code"
         | "category"
         | "unit"
+        | "packSizeLitres"
         | "purchasePrice"
         | "sellingPrice",
         string
@@ -144,6 +147,7 @@ export function ProductsPage() {
     > = {};
     const purchasePrice = Number(priceInputs.purchasePrice);
     const sellingPrice = Number(priceInputs.sellingPrice);
+    if (form.category === 'DEF' && form.unit === 'PIECE' && !form.tankLinked && (!form.packSizeLitres || form.packSizeLitres <= 0 || form.packSizeLitres > 9999999.999)) errors.packSizeLitres = 'Enter litres per pack, such as 6, 10 or 20.';
     if (form.name.trim().length < 2)
       errors.name = "Enter a product name with at least 2 letters.";
     if (!/^[A-Z0-9-]+$/.test(form.code))
@@ -182,6 +186,7 @@ export function ProductsPage() {
     const currentPurchasePrice = editing ? Number(catalog?.products.find((product) => product.id === editing)?.purchasePrice) : undefined;
     const payload = {
       ...form,
+      packSizeLitres: form.category === 'DEF' && form.unit === 'PIECE' && !form.tankLinked ? form.packSizeLitres ?? null : null,
       purchasePrice,
       sellingPrice,
       ...(!editing || purchasePrice !== currentPurchasePrice
@@ -268,11 +273,31 @@ export function ProductsPage() {
     });
     setForm({
       ...rest,
+      packSizeLitres: product.packSizeLitres ? Number(product.packSizeLitres) : null,
       hsnCode: hsnCode ?? "",
       purchasePrice: Number(purchasePrice),
       sellingPrice: Number(sellingPrice),
     });
   };
+  function generatedDefName(name: string) {
+    return !editing && (!name || /^DEF(?: bulk| \d+(?:\.\d+)? L pack)?$/.test(name));
+  }
+  function setDefFormat(bulk: boolean) {
+    setForm(current => {
+      if (!current) return current;
+      const name = generatedDefName(current.name) ? bulk ? 'DEF bulk' : 'DEF' : current.name;
+      const code = !current.code || current.code === makeCode(current.name) ? makeCode(name) : current.code;
+      return { ...current, name, code, category: 'DEF', unit: bulk ? 'LITRE' : 'PIECE', inventoryTracked: true, tankLinked: bulk, meterLinked: bulk ? current.meterLinked : false, isService: false, packSizeLitres: bulk ? null : current.packSizeLitres ?? null };
+    });
+  }
+  function setDefPackSize(size: number | null) {
+    setForm(current => {
+      if (!current) return current;
+      const name = generatedDefName(current.name) && size ? `DEF ${size} L pack` : current.name;
+      const code = !current.code || current.code === makeCode(current.name) ? makeCode(name) : current.code;
+      return { ...current, packSizeLitres: size, name, code };
+    });
+  }
   const editingProduct = catalog?.products.find((product) => product.id === editing);
   const visibleProducts = catalog?.products.filter((product) =>
     catalogFilter === "ALL"
@@ -312,6 +337,7 @@ export function ProductsPage() {
           </p>
         </div>
         <div className="heading-actions">
+          <button className="secondary small" onClick={() => { setForm({ ...blank(), category: 'DEF', name: 'DEF' }); setPriceInputs({ purchasePrice: '0', sellingPrice: '0' }); setEditing(null); setError(''); setNotice(''); setFieldErrors({}); }}><CirclePlus size={17} /> Add DEF</button>
           <button className="secondary small" onClick={addLubricant}>
             <CirclePlus size={17} /> Add lubricant
           </button>
@@ -388,7 +414,7 @@ export function ProductsPage() {
                 ) : (
                   <span>Non-stock</span>
                 )}
-                {product.tankLinked && <span>Tank</span>}
+                {product.category === 'DEF' && <span>{product.tankLinked ? 'Bulk · litres' : product.packSizeLitres ? `${Number(product.packSizeLitres)} L pack · pieces` : 'Packaged · pieces'}</span>}{product.tankLinked && <span>Tank</span>}
                 {product.meterLinked && <span>Meter</span>}
               </div>
               <button className="text-button" onClick={() => edit(product)}>
@@ -499,7 +525,7 @@ export function ProductsPage() {
                 <span>Standard category</span>
                 <select
                   value={form.category}
-                  onChange={(e) => set("category")(e.target.value)}
+                  onChange={(e) => { set('category')(e.target.value); if (e.target.value === 'DEF') setDefFormat(false); }}
                 >
                   {categories.map((v) => (
                     <option key={v}>{v}</option>
@@ -529,6 +555,7 @@ export function ProductsPage() {
                 <span>Unit</span>
                 <select
                   value={form.unit}
+                  disabled={form.category === "DEF"}
                   onChange={(e) => set("unit")(e.target.value)}
                 >
                   {units.map((v) => (
@@ -553,7 +580,7 @@ export function ProductsPage() {
                 </select>
               </label>
               <Field
-                label="Purchase price"
+                label={form.category === 'DEF' ? form.unit === 'LITRE' ? 'Purchase price per litre' : 'Purchase price per pack' : 'Purchase price'}
                 type="number"
                 value={priceInputs.purchasePrice}
                 onChange={(v) =>
@@ -564,7 +591,7 @@ export function ProductsPage() {
                 }
               />
               <Field
-                label="Selling price"
+                label={form.category === 'DEF' ? form.unit === 'LITRE' ? 'Selling price per litre' : 'Selling price per pack' : 'Selling price'}
                 type="number"
                 value={priceInputs.sellingPrice}
                 onChange={(v) =>
@@ -578,6 +605,19 @@ export function ProductsPage() {
                 onChange={setPriceEffectiveDate}
               />
             </div>
+            {form.category === 'DEF' && <section className="def-format-editor" aria-label="DEF format">
+              <h3>How is this DEF sold?</h3>
+              <div className="def-format-options">
+                <button type="button" aria-pressed={form.unit === "PIECE"} onClick={() => setDefFormat(false)}><strong>Packaged DEF</strong><span>Each can or pack is one piece</span></button>
+                <button type="button" aria-pressed={form.unit === "LITRE"} onClick={() => setDefFormat(true)}><strong>Bulk DEF</strong><span>Sold by litre from a tank</span></button>
+              </div>
+              {form.unit === 'PIECE' && <>
+                <label className={`field ${fieldErrors.packSizeLitres ? 'field-invalid' : ''}`}><span>Litres per pack</span><input type="number" min="0.001" max="9999999.999" step="0.001" value={form.packSizeLitres ?? ''} onChange={event => setDefPackSize(event.target.value ? Number(event.target.value) : null)} placeholder="e.g. 10" />{fieldErrors.packSizeLitres && <small>{fieldErrors.packSizeLitres}</small>}</label>
+                <div className="def-pack-presets" aria-label="Common DEF pack sizes">{[6, 10, 20].map(size => <button type="button" key={size} aria-pressed={form.packSizeLitres === size} onClick={() => setDefPackSize(size)}>{size} L</button>)}</div>
+                <p>Enter any pack size in litres, or choose a common size above. You can add more sizes anytime using Add DEF. Each size has its own product code, price and stock counted in pieces.</p>
+              </>}
+              {form.unit === 'LITRE' && <p>Stock, purchases and sales are measured in litres. Assign this product to the outlet’s DEF tank.</p>}
+            </section>}
             {editingProduct && editingProduct.sellingPriceHistory.length > 0 && (
               <section className="price-history">
                 <strong>Selling-price history</strong>
@@ -606,6 +646,7 @@ export function ProductsPage() {
                   <input
                     type="checkbox"
                     checked={form[key]}
+                    disabled={form.category === 'DEF' && ['tankLinked', 'meterLinked', 'isService'].includes(key)}
                     onChange={(e) => set(key)(e.target.checked)}
                   />
                   {label}

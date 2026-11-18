@@ -57,7 +57,7 @@ describe('closing shift', () => {
     const tx: any = {
       shift: { findFirst: vi.fn(async () => shift), updateMany: vi.fn(async () => ({ count: 1 })), update: vi.fn(async ({data}) => Object.assign(shift, data)) },
       sale: { groupBy: vi.fn().mockResolvedValue([{ nozzleId: 'n', _sum: { quantity: d(20) } }]), create: vi.fn(async ({data}) => ({id:'sale', ...data})) },
-      nozzle: { findMany: vi.fn().mockResolvedValue([{id:'n',code:'N1',productId:'fuel',dispenser:{code:'D1'},tankMappings:[{tankId:'t'}]}]), findUnique: vi.fn().mockResolvedValue({id:'n',productId:'fuel',product:{name:'Fuel', code:'MS', inventoryTracked:true,sellingPrice:d(100),purchasePrice:d(90),sellingPriceHistory:[],purchasePriceHistory:[]},tankMappings:[{tankId:'t',tank:{productId:'fuel'}}]}) },
+      nozzle: { findMany: vi.fn().mockResolvedValue([{id:'n',code:'N1',productId:'fuel',product:{code:'MS',category:'FUEL'},dispenser:{code:'D1'},tankMappings:[{tankId:'t'}]}]), findUnique: vi.fn().mockResolvedValue({id:'n',productId:'fuel',product:{name:'Fuel', code:'MS', inventoryTracked:true,sellingPrice:d(100),purchasePrice:d(90),sellingPriceHistory:[],purchasePriceHistory:[]},tankMappings:[{tankId:'t',tank:{productId:'fuel'}}]}) },
       tank: { findFirst: vi.fn().mockResolvedValue({openingStock:d(1000)}) },
       inventoryLedger: { findMany: vi.fn().mockResolvedValue([]), aggregate: vi.fn().mockResolvedValue({_sum:{quantityDelta:d(-20)}}), create:vi.fn() },
       ownerNotificationSettings: { findUnique: vi.fn().mockResolvedValueOnce({stockVarianceTolerance:d(1)}).mockResolvedValue({stockVarianceTolerance:d(50)}) },

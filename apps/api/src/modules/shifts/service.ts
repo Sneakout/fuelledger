@@ -1,3 +1,4 @@
+import { requiresFuelShift } from '@fuelledger/shared';
 import { safeTransaction } from '../../lib/safe-save.js';
 import { enqueueReview } from '../nerve/review-events.js';
 import { assertStockAvailable, tankBookStocksAt, tankMovementDeltasBetween } from '../../lib/stock.js';
@@ -34,7 +35,7 @@ const exact = (ids: string[], values: Array<{ id: string }>) =>
   ids.length === values.length &&
   ids.every((id) => values.some((value) => value.id === id));
 type BridgeDb = Pick<Prisma.TransactionClient, 'inventoryLedger' | 'nozzle'>;
-async function stockBridge(db: BridgeDb, organizationId: string, shift: { stationId: string; configurationId: string; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }, asOf = new Date()) {
+async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: string; stationId: string; configurationId: string; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }, asOf = new Date()) {
   const until = shift.closedAt ?? asOf;
   const [movements, nozzles] = await Promise.all([
     db.inventoryLedger.findMany({
@@ -42,8 +43,12 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { statio
         organizationId,
         stationId: shift.stationId,
         tankId: { in: shift.tankReadings.map((reading) => reading.tankId) },
-        type: { in: ['RECEIPT', 'ADJUSTMENT'] },
-        occurredAt: { gte: shift.openedAt, lt: until },
+        OR: [
+          { type: { in: ['RECEIPT', 'ADJUSTMENT'] }, occurredAt: { gte: shift.openedAt, lt: until } },
+          { type: 'SALE', sale: { shiftId: null }, occurredAt: { gte: shift.openedAt, lt: until } },
+          // Previously recorded DEF sales retain their original shift link.
+          { type: 'SALE', sale: { shiftId: shift.id, product: { NOT: [{ category: 'FUEL' }, { code: { in: ['MS', 'HSD'] } }] } } },
+        ],
       },
       orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
       select: {
@@ -62,6 +67,7 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { statio
         id: true,
         code: true,
         productId: true,
+        product: { select: { code: true, category: true } },
         dispenser: { select: { code: true } },
         tankMappings: { where: { tank: { configurationId: shift.configurationId, status: 'ACTIVE' } }, select: { tankId: true } },
       },
@@ -73,6 +79,7 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { statio
     const adjustments = rows.filter((movement) => movement.type === 'ADJUSTMENT');
     return [reading.tankId, {
       received: receipts.reduce((sum, movement) => sum.add(movement.quantityDelta), new Prisma.Decimal(0)),
+      counterSales: rows.filter(movement => movement.type === 'SALE').reduce((sum, movement) => sum.minus(movement.quantityDelta), new Prisma.Decimal(0)),
       adjustments: adjustments.reduce((sum, movement) => sum.add(movement.quantityDelta), new Prisma.Decimal(0)),
       deliveries: receipts.map((movement) => ({
         id: movement.id,
@@ -90,11 +97,11 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { statio
             ? productTanks[0]!.tankId
             : undefined;
         return resolvedTankId === reading.tankId;
-      }).map((nozzle) => ({ id: nozzle.id, code: `${nozzle.dispenser.code} / ${nozzle.code}` })),
+      }).map((nozzle) => ({ id: nozzle.id, code: `${nozzle.dispenser.code} / ${nozzle.code}`, counter: !requiresFuelShift(nozzle.product) })),
     }] as const;
   }));
 }
-async function withStockBridge<T extends { stationId: string; configurationId: string; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }>(organizationId: string, shift: T) {
+async function withStockBridge<T extends { id: string; stationId: string; configurationId: string; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }>(organizationId: string, shift: T) {
   const bridge = await stockBridge(prisma, organizationId, shift);
   return { ...shift, tankReadings: shift.tankReadings.map((reading) => ({ ...reading, receivedDuringShift: bridge.get(reading.tankId)?.received ?? new Prisma.Decimal(0), stockBridge: bridge.get(reading.tankId) })) };
 }
@@ -117,7 +124,7 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
               where: { status: "ACTIVE" },
               include: {
                 nozzles: {
-                  where: { status: "ACTIVE" },
+                  where: { status: "ACTIVE", product: { OR: [{ category: "FUEL" }, { code: { in: ["MS", "HSD"] } }] } },
                   include: { product: true, attendantAssignment: { select: { userId: true } } },
                 },
               },
@@ -238,7 +245,7 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
           tanks: { where: { status: "ACTIVE" } },
           dispensers: {
             where: { status: "ACTIVE" },
-            include: { nozzles: { where: { status: "ACTIVE" } } },
+            include: { nozzles: { where: { status: "ACTIVE", product: { OR: [{ category: "FUEL" }, { code: { in: ["MS", "HSD"] } }] } } } },
           },
         },
       },
@@ -470,9 +477,9 @@ export async function closeShift(
     const bridge = bridgeByTank.get(tankReading.id);
     const nozzleIds = new Set(bridge?.nozzles.map((nozzle) => nozzle.id) ?? []);
     const related = input.nozzleReadings.filter((reading) => nozzleIds.has(reading.id));
-    const sales = related.reduce((sum, reading) => {
+    const sales = Number(bridge?.counterSales ?? 0) + related.reduce((sum, reading) => {
       const opening = shift.nozzleReadings.find((value) => value.nozzleId === reading.id)!;
-      return sum + reading.value - Number(opening.openingMeter) - reading.testingQuantity;
+      return bridge?.nozzles.find(nozzle => nozzle.id === reading.id)?.counter ? sum : sum + reading.value - Number(opening.openingMeter) - reading.testingQuantity;
     }, 0);
     const testingLoss = related.reduce((sum, reading) => sum + (reading.testingReturned ? 0 : reading.testingQuantity), 0);
     const expected = Number(saved.openingDip) + Number(bridge?.received ?? 0) + Number(bridge?.adjustments ?? 0) - sales - testingLoss;
@@ -602,7 +609,7 @@ export async function closeShift(
         closedAt,
       );
       const tankId = resolvedTanks[0]!.tankId;
-      if (missingQuantity > 0.001) {
+      if (requiresFuelShift(nozzle.product) && missingQuantity > 0.001) {
         const quantity = new Prisma.Decimal(missingQuantity);
         const totalAmount = quantity.mul(unitPrice);
         const meterClosing = new Prisma.Decimal(reading.value).sub(

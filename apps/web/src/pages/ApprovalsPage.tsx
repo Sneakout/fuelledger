@@ -42,7 +42,7 @@ function ApprovalSummary({ approval }: { approval: OwnerApproval }) {
     return <div className="approval-comparison">
       <span><small>{evidence.operation === "CREATE" ? "New catalog item" : "Current product"}</small><b>{evidence.operation === "CREATE" ? "Not yet created" : String(before.name || product.name || "Product")}</b></span>
       <ArrowRight aria-hidden="true" />
-      <span className="proposed"><small>Requested product</small><b>{String(after.name || product.name || "Product")}</b></span>
+      <span className="proposed"><small>Requested product</small><b>{String(after.name || product.name || "Product")}</b>{after.category === "DEF" && <small>{after.packSizeLitres ? `${quantity(after.packSizeLitres)} per pack · sold by piece` : after.tankLinked ? "Bulk DEF · sold by litre" : "Packaged DEF"}</small>}</span>
       <em>{money(after.sellingPrice)} selling</em>
     </div>;
   }

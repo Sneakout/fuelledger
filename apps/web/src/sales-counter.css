@@ -1,0 +1,25 @@
+.counter-shift-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid #d7e6dc;
+  border-radius: 12px;
+  background: #f1f8f4;
+}
+.counter-shift-notice strong { font-size: 13px; color: var(--ink); }
+.counter-shift-notice p, .counter-description {
+  margin: 7px 0 0;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+.counter-shift-notice a { flex-shrink: 0; text-decoration: none; }
+.counter-description { margin: 0 0 14px; }
+.sales-page .sale-product-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.sales-page .sale-product-tabs button { display: inline-flex; align-items: center; gap: 7px; }
+@media (max-width: 600px) {
+  .counter-shift-notice { align-items: flex-start; flex-direction: column; }
+}

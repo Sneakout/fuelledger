@@ -37,11 +37,11 @@ function bridgeValues(shift: Shift, tankId: string, actual: number, closingMeter
     return {
       id: reading.nozzleId,
       code: tank.stockBridge.nozzles.find((nozzle) => nozzle.id === reading.nozzleId)?.code ?? reading.nozzle.code,
-      sales: Math.max(0, closing - Number(reading.openingMeter) - quantity),
+      sales: tank.stockBridge.nozzles.find(nozzle => nozzle.id === reading.nozzleId)?.counter ? 0 : Math.max(0, closing - Number(reading.openingMeter) - quantity),
       testingLoss: test?.testingReturned === false ? quantity : 0,
     };
   });
-  const sales = contributions.reduce((sum, item) => sum + item.sales, 0);
+  const sales = Number(tank.stockBridge.counterSales ?? 0) + contributions.reduce((sum, item) => sum + item.sales, 0);
   const testingLoss = contributions.reduce((sum, item) => sum + item.testingLoss, 0);
   const expected = Number(tank.openingDip) + Number(tank.stockBridge.received) + Number(tank.stockBridge.adjustments) - sales - testingLoss;
   return { tank, contributions, sales, testingLoss, expected, difference: actual - expected };
@@ -757,7 +757,7 @@ function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance,
           <span data-label="Sales">
             <b>{litres(bridge.sales)}</b>
             {bridge.contributions.length > 0 && <details><summary>View nozzles</summary>{bridge.contributions.map((item) => <small key={item.id}>{item.code} · {litres(item.sales)}</small>)}</details>}
-          </span>
+          {Number(reading.stockBridge.counterSales ?? 0) > 0 && <small>Includes {litres(Number(reading.stockBridge.counterSales))} counter sales</small>}</span>
           <span data-label="Testing / loss">
             <b>{litres(bridge.testingLoss)}</b>
             <small>{bridge.testingLoss > 0 ? "Not returned" : "No stock consumed"}</small>

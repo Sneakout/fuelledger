@@ -582,6 +582,7 @@ model Product {
   category             ProductCategory
   customCategoryId     String?                 @map("custom_category_id")
   unit                 UnitOfMeasure
+  packSizeLitres       Decimal?                @map("pack_size_litres") @db.Decimal(10, 3)
   purchasePrice        Decimal                 @default(0) @map("purchase_price") @db.Decimal(12, 2)
   sellingPrice         Decimal                 @default(0) @map("selling_price") @db.Decimal(12, 2)
   taxCategoryId        String?                 @map("tax_category_id")
@@ -860,7 +861,7 @@ model Sale {
   id                  String               @id @default(cuid())
   organizationId      String               @map("organization_id")
   stationId           String               @map("station_id")
-  shiftId             String               @map("shift_id")
+  shiftId             String?              @map("shift_id")
   productId           String               @map("product_id")
   employeeId          String               @map("employee_id")
   tankId              String?              @map("tank_id")
@@ -879,7 +880,7 @@ model Sale {
   createdAt           DateTime             @default(now()) @map("created_at")
   organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   station             Station              @relation(fields: [stationId], references: [id], onDelete: Restrict)
-  shift               Shift                @relation(fields: [shiftId], references: [id], onDelete: Restrict)
+  shift               Shift?               @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   product             Product              @relation(fields: [productId], references: [id], onDelete: Restrict)
   employee            User                 @relation(fields: [employeeId], references: [id], onDelete: Restrict)
   tank                Tank?                @relation(fields: [tankId], references: [id], onDelete: Restrict)

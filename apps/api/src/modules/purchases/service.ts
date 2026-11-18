@@ -1,3 +1,4 @@
+import { assertDefPackQuantity } from '../products/def-format.js';
 import { safeTransaction } from '../../lib/safe-save.js';
 import { enqueueReview } from '../nerve/review-events.js';
 import type { ExpenseCategoryInput, ExpenseInput, PurchaseInvoiceInput, PurchaseInvoiceReceiptInput, PurchaseInvoiceUpdateInput, SupplierInput, SupplierPaymentInput } from '@fuelledger/shared';
@@ -182,6 +183,7 @@ export async function bootstrap(organizationId: string, stationIds?: string[], r
         code: true,
         category: true,
         unit: true,
+        packSizeLitres: true,
         hsnCode: true,
         purchasePrice: true,
         sellingPrice: true,
@@ -317,6 +319,7 @@ export async function createInvoice(organizationId: string, userId: string, inpu
   if (input.receiveNow && products.length !== new Set(input.lines.map((x) => x.productId)).size) throw new AppError(400, 'PRODUCT_NOT_INVENTORIED', 'Every received invoice line needs an active inventory product.');
   const lines = input.lines.map(line => {
     const product = products.find(item => item.id === line.productId);
+    if (product) assertDefPackQuantity(product, line.quantity);
     if (!product || !line.sourceUnit) return line;
     const source = line.sourceUnit.trim().toUpperCase().replace(/[^A-Z]/g, '');
     if (source === 'KL' && product.unit === 'LITRE') return { ...line, quantity: line.quantity * 1_000, unitCost: line.unitCost / 1_000 };
@@ -545,6 +548,7 @@ export async function receiveInvoiceStock(organizationId: string, userId: string
       for (const line of invoice.lines) {
         const allocation = allocations.get(line.id)!;
         const product = products.find(item => item.id === allocation.productId)!;
+        assertDefPackQuantity(product, Number(line.quantity));
         const tank = allocation.tankId ? await tx.tank.findFirst({ where: { id: allocation.tankId, productId: product.id, status: 'ACTIVE', configuration: { stationId: invoice.stationId, active: true } } }) : null;
         if (allocation.tankId && !tank) throw new AppError(400, 'TANK_MAPPING_INVALID', 'The selected tank must hold the invoiced product.');
         if (product.tankLinked && !tank) throw new AppError(400, 'TANK_REQUIRED', `${product.name} must be received into a configured tank.`);
@@ -656,6 +660,8 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
             select: {
               id: true,
               name: true,
+              category: true,
+              unit: true,
               purchasePrice: true,
               purchasePriceHistory: { orderBy: { effectiveFrom: 'desc' } },
             },
@@ -692,6 +698,7 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
       quantity: new Prisma.Decimal(correctedQuantities.get(line.id) ?? line.quantity),
     })),
   };
+  for (const line of invoiceForPricing.lines) if (line.product) assertDefPackQuantity(line.product, Number(line.quantity));
   const pricing = shouldRecalculate
     ? priceShape(invoiceForPricing, new Date(input.invoiceDate))
     : {

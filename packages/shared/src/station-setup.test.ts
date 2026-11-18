@@ -51,6 +51,11 @@ describe('shift validation', () => {
 describe('product master validation', () => {
   const valid = (name: string, code: string, category: string) => ({ name, code, category, unit: 'LITRE', purchasePrice: 1, sellingPrice: 2, taxCategoryId: null, customCategoryId: null, inventoryTracked: true, tankLinked: category === 'FUEL' || category === 'DEF', meterLinked: category === 'FUEL' || category === 'DEF', isService: false, active: true });
   it.each([['MS','MS','FUEL'],['HSD','HSD','FUEL'],['DEF','DEF','DEF'],['Engine Oil','ENG-OIL','LUBRICANTS'],['Water','WATER','RETAIL'],['EV Charging','EV-CHARGE','EV_CHARGING'],['Advertising income','AD-INCOME','OTHER']])('accepts %s', (name,code,category) => expect(productInputSchema.safeParse(valid(name,code,category)).success).toBe(true));
+  it.each([6, 10, 20])('accepts a separate %s L packaged DEF SKU', size => expect(productInputSchema.safeParse({ ...valid(`DEF ${size} L`, `DEF-${size}L`, 'DEF'), unit: 'PIECE', packSizeLitres: size, tankLinked: false, meterLinked: false }).success).toBe(true));
+  it('rejects packaged DEF linked to a tank or with an invalid pack size', () => {
+    expect(productInputSchema.safeParse({ ...valid('DEF pack', 'DEF-PACK', 'DEF'), unit: 'PIECE', packSizeLitres: 10 }).success).toBe(false);
+    expect(productInputSchema.safeParse({ ...valid('DEF pack', 'DEF-PACK', 'DEF'), unit: 'PIECE', packSizeLitres: 0, tankLinked: false, meterLinked: false }).success).toBe(false);
+  });
   it('accepts non-inventory services such as car wash', () => expect(productInputSchema.safeParse({ ...valid('Car Wash','CAR-WASH','SERVICES'), unit:'UNIT', inventoryTracked:false, tankLinked:false, meterLinked:false, isService:true }).success).toBe(true));
   it('rejects a service linked to physical inventory', () => expect(productInputSchema.safeParse({ ...valid('Car Wash','CAR-WASH','SERVICES'), isService:true }).success).toBe(false));
 });

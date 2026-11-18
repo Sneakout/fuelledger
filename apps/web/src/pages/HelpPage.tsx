@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Camera, CheckCircle2, Headphones, Paperclip, Send, TicketCheck } from "lucide-react";
+import { ArrowRight, Camera, CheckCircle2, Headphones, Paperclip, Send, TicketCheck } from "lucide-react";
+import { Link } from "react-router-dom";
+import '../user-guide.css';
 import { ApiRequestError, api, type ServiceTicket } from "../lib/api";
 
 const issues = [
@@ -52,6 +54,7 @@ export function HelpPage() {
   }
   return <main className="page help-page">
     <section className="help-hero"><span><Headphones/></span><div><small>HELP & CUSTOMER SERVICE</small><h1>Tell us what needs attention</h1><p>Create a ticket with the relevant details. FuelNerve customer service will receive it with your account information.</p></div></section>
+    <Link to="/help/guide" className="guide-support-link"><div><strong>Find your way with the FuelNerve User Guide</strong><span>Search step-by-step help for shifts, stock, sales, DSR imports and more.</span></div><ArrowRight aria-hidden="true" /></Link>
     {message && <div className="success-banner"><CheckCircle2/>{message}</div>}{error && <div className="form-error">{error}</div>}
     <div className="help-layout">
       <form className="ticket-form" onSubmit={(event) => void submit(event)}>

@@ -1,3 +1,4 @@
+import { assertDefFormatChange } from '../products/def-format.js';
 import { Prisma, type ApprovalStatus } from '@prisma/client';
 import { calculateLandedPurchasePrices, type InventoryAdjustmentInput, type ProductInput, type PurchaseInvoiceInput } from '@fuelledger/shared';
 import { AppError } from '../../lib/errors.js';
@@ -210,7 +211,7 @@ export async function requestProductCatalogChange(
     product: change.product,
   };
   const before = existing ? {
-    id: existing.id, name: existing.name, code: existing.code, hsnCode: existing.hsnCode, category: existing.category, unit: existing.unit,
+    id: existing.id, name: existing.name, code: existing.code, hsnCode: existing.hsnCode, category: existing.category, unit: existing.unit, packSizeLitres: existing.packSizeLitres === null ? null : Number(existing.packSizeLitres),
     purchasePrice: Number(existing.purchasePrice), sellingPrice: Number(existing.sellingPrice), inventoryTracked: existing.inventoryTracked,
     tankLinked: existing.tankLinked, meterLinked: existing.meterLinked, isService: existing.isService, active: existing.active,
     taxCategoryId: existing.taxCategoryId, customCategoryId: existing.customCategoryId,
@@ -261,7 +262,7 @@ async function executeCatalogChange(tx: Prisma.TransactionClient, organizationId
   const purchaseFrom = purchasePriceEffectiveFrom ? new Date(purchasePriceEffectiveFrom) : sellingFrom;
   if (payload.operation === 'CREATE') {
     return tx.product.create({ data: {
-      organizationId, ...values, hsnCode: input.hsnCode || null, customCategoryId: input.customCategoryId ?? null, taxCategoryId: input.taxCategoryId ?? null,
+      organizationId, ...values, packSizeLitres: input.packSizeLitres ?? null, hsnCode: input.hsnCode || null, customCategoryId: input.customCategoryId ?? null, taxCategoryId: input.taxCategoryId ?? null,
       purchasePrice: new Prisma.Decimal(input.purchasePrice), sellingPrice: new Prisma.Decimal(input.sellingPrice),
       sellingPriceHistory: { create: { price: new Prisma.Decimal(input.sellingPrice), effectiveFrom: sellingFrom } },
       purchasePriceHistory: { create: { price: new Prisma.Decimal(input.purchasePrice), effectiveFrom: purchaseFrom } },
@@ -273,6 +274,7 @@ async function executeCatalogChange(tx: Prisma.TransactionClient, organizationId
   if (!existing || existing.updatedAt.toISOString() !== payload.expectedUpdatedAt) throw new AppError(409, 'APPROVAL_EVIDENCE_CHANGED', 'This product changed after the request was created. Review a fresh request before approving.');
   if (existing._count.tanks && (!input.tankLinked || !input.inventoryTracked)) throw new AppError(409, 'PRODUCT_IN_USE', 'This product is assigned to tanks and must remain inventory- and tank-linked.');
   if (existing._count.nozzles && (!input.meterLinked || !input.inventoryTracked)) throw new AppError(409, 'PRODUCT_IN_USE', 'This product is assigned to nozzles and must remain inventory- and meter-linked.');
+  await assertDefFormatChange(tx, existing, input);
   const priceChanged = Number(input.sellingPrice) !== Number(existing.sellingPrice);
   const purchaseChanged = Number(input.purchasePrice) !== Number(existing.purchasePrice);
   if (priceChanged || sellingPriceEffectiveFrom) await tx.productSellingPrice.upsert({ where: { productId_effectiveFrom: { productId: existing.id, effectiveFrom: sellingFrom } }, update: { price: new Prisma.Decimal(input.sellingPrice) }, create: { productId: existing.id, effectiveFrom: sellingFrom, price: new Prisma.Decimal(input.sellingPrice) } });
@@ -281,7 +283,7 @@ async function executeCatalogChange(tx: Prisma.TransactionClient, organizationId
     tx.productSellingPrice.findFirst({ where: { productId: existing.id, effectiveFrom: { lte: now } }, orderBy: { effectiveFrom: 'desc' }, select: { price: true } }),
     tx.productPurchasePrice.findFirst({ where: { productId: existing.id, effectiveFrom: { lte: now } }, orderBy: { effectiveFrom: 'desc' }, select: { price: true } }),
   ]);
-  await tx.product.update({ where: { id: existing.id }, data: { ...values, hsnCode: input.hsnCode || null, customCategoryId: input.customCategoryId ?? null, taxCategoryId: input.taxCategoryId ?? null, purchasePrice: currentPurchase?.price ?? new Prisma.Decimal(input.purchasePrice), sellingPrice: currentSelling?.price ?? new Prisma.Decimal(input.sellingPrice) } });
+  await tx.product.update({ where: { id: existing.id }, data: { ...values, packSizeLitres: input.packSizeLitres === undefined ? existing.packSizeLitres : input.packSizeLitres, hsnCode: input.hsnCode || null, customCategoryId: input.customCategoryId ?? null, taxCategoryId: input.taxCategoryId ?? null, purchasePrice: currentPurchase?.price ?? new Prisma.Decimal(input.purchasePrice), sellingPrice: currentSelling?.price ?? new Prisma.Decimal(input.sellingPrice) } });
   return { id: existing.id };
 }
 

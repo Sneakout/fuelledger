@@ -51,6 +51,7 @@ const LoginPage = lazy(() =>
   import("./pages/LoginPage").then((module) => ({ default: module.LoginPage })),
 );
 const HelpPage = lazy(() => import("./pages/HelpPage").then((module) => ({ default: module.HelpPage })));
+const UserGuidePage = lazy(() => import("./pages/UserGuidePage").then((module) => ({ default: module.UserGuidePage })));
 const DailyBriefPage = lazy(() => import("./pages/DailyBriefPage").then(module => ({ default: module.DailyBriefPage })));
 const IntelligenceAgentsPage = lazy(() =>
   import("./pages/IntelligenceAgentsPage").then((module) => ({ default: module.IntelligenceAgentsPage })),
@@ -150,6 +151,7 @@ export default function App() {
           <Route path="account" element={<AccountPage />} />
           <Route path="staff" element={<StaffPage />} />
           <Route path="help" element={<HelpPage />} />
+          <Route path="help/guide" element={<UserGuidePage />} />
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="insights" element={<IntelligenceAgentsPage />} />
           <Route path="insights/daily-brief" element={<DailyBriefPage />} />

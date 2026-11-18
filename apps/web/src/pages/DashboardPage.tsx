@@ -1,8 +1,8 @@
 import { hasActiveIntelligence } from '@fuelledger/shared';
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AlertTriangle, ArrowRight, ArrowUpRight, BadgeCheck, Banknote, BarChart3, Boxes, Building2, CheckCircle2, Clock3, Droplets, IndianRupee, ReceiptIndianRupee, ShieldCheck, TrendingDown, TrendingUp, Users } from 'lucide-react';
-import { api, ApiRequestError, type DailyBriefingFact, type DailyBriefingResponse, type DashboardBootstrap, type OwnerApproval } from '../lib/api';
+import { AlertTriangle, ArrowRight, ArrowUpRight, BadgeCheck, Banknote, BarChart3, Boxes, Building2, CheckCircle2, Clock3, Droplets, IndianRupee, ReceiptIndianRupee, TrendingDown, TrendingUp, Users } from 'lucide-react';
+import { api, ApiRequestError, type DailyBriefingFact, type DailyBriefingResponse, type DashboardBootstrap } from '../lib/api';
 import { useStation } from '../components/StationProvider';
 import { FuelTankBank } from '../components/FuelTankBank';
 import { useAuth } from '../components/AuthProvider';
@@ -14,16 +14,15 @@ const number=(value:number)=>new Intl.NumberFormat('en-IN',{maximumFractionDigit
 export function DashboardPage(){
   const{user}=useAuth();
   const{selectedStationId,selectedStation}=useStation();
-  const [data,setData]=useState<DashboardBootstrap|null>(null);const [briefing,setBriefing]=useState<DailyBriefingResponse|null>(null);const [pendingApprovals,setPendingApprovals]=useState<OwnerApproval[]>([]);const [intelligenceActive,setIntelligenceActive]=useState(false);const [error,setError]=useState('');const [recordsVersion,setRecordsVersion]=useState(0);
+  const [data,setData]=useState<DashboardBootstrap|null>(null);const [briefing,setBriefing]=useState<DailyBriefingResponse|null>(null);const [intelligenceActive,setIntelligenceActive]=useState(false);const [error,setError]=useState('');const [recordsVersion,setRecordsVersion]=useState(0);
   useEffect(()=>{const refresh=()=>setRecordsVersion(value=>value+1);const timer=window.setInterval(refresh,30_000);window.addEventListener('fuelnerve:records-changed',refresh);window.addEventListener('fuelnerve:approvals-changed',refresh);window.addEventListener('focus',refresh);return()=>{window.clearInterval(timer);window.removeEventListener('fuelnerve:records-changed',refresh);window.removeEventListener('fuelnerve:approvals-changed',refresh);window.removeEventListener('focus',refresh);};},[]);
-  useEffect(()=>{setData(null);setBriefing(null);setPendingApprovals([]);setIntelligenceActive(false);setError('');},[selectedStationId]);
+  useEffect(()=>{setData(null);setBriefing(null);setIntelligenceActive(false);setError('');},[selectedStationId]);
   useEffect(()=>{
     let active=true;
     setError('');
-    void Promise.all([api.dashboardBootstrap(selectedStationId||undefined),api.subscription().catch(()=>null),user?.role==='OWNER'?api.approvals('PENDING').catch(()=>({approvals:[]})):Promise.resolve({approvals:[]})])
-      .then(async([dashboard,plan,approvalResult])=>{
+    void Promise.all([api.dashboardBootstrap(selectedStationId||undefined),api.subscription().catch(()=>null)])
+      .then(async([dashboard,plan])=>{
         if(!active)return;
-        setPendingApprovals(approvalResult.approvals);
         const enabled=user?.role==='OWNER' && Boolean(user.demoExpiresAt || hasActiveIntelligence(plan));
         setIntelligenceActive(enabled);
         if(enabled){try{const result=await api.dailyBriefing(selectedStationId||undefined);if(active)setBriefing(result);}catch{/* Keep the Core action card if the optional briefing is unavailable. */}}
@@ -38,19 +37,12 @@ export function DashboardPage(){
   const healthy=data.actions.length===0;
   return <main className="page owner-dashboard">
     <div className="page-heading"><div><span className="eyebrow">{formatIndiaDate(data.asOf,{weekday:'long',day:'numeric',month:'long'})}</span><h1>{selectedStation?`${selectedStation.name}, running smoothly.`:'Your business, under control'}</h1><p>Today’s performance, outlet health, and the few things that need your attention.</p></div><Link className="secondary owner-report-link" to="/reports"><BarChart3 size={16}/> Open full reports</Link></div>
-    {user?.role==='OWNER'?<DashboardApprovals approvals={pendingApprovals}/>:null}
     <section className="owner-kpis"><article><span className="green"><IndianRupee/></span><div><small>Sales today</small><b>{money(data.today.grossSales)}</b><em>{data.today.transactions} transactions</em></div></article><article><span className="blue"><Banknote/></span><div><small>Collected today</small><b>{money(collected)}</b><em>Cash, UPI, card & other</em></div></article><article><span className="violet"><Droplets/></span><div><small>Metered volume</small><b>{number(data.today.meteredVolume)} L</b><em>Fuel and metered DEF</em></div></article><article><span className={data.today.netProfit<0?'amber':'green'}><IndianRupee/></span><div><small>{data.today.netProfit<0?'Net loss today':'Net profit today'}</small><b className={data.today.netProfit<0?'negative':''}>{money(Math.abs(data.today.netProfit))}</b><em>Sales less product cost and expenses</em></div></article></section>
     <section className="owner-main-grid"><article className="owner-performance"><header><div><span className="eyebrow light">7-day performance</span><h2>{money(data.trend.thisWeek)} in sales</h2><p>{data.trend.weekChange===null?'A clean baseline for the next comparison.':<><span className={data.trend.weekChange>=0?'up':'down'}>{data.trend.weekChange>=0?<TrendingUp/>:<TrendingDown/>}{Math.abs(data.trend.weekChange).toFixed(1)}%</span> versus the previous seven days</>}</p></div><div className="owner-health-mark">{healthy?<CheckCircle2/>:<AlertTriangle/>}<span><b>{healthy?'All clear':`${data.actions.length} item${data.actions.length===1?'':'s'} need attention`}</b><small>{data.operations.openShifts} shift{data.operations.openShifts===1?'':'s'} currently open</small></span></div></header><div className="owner-trend">{data.trend.days.map(day=><div key={day.date}><i><em style={{height:`${Math.max(day.amount/maxTrend*100,day.amount?5:0)}%`}}/></i><b>{day.amount?money(day.amount):'—'}</b><small>{formatIndiaCalendarDate(day.date,{weekday:'short'})}</small></div>)}</div><footer><Link to="/sales/history"><BarChart3/> View sales history <ArrowUpRight/></Link><Link to="/sales"><ReceiptIndianRupee/> Record sale <ArrowUpRight/></Link><Link to="/operations"><Clock3/> Shift operations <ArrowUpRight/></Link><Link to="/reconciliation"><BadgeCheck/> Reconcile shifts <ArrowUpRight/></Link></footer></article>
       {intelligenceActive&&briefing?<DashboardDailyBrief briefing={briefing} stationName={selectedStation?.name??'All fuel stations'}/>:<article className="owner-actions"><header><div><span className="eyebrow">Attention</span><h2>What needs action</h2>{intelligenceActive && <Link to="/insights/daily-brief">Open daily brief <ArrowRight size={14}/></Link>}</div><span className={healthy?'clear':'count'}>{healthy?<CheckCircle2/>:data.actions.length}</span></header>{healthy?<div className="owner-all-clear"><CheckCircle2/><h3>Nothing urgent</h3><p>Collections, stock, credit, and payables have no flagged exceptions.</p></div>:<div className="action-list">{data.actions.map(action=><Link key={action.id} to={action.href}><span className={action.severity.toLowerCase()}><AlertTriangle/></span><div><b>{action.title}</b><small>{action.detail}</small></div><ArrowRight/></Link>)}</div>}<div className="owner-position"><span><Users/><small>Receivables</small><b>{money(data.today.receivables)}</b></span><span><ReceiptIndianRupee/><small>Payables</small><b>{money(data.today.payables)}</b></span><span><Boxes/><small>Inventory</small><b>{money(data.today.inventoryValue)}</b></span></div></article>}</section>
     <FuelTankBank tanks={data.tankStocks} asOf={data.asOf}/>
     <section className="owner-detail-grid"><article className="station-health"><header><div><span className="eyebrow">Outlet health</span><h2>Fuel stations right now</h2></div><Building2/></header><div className="station-health-head"><span>Fuel station</span><span>Sales today</span><span>Operations</span><span>Status</span></div>{data.stationHealth.map(station=><div key={station.id}><span><b>{station.name}</b><small>{station.code} · {station.transactions} transactions</small></span><strong>{money(station.sales)}</strong><span><small>{station.openShifts} open shift{station.openShifts===1?'':'s'}</small><small>{station.pendingReconciliations} awaiting reconciliation</small></span><em className={station.status.toLowerCase()}>{station.status==='ATTENTION'?'Needs attention':station.status==='RUNNING'?'Running':'Calm'}</em></div>)}</article><article className="top-products"><header><div><span className="eyebrow">Today’s mix</span><h2>Top products</h2></div><Link to="/reports">View report <ArrowRight/></Link></header>{data.topProducts.length?data.topProducts.map((product,index)=><div key={product.key}><span>{index+1}</span><div><b>{product.product}</b><small>{number(product.quantity)} {product.unit.toLowerCase()}</small></div><strong>{money(product.revenue)}</strong></div>):<div className="owner-all-clear compact"><p>No sales have been recorded today.</p></div>}</article></section>
   </main>;
-}
-
-function DashboardApprovals({approvals}:{approvals:OwnerApproval[]}){
-  const waiting=approvals.length;
-  const examples=approvals.slice(0,2).map(item=>item.actionType==='PRODUCT_PRICE_CHANGE'?'price change':item.actionType==='INVENTORY_ADJUSTMENT'?'stock adjustment':'product change');
-  return <section className={`dashboard-approvals ${waiting?'waiting':'clear'}`} aria-label="Owner approvals"><span className="dashboard-approvals-icon"><ShieldCheck/></span><div><small>Owner approvals</small><h2>{waiting?`${waiting} decision${waiting===1?'':'s'} waiting`:'No decisions waiting'}</h2><p>{waiting?`Pending ${examples.join(' and ')}${waiting>2?` and ${waiting-2} more`:''}. Nothing is applied until you review it.`:'Price, stock and product requests will remain available here whenever approval is required.'}</p></div><Link to="/approvals">{waiting?'Review now':'Open approvals'} <ArrowRight/></Link></section>;
 }
 
 function DashboardDailyBrief({briefing,stationName}:{briefing:DailyBriefingResponse;stationName:string}){

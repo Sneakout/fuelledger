@@ -415,7 +415,7 @@ export async function reconcile(
 function presentShift(
   shift: any,
   expectedRows: Array<{
-    shiftId: string;
+    shiftId: string | null;
     paymentMethod: string;
     _sum: { totalAmount: Prisma.Decimal | null };
   }>,

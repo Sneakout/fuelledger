@@ -1104,7 +1104,7 @@ export function PurchasesPage() {
                               <option value="">Choose product</option>
                               {data.products.map((x) => (
                                 <option key={x.id} value={x.id}>
-                                  {x.name}
+                                  {x.name}{x.packSizeLitres ? ` · ${Number(x.packSizeLitres)} L pack` : ""}
                                 </option>
                               ))}
                             </select>
@@ -1140,14 +1140,14 @@ export function PurchasesPage() {
                             <span>
                               {product?.category === "FUEL"
                                 ? "Quantity (L)"
-                                : `Quantity (${product?.unit ?? "units"})`}
+                                : product?.packSizeLitres ? `Quantity (packs · ${Number(product.packSizeLitres)} L each)` : `Quantity (${product?.unit ?? "units"})`}
                             </span>
                             <input
                               aria-label={`${product?.category === "FUEL" ? "Quantity in litres" : "Quantity"} ${index + 1}`}
                               title={
                                 product?.category === "FUEL"
                                   ? "Quantity (litres)"
-                                  : `Quantity (${product?.unit ?? "units"})`
+                                  : product?.packSizeLitres ? `Quantity (packs · ${Number(product.packSizeLitres)} L each)` : `Quantity (${product?.unit ?? "units"})`
                               }
                               placeholder={
                                 product?.category === "FUEL"
@@ -1155,8 +1155,8 @@ export function PurchasesPage() {
                                   : "Quantity"
                               }
                               type="number"
-                              min=".001"
-                              step=".001"
+                              min={product?.category === "DEF" && product.unit === "PIECE" ? "1" : ".001"}
+                              step={product?.category === "DEF" && product.unit === "PIECE" ? "1" : ".001"}
                               value={line.quantity}
                               onChange={(e) =>
                                 setLines(

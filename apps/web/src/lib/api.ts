@@ -859,11 +859,12 @@ export type Shift = {
     closingDip: string | null;
     receivedDuringShift: string;
     stockBridge: {
+      counterSales?: string;
       received: string;
       adjustments: string;
       deliveries: Array<{ id: string; quantity: string; occurredAt: string; reference: string; supplier: string }>;
       adjustmentDetails: Array<{ id: string; quantity: string; note: string | null; occurredAt: string }>;
-      nozzles: Array<{ id: string; code: string }>;
+      nozzles: Array<{ id: string; code: string; counter?: boolean }>;
     };
     tank: { code: string; product: { name: string; code: string } };
   }>;
@@ -909,6 +910,7 @@ export type CatalogTaxCategory = {
   active: boolean;
 };
 export type CatalogProduct = {
+  packSizeLitres?: string | null;
   id: string;
   name: string;
   code: string;
@@ -943,12 +945,14 @@ export type ProductForm = Omit<
   CatalogProduct,
   | "id"
   | "purchasePrice"
+  | "packSizeLitres"
   | "sellingPrice"
   | "sellingPriceHistory"
   | "purchasePriceHistory"
   | "taxCategory"
   | "customCategory"
 > & {
+  packSizeLitres?: number | null;
   purchasePrice: number;
   sellingPrice: number;
   purchasePriceEffectiveFrom?: string;
@@ -1060,6 +1064,7 @@ export type StationEquipment = {
   }>;
 };
 export type SalesProduct = {
+  packSizeLitres?: string | null;
   id: string;
   name: string;
   code: string;
@@ -1112,11 +1117,12 @@ export type Sale = {
   notes: string | null;
   occurredAt: string;
   station: { name: string; code: string };
-  shift: { id: string; shiftNumber: number; status: string };
+  shift: { id: string; shiftNumber: number; status: string } | null;
   product: {
     name: string;
     code: string;
     unit: string;
+    packSizeLitres?: string | null;
     meterLinked: boolean;
     isService: boolean;
   };
@@ -1136,6 +1142,8 @@ export type SaleCustomer = {
   vehicles: CustomerVehicle[];
 };
 export type SalesBootstrap = {
+  stations: Array<{ id: string; name: string; code: string }>;
+  tanks: Array<{ id: string; code: string; productId: string; stationId: string }>;
   openShifts: OpenSaleShift[];
   products: SalesProduct[];
   employees: Array<{ id: string; name: string; role: string }>;
@@ -1178,6 +1186,7 @@ export type ReconciliationLine = {
     code: string;
     unit: string;
     category?: string;
+    packSizeLitres?: string | null;
     purchasePrice: number;
   };
   opening: number;
@@ -1353,6 +1362,7 @@ export type Supplier = {
   active: boolean;
 };
 export type PurchaseProduct = {
+  packSizeLitres?: string | null;
   id: string;
   name: string;
   code: string;

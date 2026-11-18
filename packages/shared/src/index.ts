@@ -589,6 +589,7 @@ export const productInputSchema = z
     category: z.enum(productCategories),
     customCategoryId: z.string().cuid().nullable().optional(),
     unit: z.enum(units),
+    packSizeLitres: z.coerce.number().positive().max(9999999.999).nullable().optional(),
     purchasePrice: z.coerce.number().min(0),
     purchasePriceEffectiveFrom: z.string().datetime().optional(),
     sellingPrice: z.coerce.number().min(0),
@@ -601,6 +602,10 @@ export const productInputSchema = z
     active: z.boolean(),
   })
   .superRefine((product, context) => {
+    if (product.packSizeLitres != null && (product.category !== 'DEF' || product.unit !== 'PIECE' || product.tankLinked || product.meterLinked || product.isService))
+      context.addIssue({ code: 'custom', path: ['packSizeLitres'], message: 'Pack size applies to packaged DEF sold by piece, with stock tracked separately from tanks.' });
+    if (product.category === 'DEF' && (product.tankLinked || product.meterLinked) && product.unit !== 'LITRE')
+      context.addIssue({ code: 'custom', path: ['unit'], message: 'Bulk DEF linked to a tank or meter must use litres.' });
     if (
       product.isService &&
       (product.inventoryTracked || product.tankLinked || product.meterLinked)
@@ -695,7 +700,7 @@ export const paymentMethods = [
 export const saleInputSchema = z
   .object({
     stationId: z.string().cuid(),
-    shiftId: z.string().cuid(),
+    shiftId: z.string().cuid().nullable().optional(),
     productId: z.string().cuid(),
     employeeId: z.string().cuid(),
     paymentMethod: z.enum(paymentMethods),
@@ -751,6 +756,11 @@ export const saleInputSchema = z
       });
   });
 export type SaleInput = z.infer<typeof saleInputSchema>;
+
+/** Shift meters account for MS/HSD fuel. DEF and shop products use counter quantities. */
+export function requiresFuelShift(product: { code: string; category?: string }) {
+  return product.category === 'FUEL' || ['MS', 'HSD'].includes(product.code.toUpperCase());
+}
 
 const inventoryLineSchema = z.object({
   productId: z.string().cuid(),

@@ -122,7 +122,7 @@ function StockCard({ line, sequence }: { line: ReconciliationLine; sequence: num
   const review = needsReview(line);
   const differenceCopy = variance === null ? 'Take a physical dip to verify the system balance.' : Math.abs(variance) < .001 ? 'The physical dip matched the system exactly.' : `${quantity(Math.abs(variance))} ${unit(line.product.unit)} ${variance < 0 ? 'less' : 'more'} than the system expected at the last check.`;
 
-  if (!isTank) return <article className="inventory-shop-card"><span className="tank-mark"><PackageCheck size={18}/></span><div><strong>{line.product.name}</strong><small>{line.product.code} · {unit(line.product.unit)}</small></div><span><small>On hand</small><b>{quantity(line.bookStock)} {unit(line.product.unit)}</b></span><details><summary>How calculated</summary><StockEquation line={line}/></details></article>;
+  if (!isTank) return <article className="inventory-shop-card"><span className="tank-mark"><PackageCheck size={18}/></span><div><strong>{line.product.name}</strong><small>{line.product.code} · {line.product.packSizeLitres ? `${quantity(Number(line.product.packSizeLitres))} L per pack · pieces` : unit(line.product.unit)}</small></div><span><small>On hand</small><b>{quantity(line.bookStock)} {unit(line.product.unit)}</b></span><details><summary>How calculated</summary><StockEquation line={line}/></details></article>;
 
   const colour = ['HSD'].includes(line.product.code) ? 'hsd' : line.product.code === 'DEF' ? 'def' : 'ms';
   const stockValue = line.bookStock * line.product.purchasePrice;
