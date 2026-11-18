@@ -74,18 +74,22 @@ export function NotificationsPage() {
     setData(result);
   }
 
+  const savedOptIn = Boolean(data.settings.whatsappOptedIn && data.settings.whatsappNumber);
+  const changed = JSON.stringify(settings) !== JSON.stringify(data.settings);
+
   return <main className="page notifications-page">
     <section className="notification-hero"><div><h1>WhatsApp alerts</h1><p>Choose what FuelNerve sends to you and how customers receive payment reminders.</p></div><span><MessageCircleMore /></span></section>
     {error && <p className="form-error" role="alert">{error}</p>}
     {notice && <p className="success-banner" role="status">{notice}</p>}
     <section className="notification-setup">
       <header><div><span className="notification-icon"><MessageCircleMore /></span><div><h2>Owner’s WhatsApp</h2><p>Use the country code when entering your number.</p></div></div>
-        <span className={data.deliveryAvailable ? 'notification-ready' : 'notification-pending'}>{data.deliveryAvailable ? <><Check /> Delivery available</> : <><TriangleAlert /> Awaiting activation</>}</span>
+        <span className={changed || !savedOptIn ? 'notification-pending' : 'notification-ready'}>{changed ? <><TriangleAlert /> Unsaved changes</> : savedOptIn ? <><Check /> Preferences saved</> : <><TriangleAlert /> Alerts off</>}</span>
       </header>
       <div className="notification-number">
         <label><span>WhatsApp number</span><input type="tel" value={settings.whatsappNumber ?? ''} placeholder="+91 98765 43210" onChange={event => setSettings({ ...settings, whatsappNumber: event.target.value, whatsappOptedIn: false })} /></label>
         {choice('whatsappOptedIn', 'I agree to receive FuelNerve alerts on this WhatsApp number')}
       </div>
+      <p className="notification-delivery-note">{changed ? 'Save your changes to update your WhatsApp number and alert choices.' : !savedOptIn ? 'Add your WhatsApp number and agree to receive alerts, then save your preferences.' : data.deliveryAvailable ? 'Your number and consent are saved. Enabled updates are sent when there is a relevant event or scheduled summary.' : 'Your number and consent are saved. WhatsApp delivery is not available yet; your enabled updates will start once delivery is enabled.'}</p>
     </section>
     <section className="notification-layout">
       <article className="notification-rules"><header><h2>Messages to the owner</h2></header>
@@ -110,12 +114,6 @@ export function NotificationsPage() {
       </aside>}
     </section>
     <div className="editor-footer">
-      <button type="button" className="secondary" disabled={busy || !data.settings.whatsappOptedIn || !data.testAvailable} onClick={() => void act(async () => {
-        const result = await api.testWhatsApp();
-        if (result.delivery.status !== 'QUEUED') throw new Error('Test message could not be queued.');
-        await refreshHistory();
-        setNotice('Test message queued. Check delivery history for its status.');
-      })}>Prepare test for saved number</button>
       <button type="button" className="primary small" disabled={busy} onClick={() => void act(async () => {
         const result = await api.updateNotificationSettings({ ...settings, whatsappNumber: settings.whatsappNumber ?? '', confirmNewNumber: settings.whatsappOptedIn });
         setSettings(result.settings);
