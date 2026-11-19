@@ -51,7 +51,7 @@ describe('HistoricalSalesImportPage', () => {
     expect(screen.queryByDisplayValue('5000')).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue('1000')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Enter manually/ }));
-    expect(screen.getByLabelText(/HSD-1 stock/)).toHaveValue(0);
+    expect(await screen.findByLabelText(/HSD-1 stock/)).toHaveValue(0);
   });
 
   it('switches from an HSD draft to MS without rendering the HSD equipment against MS', async () => {
@@ -334,4 +334,29 @@ describe('HistoricalSalesImportPage', () => {
     await waitFor(() => expect(screen.getByLabelText('RSP 2026-11-01')).toHaveClass('server-needs-review'));
     expect(screen.getByLabelText('RSP 2026-11-01').closest('tr')).toHaveClass('server-needs-review');
   });
+  it('checks the server before manual entry and offers the saved days without replacing anything', async () => {
+    const rows = [
+      {date:'2026-11-01',tankReadings:[{tankId:'tank-1',openingStock:8000}],receiptQuantity:0,totalStock:8000,nozzleReadings:[{nozzleId:'nozzle-1',meterReading:1000}],testingQuantity:0,salesQuantity:100,cumulativeSales:100,sellingPrice:94},
+      {date:'2026-11-02',tankReadings:[{tankId:'tank-1',openingStock:7900}],receiptQuantity:0,totalStock:7900,nozzleReadings:[{nozzleId:'nozzle-1',meterReading:1100}],testingQuantity:0,salesQuantity:0,cumulativeSales:100,sellingPrice:94},
+    ];
+    const record = {id:'existing',stationId:'station-1',productId:'product-1',month:'2026-11',monthStart:'2026-10-31T18:30:00Z',sourceFileName:'saved.pdf',cutoverApplied:false,createdAt:'2026-11-15T10:00:00Z',updatedAt:'2026-11-15T10:00:00Z',product:{code:'HSD',name:'Diesel'},importedBy:{name:'Owner'},corrections:[],rows};
+    historicalSalesImports.mockResolvedValue({imports:[{...record,_count:{corrections:0}}]});
+    historicalSalesImport.mockResolvedValue({record});
+    render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button',{name:/Enter manually/}));
+    expect(await screen.findByRole('dialog',{name:'Data already exists for this period'})).toBeInTheDocument();
+    expect(createHistoricalSalesImport).not.toHaveBeenCalled(); expect(correctHistoricalSalesImport).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'Keep existing data'}));
+    expect(screen.queryByLabelText('Nozzle sales 2026-11-01')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:/Enter manually/}));
+    fireEvent.click(await screen.findByRole('button',{name:'Open saved data to edit'}));
+    expect(await screen.findByLabelText('Nozzle sales 2026-11-01')).toHaveValue(100);
+    fireEvent.change(screen.getByDisplayValue('1100'),{target:{value:'1120'}});
+    expect(screen.getByLabelText('Nozzle sales 2026-11-01')).toHaveValue(120);
+    expect(screen.getByLabelText('Cumulative sales 2026-11-01')).toHaveValue(120);
+    expect(screen.getByRole('button',{name:/Save corrections/})).toBeDisabled();
+    expect(correctHistoricalSalesImport).not.toHaveBeenCalled();
+    historicalSalesImports.mockResolvedValue({imports:[]});
+  });
+
 });

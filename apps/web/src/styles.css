@@ -246,3 +246,12 @@
 .sidebar-profile strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 a.sidebar-profile:hover{background:#ffffff0c}
 a.sidebar-profile:focus-visible{outline:2px solid #d6f16b;outline-offset:3px}
+
+.historical-import-page .historical-grid h2{font-size:clamp(22px,2.1vw,30px);line-height:1.25;letter-spacing:-.035em}
+.historical-import-page .historical-grid input,.historical-import-page .historical-grid select,.historical-import-page .historical-grid textarea{font-family:inherit;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.historical-import-page .historical-grid th{font-size:13px;line-height:1.45;font-weight:750}
+.historical-import-page .historical-grid th small{font-size:12px;font-weight:500}
+.historical-existing-notice{padding:24px;border:1px solid #d7dfb3;background:#fbfced;border-radius:18px;margin-bottom:20px;scroll-margin-top:24px}
+.historical-existing-notice h2{font-size:24px;line-height:1.3;margin:8px 0;color:var(--forest)}
+.historical-existing-notice p,.historical-existing-notice summary{font-size:14px;line-height:1.65}
+.historical-existing-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
