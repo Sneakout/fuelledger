@@ -587,6 +587,8 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input),
     }),
+  manualMessageContext: (id: string) => request<{ stations: { id: string; name: string }[]; today: string }>(`/platform/customers/${id}/manual-messages`),
+  prepareManualMessage: (id: string, input: { stationId: string; type: string; date: string }) => request<{ body: string; destination: string; ownerName: string; stationName: string; checkedAt: string; warnings: string[] }>(`/platform/customers/${id}/manual-messages/prepare`, { method: 'POST', body: JSON.stringify(input) }),
   testCustomerWhatsApp: (id: string, welcome = false, operationalType?: string) =>
     request<{ delivery: { status: "QUEUED" | "FAILED" | "SKIPPED"; reason?: string } }>(`/platform/customers/${id}/notifications/test`, { method: "POST", body: JSON.stringify({ welcome, operationalType }) }),
   whatsappRollout: () => request<WhatsAppRolloutSnapshot>("/platform/whatsapp-rollout"),

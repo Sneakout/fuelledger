@@ -1,3 +1,4 @@
+import { ManualOwnerMessages } from './ManualOwnerMessages';
 import { useEffect, useState } from 'react';
 import { Eye, MessageCircleMore, RefreshCw, Send } from 'lucide-react';
 import { currentPendingHold, pendingMessageStatus } from '../lib/whatsapp-message-state';
@@ -43,6 +44,7 @@ export function OwnerWhatsAppWorkspace({ customers, policy, onRefresh, onTestSet
   return <div className="owner-whatsapp-workspace">
     {customers.length > 1 && <label className="field"><span>Choose owner account</span><select disabled={busy} value={ownerId} onChange={event => setOwnerId(event.target.value)}>{customers.map(row => <option key={row.id} value={row.id}>{row.name} · {row.owner?.email ?? 'No owner email'}</option>)}</select></label>}
     {customers.length === 1 && <p className="wa-owner-status">{eligible ? 'Owner consent saved' : 'Owner consent needed'} · {paused ? 'Sending paused' : enrolled ? 'Owner in rollout' : 'Owner outside rollout'}</p>}
+    <ManualOwnerMessages key={ownerId} organizationId={ownerId}/>
     <details className="wa-testing"><summary>Set up & test WhatsApp</summary>
     <div className="wa-steps">
       <section><span className="eyebrow">1 · Check destination</span><h3>{owner.name}</h3><p>{owner.owner?.name ?? 'Owner'} · {owner.owner?.email ?? 'No email'}</p><strong>{owner.notificationSettings.whatsappNumber ? `+${owner.notificationSettings.whatsappNumber}` : 'WhatsApp number not added'}</strong><p>{eligible ? 'Owner consent recorded. Ready to prepare a preview.' : 'The owner must add their number and consent in Settings → WhatsApp alerts.'}</p></section>

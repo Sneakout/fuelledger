@@ -1,3 +1,4 @@
+import { manualMessageContext, manualMessageInput, prepareManualOwnerMessage } from '../modules/notifications/manual-owner-messages.js';
 import { Router } from "express";
 import { customerSubscriptionUpdateSchema } from "@fuelledger/shared";
 import { z } from "zod";
@@ -266,4 +267,13 @@ platformRouter.get("/capabilities", async (_req, res) => {
     execution: false,
     invoiceCapture: true,
   });
+});
+
+platformRouter.get('/customers/:id/manual-messages', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  res.json(await manualMessageContext(req.params.id));
+});
+platformRouter.post('/customers/:id/manual-messages/prepare', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  res.json(await prepareManualOwnerMessage(req.params.id, manualMessageInput.parse(req.body)));
 });
