@@ -46,3 +46,8 @@
   .notifications-page .notification-history article > strong { grid-column: 1; }
 }
 .notifications-page .notification-delivery-note { margin:16px 0 0;padding:12px 16px;border-radius:12px;background:#f0f7f3;color:var(--muted);font-size:13px;line-height:1.6; }
+
+.customer-reminder-panel .required-mark { color: #a44331; }
+.customer-reminder-panel .reminder-field-help { color: var(--muted); font-size: 12px; line-height: 1.5; font-weight: 500; }
+.customer-reminder-panel .reminder-field-error { color: #ad3c2d; font-size: 12px; line-height: 1.5; font-weight: 650; }
+.customer-reminder-panel .field :is(input,select)[aria-invalid="true"] { border-color: #b84936; background: #fff6f3; box-shadow: 0 0 0 2px #b8493614; }

@@ -735,6 +735,7 @@ model Shift {
   status              ShiftStatus               @default(DRAFT)
   openingCash         Decimal                   @map("opening_cash") @db.Decimal(12, 2)
   closingCash         Decimal?                  @map("closing_cash") @db.Decimal(12, 2)
+  openingCashHandover  Json?                     @map("opening_cash_handover")
   openedAt            DateTime                  @default(now()) @map("opened_at")
   closedAt            DateTime?                 @map("closed_at")
   notes               String?

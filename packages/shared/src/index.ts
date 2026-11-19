@@ -668,6 +668,13 @@ export const openShiftSchema = z.object({
     z.object({ nozzleId: z.string().cuid(), userId: z.string().cuid() }),
   ),
   openingCash: z.coerce.number().min(0),
+  cashHandover: z.object({
+    previousShiftId: z.string().cuid().nullable(),
+    previousClosingCash: z.number().finite().min(0).nullable(),
+    added: z.number().finite().min(0).max(9999999999.99),
+    removed: z.number().finite().min(0).max(9999999999.99),
+    reason: z.string().trim().max(500).optional(),
+  }).optional(),
   tankReadings: z.array(reading),
   nozzleReadings: z.array(reading),
   notes: z.string().max(500).optional(),

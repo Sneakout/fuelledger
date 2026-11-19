@@ -5,7 +5,7 @@ import { WhatsAppInbox } from './WhatsAppInbox';
 const mock = vi.hoisted(() => ({ owners: vi.fn(), messages: vi.fn() }));
 vi.mock('../lib/api', () => ({ ApiRequestError: class extends Error {}, api: { adminWhatsAppOwners: mock.owners, adminWhatsAppMessages: mock.messages } }));
 vi.mock('./OwnerWhatsAppWorkspace', () => ({
-  whatsappHoldReasons: { delivery_paused: 'All sending is paused.' },
+  whatsappHoldReasons: { delivery_paused: 'All sending is paused.', category_paused: 'This message category is paused.' },
   whatsappMessageNames: { OWNER_WELCOME: 'Owner welcome' },
   OwnerWhatsAppWorkspace: ({ messageId, onHistory }: { messageId?: string; onHistory(): void }) =>
     <div><p>Selected message: {messageId}</p><button onClick={onHistory}>View full history</button></div>,
@@ -45,4 +45,29 @@ it('opens the exact attention message and scopes full history to its owner', asy
   fireEvent.change(screen.getByLabelText('From (IST)'), { target: { value: '2026-11-18' } });
   fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'DELIVERED' } });
   await waitFor(() => expect(mock.messages).toHaveBeenLastCalledWith({ view: 'history', ownerId: owner.id, from: '2026-11-18', status: 'DELIVERED' }));
+});
+
+
+it('prioritises paused sending over preview approval in the message list', async () => {
+  mock.owners.mockResolvedValue({ owners: [owner], nextCursor: null });
+  mock.messages.mockResolvedValue({ messages: [{ ...message, needsApproval: true, rolloutHold: 'category_paused' }], nextCursor: null });
+  const policy = { stage: 'INTERNAL' as const, paused: false, enabledCategories: [], organizationIds: [owner.id], version: 1 };
+  const view = render(<WhatsAppInbox policy={policy} onRefresh={vi.fn()} onTestSetup={vi.fn()}/>);
+  fireEvent.click(screen.getByRole('button', { name: 'Needs attention' }));
+  expect(await screen.findByText('Paused')).toBeInTheDocument();
+  expect(screen.getByText('This message category is paused.')).toBeInTheDocument();
+  expect(screen.getByText('Preview: approval needed in FuelNerve')).toBeInTheDocument();
+  expect(screen.queryByText('Needs preview approval')).not.toBeInTheDocument();
+  view.rerender(<WhatsAppInbox policy={{ ...policy, enabledCategories: ['OWNER_WELCOME'] }} onRefresh={vi.fn()} onTestSetup={vi.fn()}/>);
+  expect(await screen.findByText('Needs preview approval')).toBeInTheDocument();
+  expect(screen.queryByText('This message category is paused.')).not.toBeInTheDocument();
+});
+
+it('keeps delivered outcomes distinct from rollout holds recorded earlier', async () => {
+  mock.owners.mockResolvedValue({ owners: [owner], nextCursor: null });
+  mock.messages.mockResolvedValue({ messages: [{ ...message, status: 'DELIVERED', needsApproval: false }], nextCursor: null });
+  open();
+  fireEvent.click(screen.getByRole('button', { name: 'Delivery history' }));
+  expect(await screen.findByText('Delivered')).toBeInTheDocument();
+  expect(screen.queryByText('All sending is paused.')).not.toBeInTheDocument();
 });

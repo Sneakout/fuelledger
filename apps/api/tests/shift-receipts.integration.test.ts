@@ -96,6 +96,7 @@ suite('shift receipt timeline against isolated PostgreSQL', () => {
 
     const active = await openShift(organizationId, {
       stationId: station.id, managerId: owner.id, userIds: [owner.id], openingCash: 0,
+      cashHandover: { previousShiftId: second.id, previousClosingCash: null, added: 0, removed: 0, reason: 'Previous physical cash count was not recorded in this fixture' },
       tankReadings: tankIds.map(id => ({ id, value: 1690 })), nozzleReadings: [], nozzleAssignments: [],
     });
     await createInvoice(organizationId, owner.id, {

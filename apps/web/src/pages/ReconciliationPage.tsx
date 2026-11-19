@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BadgeCheck,
   Banknote,
@@ -56,6 +56,8 @@ type CreditAllocation = {
 export function ReconciliationPage() {
   const [searchParams] = useSearchParams();
   const requestedShiftId = searchParams.get("shiftId");
+  const workspaceVersion = useRef(0);
+  const saveInFlight = useRef(false);
   const [data, setData] = useState<ReconciliationBootstrap | null>(null);
   const [shiftId, setShiftId] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
@@ -69,27 +71,31 @@ export function ReconciliationPage() {
     type: "CREDIT" | "FLEET";
     paymentMethod: Method;
   } | null>(null);
-  const load = () =>
-    api
-      .reconciliationBootstrap(requestedShiftId ?? undefined)
-      .then((result) => {
-        setData(result);
-        const next = requestedShiftId
-          ? result.shifts.find(s => s.id === requestedShiftId)
-          : result.shifts.find(s => s.status === "RECONCILIATION_REQUIRED") ?? result.shifts[0];
-        if (requestedShiftId && !next) setError("This shift is no longer available for reconciliation.");
-        if (next && !shiftId) choose(next);
-      })
-      .catch((e) =>
-        setError(
-          e instanceof ApiRequestError
-            ? e.message
-            : "Unable to load reconciliation.",
-        ),
-      );
+  const [loadError, setLoadError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
-    void load();
-  }, []);
+    let cancelled = false;
+    workspaceVersion.current += 1;
+    setData(null);
+    setLoadError("");
+    setSuccess("");
+    void api.reconciliationBootstrap(requestedShiftId ?? undefined).then(result => {
+      if (cancelled) return;
+      const next = requestedShiftId
+        ? result.shifts.find(item => item.id === requestedShiftId)
+        : result.shifts.find(item => item.status === "RECONCILIATION_REQUIRED") ?? result.shifts[0];
+      setData(result);
+      if (next) choose(next);
+      else {
+        setShiftId("");
+        if (requestedShiftId) setError("This shift is no longer available for reconciliation.");
+      }
+    }).catch(e => {
+      if (!cancelled) setLoadError(e instanceof ApiRequestError ? e.message : "Unable to load reconciliation. Check your connection and try again.");
+    });
+    return () => { cancelled = true; };
+  }, [requestedShiftId, reloadKey]);
   const shift = data?.shifts.find((item) => item.id === shiftId);
   function choose(next: ReconciliationShift) {
     setShiftId(next.id);
@@ -165,11 +171,13 @@ export function ReconciliationPage() {
       (allocation) => allocation.customerId && allocation.amount > 0,
     );
   async function lock() {
-    if (!shift || !fullyAllocated) return;
+    if (!shift || !fullyAllocated || saveInFlight.current || shift.status === "LOCKED") return;
+    saveInFlight.current = true;
+    const version = workspaceVersion.current;
     setSaving(true);
     setError("");
     try {
-      await api.reconcileShift(shift.id, {
+      const { shift: saved } = await api.reconcileShift(shift.id, {
         collections: rows.map((row) => ({
           paymentMethod: row.paymentMethod,
           actualAmount: row.actualAmount,
@@ -184,32 +192,55 @@ export function ReconciliationPage() {
         })),
         notes: notes || undefined,
       });
-      const result = await api.reconciliationBootstrap();
-      setData(result);
-      const saved = result.shifts.find((item) => item.id === shift.id);
-      if (saved) choose(saved);
+      if (version !== workspaceVersion.current) return;
+      setData(current => current ? {
+        ...current,
+        shifts: current.shifts.map(item => item.id === saved.id ? saved : item),
+      } : current);
+      choose(saved);
+      setSuccess(`Shift #${saved.shiftNumber} reconciled and locked. Your payment split and collections have been saved.`);
     } catch (e) {
+      if (version !== workspaceVersion.current) return;
       setError(
         e instanceof ApiRequestError
           ? e.message
           : "Unable to reconcile this shift.",
       );
     } finally {
+      saveInFlight.current = false;
       setSaving(false);
     }
   }
+  if (loadError) return (
+    <main className="page reconciliation-page">
+      <section className="sales-empty" role="alert">
+        <h2>Reconciliation could not be loaded</h2>
+        <p>{loadError}</p>
+        <button className="primary small" onClick={() => setReloadKey(key => key + 1)}>Try again</button>
+      </section>
+    </main>
+  );
   if (!data)
     return (
-      <main className="page">
+      <main className="page reconciliation-page">
         <div className="loading">
           <span />
           <p>Preparing shift reconciliation…</p>
         </div>
       </main>
     );
+  if (requestedShiftId && !shift) return (
+    <main className="page reconciliation-page">
+      <section className="sales-empty" role="alert">
+        <h2>Shift unavailable</h2>
+        <p>{error || "This shift is no longer available for reconciliation."}</p>
+        <Link className="primary small" to="/operations">Go to operations</Link>
+      </section>
+    </main>
+  );
   if (!data.shifts.length)
     return (
-      <main className="page">
+      <main className="page reconciliation-page">
         <div className="page-heading">
           <div>
             <span className="eyebrow">Cash & shift reconciliation</span>
@@ -233,7 +264,7 @@ export function ReconciliationPage() {
     );
   const locked = shift?.status === "LOCKED";
   return (
-    <main className="page">
+    <main className="page reconciliation-page">
       <div className="page-heading">
         <div>
           <span className="eyebrow">Shift reconciliation</span>
@@ -245,8 +276,9 @@ export function ReconciliationPage() {
           {locked ? "Locked" : "Needs review"}
         </span>
       </div>
-      {error && <div className="form-error">{error}</div>}
-      <section className="cash-recon-layout">
+      {error && <div className="form-error" role="alert">{error}</div>}
+      {success && <div className="reconciliation-success" role="status"><BadgeCheck size={20} /><span>{success}</span></div>}
+      <section className="cash-recon-layout" aria-busy={saving}>
         <aside className="shift-queue">
           <div>
             <span className="eyebrow">Shift queue</span>
@@ -255,7 +287,8 @@ export function ReconciliationPage() {
           {data.shifts.map((item) => (
             <button
               key={item.id}
-              onClick={() => choose(item)}
+              disabled={saving}
+              onClick={() => { setSuccess(""); choose(item); }}
               className={item.id === shiftId ? "selected" : ""}
             >
               <span>
@@ -311,7 +344,7 @@ export function ReconciliationPage() {
                 <small>
                   {fullyAllocated ? "Allocation complete" : "Still to allocate"}
                 </small>
-                <strong>{fullyAllocated ? "Ready" : money(unallocated)}</strong>
+                <strong>{locked ? "Locked" : fullyAllocated ? "Ready" : money(unallocated)}</strong>
               </span>
             </div>
             <div className="allocation-columns">
@@ -336,14 +369,14 @@ export function ReconciliationPage() {
                     <strong>{labels[row.paymentMethod]}</strong>
                   </div>
                   <label>
-                    <input
+                    {locked ? <output aria-label={`${labels[row.paymentMethod]} sales amount in rupees`}>{money(row.allocationAmount)}</output> : <input
                       aria-label={`${labels[row.paymentMethod]} sales amount in rupees`}
                       type="number"
                       min="0"
                       step="0.01"
                       value={row.allocationAmount || ""}
                       placeholder="0.00"
-                      disabled={locked}
+                      disabled={locked || saving}
                       onChange={(e) =>
                         update(
                           row.paymentMethod,
@@ -351,17 +384,17 @@ export function ReconciliationPage() {
                           e.target.value,
                         )
                       }
-                    />
+                    />}
                   </label>
                   <label>
-                    <input
+                    {locked ? <output aria-label={`${labels[row.paymentMethod]} verified amount in rupees`}>{money(row.actualAmount)}</output> : <input
                       aria-label={`${labels[row.paymentMethod]} verified amount in rupees`}
                       type="number"
                       min="0"
                       step="0.01"
                       value={row.actualAmount || ""}
                       placeholder="0.00"
-                      disabled={locked}
+                      disabled={locked || saving}
                       onChange={(e) =>
                         update(
                           row.paymentMethod,
@@ -369,7 +402,7 @@ export function ReconciliationPage() {
                           e.target.value,
                         )
                       }
-                    />
+                    />}
                   </label>
                   <b
                     className={
@@ -385,7 +418,7 @@ export function ReconciliationPage() {
               rows={rows}
               allocations={creditAllocations}
               customers={data.customers}
-              locked={locked}
+              locked={locked || saving}
               onChange={setCreditAllocations}
               onCreate={(method) =>
                 setCustomerMode({ type: method, paymentMethod: method })
@@ -395,7 +428,7 @@ export function ReconciliationPage() {
               rows={rows}
               allocations={creditAllocations}
               customers={data.customers}
-              locked={locked}
+              locked={locked || saving}
               onChange={setCreditAllocations}
               onCreate={() =>
                 setCustomerMode({ type: "FLEET", paymentMethod: "CASH" })
@@ -423,7 +456,7 @@ export function ReconciliationPage() {
               <span>Reconciliation note (optional)</span>
               <input
                 value={notes}
-                disabled={locked}
+                disabled={locked || saving}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Anything the owner or accountant should know"
               />
@@ -462,7 +495,7 @@ export function ReconciliationPage() {
           type={customerMode.type}
           onClose={() => setCustomerMode(null)}
           onCreated={async (customerId) => {
-            const result = await api.reconciliationBootstrap();
+            const result = await api.reconciliationBootstrap(shiftId);
             setData(result);
             const required = Number(
               rows.find(
@@ -909,7 +942,7 @@ function QuickCustomerModal({
         </span>
         <h2>Create account</h2>
         <p>Add it now and it will be selected automatically.</p>
-        {error && <div className="form-error">{error}</div>}
+        {error && <div className="form-error" role="alert">{error}</div>}
         <div className="form-grid">
           <label className="field">
             <span>Name</span>

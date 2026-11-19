@@ -20,6 +20,7 @@ const money = (value: string | number) =>
     currency: "INR",
     maximumFractionDigits: 0,
   }).format(Number(value));
+const cashMoney = (value: string | number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value));
 const captured = (value: string) => `${formatIndiaDateTime(value)} IST`;
 const meterLabel = (
   dispenser: { code: string; location: string | null },
@@ -63,6 +64,7 @@ function Field({
       <input
         type="number"
         min="0"
+        step="0.01"
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
       />
@@ -106,6 +108,7 @@ export function OperationsPage() {
   const navigate = useNavigate();
   const { selectedStationId, selectStation: selectWorkspaceStation } = useStation();
   const editedOpeningTanks = useRef(new Set<string>());
+  const receiptHistory = useRef<HTMLDetailsElement>(null);
   const requestedShiftId = new URLSearchParams(window.location.search).get("shiftId");
   const [data, setData] = useState<ShiftBootstrap | null>(null),
     [stationId, setStationId] = useState(""),
@@ -115,6 +118,11 @@ export function OperationsPage() {
       Array<{ nozzleId: string; userId: string }>
     >([]),
     [openingCash, setOpeningCash] = useState(0),
+    [cashAdded, setCashAdded] = useState(0),
+    [cashRemoved, setCashRemoved] = useState(0),
+    [cashReason, setCashReason] = useState(""),
+    [refreshingCash, setRefreshingCash] = useState(false),
+    [cashRefreshStatus, setCashRefreshStatus] = useState(""),
     [openTanks, setOpenTanks] = useState<Reading[]>([]),
     [openNozzles, setOpenNozzles] = useState<Reading[]>([]),
     [closeCash, setCloseCash] = useState(0),
@@ -126,13 +134,14 @@ export function OperationsPage() {
     [error, setError] = useState(""),
     [loadError, setLoadError] = useState(""),
     [saving, setSaving] = useState(false),
-    [refreshingStock, setRefreshingStock] = useState(false);
+    [refreshingStock, setRefreshingStock] = useState(false),
+    [stockRefreshStatus, setStockRefreshStatus] = useState("");
   const load = async () => {
     setLoadError("");
     let timeoutId: number | undefined;
     try {
       const result = await Promise.race([
-        api.shiftBootstrap(),
+        api.shiftBootstrap(true),
         new Promise<never>((_, reject) => {
           timeoutId = window.setTimeout(
             () => reject(new Error("SHIFT_WORKSPACE_TIMEOUT")),
@@ -162,9 +171,15 @@ export function OperationsPage() {
   }, []);
   const selectStation = (station: ShiftStation, source = data) => {
     editedOpeningTanks.current.clear();
+    setStockRefreshStatus("");
     setStationId(station.id);
     const config = station.configurations[0];
     const last = station.lastClosing;
+    setOpeningCash(Number(last?.closingCash ?? 0));
+    setCashAdded(0);
+    setCashRemoved(0);
+    setCashReason("");
+    setCashRefreshStatus("");
     setOpenTanks(
       config?.tanks.map((t) => ({ id: t.id, value: Number(station.availableTankStock.find(reading => reading.id === t.id)?.expectedOpening ?? t.openingStock) })) ??
         [],
@@ -202,6 +217,24 @@ export function OperationsPage() {
   );
   const selected = data?.stations.find((s) => s.id === stationId);
   const config = selected?.configurations[0];
+  const priorCash = selected?.lastClosing?.closingCash == null ? null : Number(selected.lastClosing.closingCash);
+  const expectedCash = priorCash === null ? null : (Math.round(priorCash * 100) + Math.round(cashAdded * 100) - Math.round(cashRemoved * 100)) / 100;
+  const cashDifference = expectedCash === null ? null : (Math.round(openingCash * 100) - Math.round(expectedCash * 100)) / 100;
+  const cashReasonRequired = cashAdded > 0 || cashRemoved > 0 || (cashDifference !== null && Math.abs(cashDifference) >= 0.01) || (!!selected?.lastClosing && priorCash === null);
+  async function refreshCash() {
+    setRefreshingCash(true);
+    setCashRefreshStatus("");
+    try {
+      const updated = await api.shiftBootstrap(true);
+      const station = updated.stations.find(item => item.id === stationId);
+      if (!station) throw new Error("Fuel station unavailable");
+      setData(updated);
+      // Preserve the physical count and the user's explanation for review.
+      setCashRefreshStatus("Previous closing cash refreshed. Your counted cash and handover entries have been kept for review.");
+    } catch {
+      setError("Unable to refresh the cash handover. Try again.");
+    } finally { setRefreshingCash(false); }
+  }
   const stationUsers =
     data?.users.filter(
       (user) => user.role === "OWNER" || user.stationIds.includes(stationId),
@@ -241,16 +274,23 @@ export function OperationsPage() {
   const refreshStock = async (validationMessage?: string) => {
     setRefreshingStock(true);
     if (!validationMessage) setError("");
+    setStockRefreshStatus("");
     try {
-      const updated = await api.shiftBootstrap();
+      const updated = await api.shiftBootstrap(true);
       const station = updated.stations.find(item => item.id === stationId);
       if (!station) throw new Error("This fuel station is no longer available.");
+      const openingChanged = station.availableTankStock.some(tank =>
+        Number(tank.expectedOpening) !== Number(selected?.availableTankStock.find(before => before.id === tank.id)?.expectedOpening),
+      );
       setData(updated);
       setOpenTanks(current => current.map(reading => {
         const after = station.availableTankStock.find(tank => tank.id === reading.id);
         if (!after || editedOpeningTanks.current.has(reading.id)) return reading;
         return { ...reading, value: Number(after.expectedOpening) };
       }));
+      if (!active && !validationMessage) setStockRefreshStatus(
+        openingChanged ? "Expected opening stock updated." : "Stock refreshed. The expected opening is unchanged.",
+      );
     } catch (error) {
       setError(validationMessage ?? (error instanceof ApiRequestError ? error.message : "Unable to refresh stock. Try again."));
     } finally {
@@ -285,6 +325,14 @@ export function OperationsPage() {
       setError("Choose a fuel station and manager.");
       return;
     }
+    if (expectedCash !== null && expectedCash < 0) {
+      setError("Cash removed cannot exceed previous closing cash plus cash added.");
+      return;
+    }
+    if (cashReasonRequired && !cashReason.trim()) {
+      setError("Add a cash handover reason before opening this shift.");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
@@ -294,16 +342,24 @@ export function OperationsPage() {
         userIds,
         nozzleAssignments: nozzleAssignments.filter((assignment) => assignment.userId),
         openingCash,
+        cashHandover: {
+          previousShiftId: selected?.lastClosing?.shiftId ?? null,
+          previousClosingCash: priorCash,
+          added: cashAdded,
+          removed: cashRemoved,
+          reason: cashReason,
+        },
         tankReadings: openTanks,
         nozzleReadings: openNozzles,
         notes,
       });
       setNotes("");
-      load();
+      await load();
     } catch (e) {
       const message = e instanceof ApiRequestError ? e.message : "Unable to open shift.";
       setError(message);
       if (e instanceof ApiRequestError && e.code === "OPENING_TANK_VARIANCE_NOTE_REQUIRED") await refreshStock(message);
+      if (e instanceof ApiRequestError && e.code === "CASH_HANDOVER_STALE") await refreshCash();
     } finally {
       setSaving(false);
     }
@@ -616,11 +672,30 @@ export function OperationsPage() {
               </select>
             </label>
           </div>
-          <Field
-            label="Opening cash"
-            value={openingCash}
-            onChange={setOpeningCash}
-          />
+          <section className="opening-cash-bridge">
+            <div className="section-heading">
+              <div><h3>Opening cash handover</h3>
+                <p>Confirm the cash physically available for this shift. Collections, UPI, card and customer dues are tracked separately.</p>
+              </div>
+              <button type="button" className="secondary small" disabled={refreshingCash || saving} onClick={() => void refreshCash()}><RefreshCw size={15} />{refreshingCash ? "Refreshing cash…" : "Refresh cash"}</button>
+            </div>
+            {selected?.lastClosing ? <p>Previous shift #{selected.lastClosing.shiftNumber} · {captured(selected.lastClosing.closedAt)}</p> : <p>First shift: enter the starting cash you have counted.</p>}
+            <div className="opening-cash-totals">
+              <div><span>Previous actual closing cash</span><strong>{priorCash === null ? "Not recorded" : cashMoney(priorCash)}</strong></div>
+              <div><span>Expected opening cash</span><strong>{expectedCash === null ? "Starting count required" : cashMoney(expectedCash)}</strong></div>
+              <div><span>Counted difference</span><strong>{cashDifference === null ? "No previous count to compare" : cashDifference === 0 ? "Match" : `${cashDifference > 0 ? "+" : "−"}${cashMoney(Math.abs(cashDifference))}`}</strong></div>
+            </div>
+            <div className="form-grid">
+              <Field label="Cash added between shifts (₹)" value={cashAdded} onChange={setCashAdded} />
+              <Field label="Cash removed between shifts (₹)" value={cashRemoved} onChange={setCashRemoved} />
+              <Field label="Actual opening cash counted (₹)" value={openingCash} onChange={setOpeningCash} />
+            </div>
+            <label className="field"><span>Cash handover reason{cashReasonRequired ? " *" : " (optional)"}</span>
+              <textarea value={cashReason} onChange={event => setCashReason(event.target.value)} required={cashReasonRequired} maxLength={500} placeholder="For example, cash handed to the owner or float added; explain any counted difference." />
+            </label>
+            <p>Cash added or removed is a handover record. Record any related expense, payment or bank transaction in its own workflow.</p>
+            {cashRefreshStatus && <p role="status">{cashRefreshStatus}</p>}
+          </section>
           <section className="opening-nozzle-table">
             <h3>Opening nozzle meter readings</h3>
             <p className="opening-nozzle-help">
@@ -686,6 +761,18 @@ export function OperationsPage() {
               lastClosingAt: selected?.lastClosing?.closedAt,
             })) ?? []}
             values={openTanks}
+            refreshStatus={stockRefreshStatus}
+            onReviewReceipts={() => {
+              const history = receiptHistory.current;
+              if (!history) return;
+              history.open = true;
+              history.querySelector("summary")?.focus();
+              history.scrollIntoView?.({ block: "start" });
+            }}
+            onUseExpected={reading => {
+              editedOpeningTanks.current.delete(reading.id);
+              replace(openTanks, reading.id, reading.value, setOpenTanks);
+            }}
             onChange={v => {
               editedOpeningTanks.current.add(v.id);
               replace(openTanks, v.id, v.value, setOpenTanks);
@@ -715,7 +802,7 @@ export function OperationsPage() {
           </p>
         </article>
       </section>
-      {stationId && <ReceiptHistory key={stationId} stationId={stationId} tolerance={data.stockVarianceTolerance} />}
+      {stationId && <ReceiptHistory key={stationId} stationId={stationId} tolerance={data.stockVarianceTolerance} detailsRef={receiptHistory} />}
       <section className="recent-shifts">
         <h2>Recent shifts</h2>
         {data.shifts
@@ -749,7 +836,7 @@ function receiptPeriod(receipt: ShiftReceipt) {
   return receipt.period === "BEFORE_FIRST" ? "Before the first shift" : "Between shifts · awaiting next opening";
 }
 
-function ReceiptHistory({ stationId, tolerance }: { stationId: string; tolerance: number }) {
+function ReceiptHistory({ stationId, tolerance, detailsRef }: { stationId: string; tolerance: number; detailsRef?: React.Ref<HTMLDetailsElement> }) {
   const [receipts, setReceipts] = useState<ShiftReceipt[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -784,7 +871,7 @@ function ReceiptHistory({ stationId, tolerance }: { stationId: string; tolerance
     }
   }
 
-  return <details className="recent-shifts operations-receipts" onToggle={event => {
+  return <details ref={detailsRef} className="recent-shifts operations-receipts" onToggle={event => {
     if (event.currentTarget.open && receipts === null && !loading && !error) void load();
   }}>
     <summary>Tank receipt history</summary>
@@ -889,51 +976,56 @@ function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance,
   </section>;
 }
 function Readings({
-  title,
-  items,
-  values,
-  onChange,
-  locked = false,
-  action,
+  title, items, values, onChange, onUseExpected, onReviewReceipts, action, refreshStatus,
 }: {
   title: string;
   items: Array<{ id: string; label: string; opening: number; balance?: ShiftStation["availableTankStock"][number] | undefined; lastClosingAt?: string | undefined }>;
   values: Reading[];
   onChange(value: Reading): void;
-  locked?: boolean;
-  action?: React.ReactNode;
+  onUseExpected(value: Reading): void;
+  onReviewReceipts(): void;
+  action: React.ReactNode;
+  refreshStatus: string;
 }) {
+  const hasBookDifference = items.some(({ balance }) => balance &&
+    Math.abs(Number(balance.value) - Number(balance.expectedOpening)) > 0.001);
   return (
     <section className="shift-readings">
       <div className="operations-section-header"><h3>{title}</h3>{action}</div>
-      {items.map((item) => {
-        const value = values.find((v) => v.id === item.id)?.value ?? 0;
+      <div className="opening-stock-status" role="status">{refreshStatus}</div>
+      {hasBookDifference && <div className="opening-stock-help">
+        <p><strong>Book stock and expected opening differ.</strong> Expected opening starts with the last measured closing dip and includes stock movements since then. Book stock reflects the full stock history. Check the receipt times and enter the dip measured at opening.</p>
+        <button type="button" className="secondary small" onClick={onReviewReceipts}>Review tank receipt history</button>
+      </div>}
+      {items.map(({ id, label, opening, balance, lastClosingAt }) => {
+        const value = values.find(reading => reading.id === id)?.value ?? 0;
+        const expected = Number(balance?.expectedOpening ?? opening);
+        const difference = value - expected;
+        const bookDifference = balance ? Number(balance.value) - expected : 0;
         return (
-          <label key={item.id}>
-            <span>
-              <strong>{item.label}</strong>
-              {item.balance ? <>
-                <small>{item.balance.lastActual == null ? "Using book stock before opening" : `Last actual closing ${litres(Number(item.balance.lastActual))} · ${captured(item.lastClosingAt!)}`}</small>
-                <small>{item.balance.lastActual == null ? "Receipts before opening" : "Received between shifts"} {litres(Number(item.balance.received))} · Adjustments {litres(Number(item.balance.adjustments))}{Number(item.balance.netOther) !== 0 && ` · Other movements ${litres(Number(item.balance.netOther))}`}</small>
-                <small><b>Expected opening {litres(Number(item.balance.expectedOpening))}</b> · Book stock now {litres(Number(item.balance.value))}</small>
-                {Math.abs(value - Number(item.balance.expectedOpening)) > 0.001 && <small>Actual dip differs by {litres(value - Number(item.balance.expectedOpening))}. Add an opening note.</small>}
-              </> : <small>{locked ? "Automatically from previous shift closing" : `Opening ${litres(item.opening)}`}</small>}
-            </span>
-            {locked ? (
-              <output>{value.toLocaleString("en-IN")} L</output>
-            ) : (
-              <input
-                aria-label={`Actual opening dip in litres for ${item.label}`}
-                type="number"
-                min="0"
-                step="0.001"
-                value={value}
-                onChange={(e) =>
-                  onChange({ id: item.id, value: Number(e.target.value) })
-                }
-              />
-            )}
-          </label>
+          <div className="opening-tank-reading" key={id}>
+            <label>
+              <span>
+                <strong>{label}</strong>
+                {balance && <>
+                  <small>{balance.lastActual == null ? "Using book stock before opening" : `Last actual closing ${litres(Number(balance.lastActual))} · ${captured(lastClosingAt!)}`}</small>
+                  <small>{balance.lastActual == null ? "Receipts before opening" : "Received between shifts"} {litres(Number(balance.received))} · Adjustments {litres(Number(balance.adjustments))}{Number(balance.netOther) !== 0 && ` · Other movements ${litres(Number(balance.netOther))}`}</small>
+                </>}
+                <small><b>Expected opening {litres(expected)}</b>{balance && ` · Book stock now ${litres(Number(balance.value))}`}</small>
+                {Math.abs(bookDifference) > 0.001 && <small>Book stock is {litres(Math.abs(bookDifference))} {bookDifference > 0 ? "higher" : "lower"}.</small>}
+              </span>
+              <span className="opening-tank-input">
+                <small>Actual opening dip (L)</small>
+                <input aria-label={`Actual opening dip in litres for ${label}`} type="number" min="0" step="0.001" value={value}
+                  onChange={event => onChange({ id, value: Number(event.target.value) })}
+                />
+              </span>
+            </label>
+            {Math.abs(difference) > 0.001 && <div className="operations-section-header opening-dip-difference">
+              <small>Actual dip differs by {litres(Math.abs(difference))}. Add an opening note.</small>
+              <button type="button" className="secondary small" aria-label={`Reset to expected opening for ${label}`} onClick={() => onUseExpected({ id, value: expected })}>Reset to expected opening</button>
+            </div>}
+          </div>
         );
       })}
     </section>
@@ -964,13 +1056,19 @@ function ShiftSummary({
     <article className="shift-summary">
       <span className="eyebrow">Shift summary preview</span>
       <h2>Here’s what we captured</h2>
+      {shift.openingCashHandover && <details>
+        <summary>Opening cash handover</summary>
+        <p>Previous closing: {shift.openingCashHandover.previousClosingCash === null ? "Not recorded" : cashMoney(shift.openingCashHandover.previousClosingCash)} · Added: {cashMoney(shift.openingCashHandover.added)} · Removed: {cashMoney(shift.openingCashHandover.removed)}</p>
+        <p>Expected: {shift.openingCashHandover.expectedOpening === null ? "First count / previous count unavailable" : cashMoney(shift.openingCashHandover.expectedOpening)} · Counted: {cashMoney(shift.openingCashHandover.actualOpening)}{shift.openingCashHandover.difference !== null && ` · Difference: ${cashMoney(shift.openingCashHandover.difference)}`}</p>
+        {shift.openingCashHandover.reason && <p>{shift.openingCashHandover.reason}</p>}
+      </details>}
       <div>
         <span>Opening cash</span>
-        <strong>{money(shift.openingCash)}</strong>
+        <strong>{cashMoney(shift.openingCash)}</strong>
       </div>
       <div>
         <span>Closing cash</span>
-        <strong>{money(closingCash)}</strong>
+        <strong>{cashMoney(closingCash)}</strong>
       </div>
       <div>
         <span>Metered volume</span>

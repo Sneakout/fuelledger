@@ -143,6 +143,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try { return await pending; } finally { inFlightSaves.delete(signature); }
 }
 async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
+  const isRead = !init?.method || init.method === "GET";
+  const allowOfflineFallback = isRead && init?.cache !== "no-store";
   let response: Response;
   try {
     response = await fetch(`${API_URL}${path}`, {
@@ -153,7 +155,7 @@ async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
     markOnline();
   } catch {
     markOffline();
-    if (!init?.method || init.method === "GET") {
+    if (allowOfflineFallback) {
       const cached = await readOfflineResponse<T>(path);
       if (cached !== undefined) return cached;
     }
@@ -162,7 +164,7 @@ async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
       "NETWORK_UNAVAILABLE",
     );
   }
-  if ((!init?.method || init.method === "GET") && response.status >= 500) {
+  if (allowOfflineFallback && response.status >= 500) {
     const cached = await readOfflineResponse<T>(path);
     if (cached !== undefined) {
       markOffline();
@@ -194,7 +196,7 @@ async function rawRequest<T>(path: string, init?: RequestInit): Promise<T> {
     );
   }
   const result = body as T;
-  if ((!init?.method || init.method === "GET") && isOfflineCacheable(path))
+  if (isRead && isOfflineCacheable(path))
     await cacheOfflineResponse(path, result);
   return result;
 }
@@ -323,7 +325,7 @@ export const api = {
   tankReceiptHistory: (stationId: string, before?: string) => request<{ receipts: ShiftReceipt[]; nextCursor: string | null }>(
     `/shifts/stations/${encodeURIComponent(stationId)}/receipts${before ? `?before=${encodeURIComponent(before)}` : ""}`,
   ),
-  shiftBootstrap: () => request<ShiftBootstrap>("/shifts/bootstrap"),
+  shiftBootstrap: (fresh = false) => request<ShiftBootstrap>("/shifts/bootstrap", fresh ? { cache: "no-store" } : undefined),
   openShift: (input: ShiftOpenForm) =>
     request<{ shift: Shift }>("/shifts/open", {
       method: "POST",
@@ -364,7 +366,7 @@ export const api = {
       body: JSON.stringify({ ...input, recordedAt: input.recordedAt ?? new Date().toISOString() }),
     }),
   reconciliationBootstrap: (shiftId?: string) =>
-    request<ReconciliationBootstrap>(`/reconciliation/bootstrap${shiftId ? `?shiftId=${encodeURIComponent(shiftId)}` : ""}`),
+    request<ReconciliationBootstrap>(`/reconciliation/bootstrap${shiftId ? `?shiftId=${encodeURIComponent(shiftId)}` : ""}`, { cache: "no-store" }),
   reconcileShift: (id: string, input: ReconciliationForm) =>
     request<{ shift: ReconciliationShift }>(`/reconciliation/shifts/${id}`, {
       method: "POST",
@@ -806,6 +808,7 @@ export type ClosingNozzleReading = Reading & {
   testingReturned: boolean;
 };
 export type ShiftOpenForm = {
+  cashHandover?: { previousShiftId: string | null; previousClosingCash: number | null; added: number; removed: number; reason?: string };
   stationId: string;
   managerId: string;
   userIds: string[];
@@ -836,6 +839,7 @@ export type ShiftStation = {
     expectedOpening: string;
   }>;
   lastClosing: {
+    closingCash: string | null;
     nozzleAssignments: Array<{ nozzleId: string; userId: string }>;
     shiftId: string;
     shiftNumber: number;
@@ -888,6 +892,7 @@ export type ShiftReceipt = ShiftDelivery & {
   timingMismatch: boolean;
 };
 export type Shift = {
+  openingCashHandover?: { previousShiftId: string | null; previousClosingCash: string | null; added: string; removed: string; expectedOpening: string | null; actualOpening: string; difference: string | null; reason: string | null; enteredById: string | null; recordedAt: string } | null;
   id: string;
   shiftNumber: number;
   status: string;

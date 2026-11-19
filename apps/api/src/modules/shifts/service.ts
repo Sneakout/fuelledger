@@ -13,6 +13,7 @@ import { effectivePriceAt } from "../../lib/effective-price.js";
 import { prisma } from "../../lib/prisma.js";
 import { shiftMovementWindow } from '../../lib/shift-interval.js';
 import { deliveryEvidence, receiptDetails } from './receipt-history.js';
+import { cashHandoverSnapshot } from './cash-handover.js';
 import { collectionAccount, postJournal } from "../accounting/service.js";
 
 const include = {
@@ -205,6 +206,7 @@ async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizatio
             id: true,
             shiftNumber: true,
             closedAt: true,
+            closingCash: true,
             nozzleAssignments: { select: { nozzleId: true, userId: true } },
             tankReadings: { select: { tankId: true, closingDip: true } },
             nozzleReadings: { select: { nozzleId: true, closingMeter: true } },
@@ -264,6 +266,7 @@ async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizatio
         shiftId: previous.id,
         shiftNumber: previous.shiftNumber,
         closedAt: previous.closedAt!,
+        closingCash: previous.closingCash,
         nozzleAssignments: previous.nozzleAssignments,
         tankReadings: previous.tankReadings.flatMap(row => {
           if (row.closingDip === null) return [];
@@ -295,7 +298,7 @@ async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizatio
     shifts: await Promise.all(shifts.map(async (shift) => summary(await withStockBridge(organizationId, shift, tx, asOf)))),
   };
 }
-export async function openShift(organizationId: string, input: OpenShiftInput) {
+export async function openShift(organizationId: string, input: OpenShiftInput, enteredById: string | null = null) {
   return safeTransaction(prisma, async (tx) => {
   const openedAt = new Date();
   const station = await tx.station.findFirst({
@@ -344,12 +347,15 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
     where: { stationId: station.id, closedAt: { not: null } },
     orderBy: { closedAt: "desc" },
     select: {
+      id: true,
+      closingCash: true,
       shiftNumber: true,
       closedAt: true,
       tankReadings: { select: { tankId: true, closingDip: true } },
       nozzleReadings: { select: { nozzleId: true, closingMeter: true } },
     },
   });
+  const cashHandover = cashHandoverSnapshot(input, previous, enteredById, openedAt);
   const tankSources = tanks.map((tank) => ({
     id: tank.id,
     stationId: station.id,
@@ -425,6 +431,7 @@ export async function openShift(organizationId: string, input: OpenShiftInput) {
       status: "OPEN",
       openedAt,
       openingCash: new Prisma.Decimal(input.openingCash),
+      openingCashHandover: cashHandover,
       notes: input.notes || null,
       users: {
         create: Array.from(new Set(input.userIds)).map((userId) => ({

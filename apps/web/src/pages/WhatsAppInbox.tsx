@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ChevronLeft, ChevronRight, History, ListChecks, RefreshCw, Users } from 'lucide-react';
 import { api, ApiRequestError, type WhatsAppOwnerSummary, type WhatsAppRolloutPolicy } from '../lib/api';
+import { currentPendingHold, pendingMessageStatus } from '../lib/whatsapp-message-state';
 import { OwnerWhatsAppWorkspace, whatsappHoldReasons, whatsappMessageNames } from './OwnerWhatsAppWorkspace';
 
 const views = [
@@ -92,7 +93,8 @@ function OwnerDirectory({ policy, onOpen, listVersion }: { policy: WhatsAppRollo
   </>;
 }
 
-function MessageDirectory({ view, owner, clearOwner, onOpen, listVersion }: {
+function MessageDirectory({ view, owner, clearOwner, onOpen, listVersion, policy }: {
+  policy: WhatsAppRolloutPolicy;
   view: 'attention' | 'history'; owner: WhatsAppOwnerSummary | null;
   listVersion: number; clearOwner(): void; onOpen(ownerId: string, messageId: string): void;
 }) {
@@ -115,12 +117,14 @@ function MessageDirectory({ view, owner, clearOwner, onOpen, listVersion }: {
     {records.loading && <p role="status">Loading messages…</p>}
     {records.error && <p role="alert" className="form-error">{records.error}</p>}
     {records.rows?.map(row => {
-      const reason = row.errorMessage || (row.rolloutHold && whatsappHoldReasons[row.rolloutHold])
-        || row.suppressionReason?.replaceAll('_', ' ') || row.rolloutHold?.replaceAll('_', ' ');
-      const status = row.status === 'PENDING' && row.needsApproval ? 'Needs approval' : statuses[row.status];
+      const hold = row.status === 'PENDING' ? currentPendingHold(policy, row.organizationId, row.type, row.rolloutHold) : row.rolloutHold;
+      const reason = row.status === 'PENDING'
+        ? (hold && hold !== 'preview_only' && (whatsappHoldReasons[hold] ?? hold.replaceAll('_', ' ')))
+        : row.errorMessage || row.suppressionReason?.replaceAll('_', ' ');
+      const status = row.status === 'PENDING' ? pendingMessageStatus(hold, row.needsApproval) : statuses[row.status];
       return <div className="wa-inbox-row" key={row.id}>
         <div><strong>{whatsappMessageNames[row.type] ?? row.type.replaceAll('_', ' ')}</strong><small>{row.organization.name}</small></div>
-        <div><b>{status}</b><small>{reason}</small></div>
+        <div><b>{status}</b><small>{reason}</small>{row.status === 'PENDING' && <small>Preview: {row.needsApproval ? 'approval needed in FuelNerve' : 'approved in FuelNerve'}</small>}</div>
         <small>{timestamp(row.createdAt)}</small>
         <button type="button" className="secondary small" onClick={() => onOpen(row.organizationId, row.id)}>Open message</button>
       </div>;
@@ -180,7 +184,7 @@ export function WhatsAppInbox({ policy, onRefresh, onTestSetup }: {
     </nav>
     <div hidden={Boolean(selected)}>
       {view === 'owners' ? <OwnerDirectory listVersion={listVersion} policy={policy} onOpen={openOwner}/> :
-        <MessageDirectory key={`${view}:${historyOwner?.id ?? ''}`} listVersion={listVersion} view={view} owner={view === 'history' ? historyOwner : null}
+        <MessageDirectory policy={policy} key={`${view}:${historyOwner?.id ?? ''}`} listVersion={listVersion} view={view} owner={view === 'history' ? historyOwner : null}
           clearOwner={() => setHistoryOwner(null)} onOpen={openOwner}/>}
     </div>
     {selected && <div>

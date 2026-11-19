@@ -105,3 +105,27 @@ it('stops retrying a rejected record and surfaces it for attention', async () =>
 
   expect(getOfflineSyncSnapshot()).toMatchObject({ pending: 0, attention: 1, lastError: 'Review this saved record before posting.' });
 });
+
+it('requires a server response when the operator explicitly refreshes shift stock', async () => {
+  const cachedShift = { stations: [], shifts: [] };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce({ status: 200, ok: true, headers: { get: () => 'application/json' }, json: async () => cachedShift })
+    .mockRejectedValue(new TypeError('offline'));
+  vi.stubGlobal('fetch', fetchMock);
+
+  await expect(api.shiftBootstrap()).resolves.toEqual(cachedShift);
+  await expect(api.shiftBootstrap(true)).rejects.toMatchObject({ code: 'NETWORK_UNAVAILABLE' });
+  expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining('/shifts/bootstrap'), expect.objectContaining({ cache: 'no-store' }));
+  await expect(api.shiftBootstrap()).resolves.toEqual(cachedShift);
+});
+
+
+it('does not restore stale reconciliation records when the server is unavailable', async () => {
+  const fetchMock = vi.fn().mockResolvedValueOnce({ status: 200, ok: true,
+    headers: { get: () => 'application/json' }, json: async () => ({ shifts: [{ id: 'shift-1', status: 'RECONCILIATION_REQUIRED' }], customers: [] }),
+  }).mockRejectedValue(new TypeError('offline'));
+  vi.stubGlobal('fetch', fetchMock);
+  await api.reconciliationBootstrap('shift-1');
+  await expect(api.reconciliationBootstrap('shift-1')).rejects.toMatchObject({ code: 'NETWORK_UNAVAILABLE' });
+  expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining('/reconciliation/bootstrap?shiftId=shift-1'), expect.objectContaining({ cache: 'no-store' }));
+});

@@ -84,3 +84,18 @@ it('prepares a selected operational preview and enables only its owner category'
   fireEvent.click(screen.getByRole('button',{name:'Enable selected message for this owner only'}));
   await waitFor(()=>expect(setup).toHaveBeenCalledWith('a','PURCHASE_RECEIPT_SUMMARY'));
 });
+
+
+it('shows a paused category separately from preview approval and keeps sending disabled', async () => {
+  mock.history.mockResolvedValue({ deliveries: [{ ...job, rolloutHold: 'category_paused' }] });
+  const view = render(<OwnerWhatsAppWorkspace customers={owners} policy={{ ...policy, enabledCategories: [] }} onRefresh={vi.fn()} onTestSetup={vi.fn()}/>);
+  expect(await screen.findByText('Paused')).toBeInTheDocument();
+  expect(screen.getByText('This message category is paused.')).toBeInTheDocument();
+  expect(screen.getByText(/Preview: approval needed in FuelNerve/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Send this message' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Approve this preview' })).toBeEnabled();
+  view.rerender(<OwnerWhatsAppWorkspace customers={owners} policy={policy} onRefresh={vi.fn()} onTestSetup={vi.fn()}/>);
+  expect(await screen.findByText('Needs preview approval')).toBeInTheDocument();
+  expect(screen.queryByText('This message category is paused.')).not.toBeInTheDocument();
+  expect(mock.send).not.toHaveBeenCalled();
+});

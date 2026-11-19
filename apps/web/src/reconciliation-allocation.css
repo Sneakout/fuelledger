@@ -3,5 +3,25 @@
 @media(max-width:1100px){.allocation-columns{display:none}.collection-row.allocation-row{grid-template-columns:1fr 1fr;padding:17px 4px}.collection-row.allocation-row .collection-method{grid-column:1/-1}.collection-row.allocation-row>label:before,.collection-row.allocation-row>b:before{display:block;margin-bottom:5px;color:var(--muted);font-size:7px;font-weight:800;text-transform:uppercase}.collection-row.allocation-row>label:nth-of-type(1):before{content:'Allocated sales (₹)'}.collection-row.allocation-row>label:nth-of-type(2):before{content:'Confirmed amount (₹)'}.collection-row.allocation-row>b:before{content:'Difference (₹)'}.collection-row.allocation-row>b{text-align:left}.allocation-total{grid-template-columns:1fr 1fr}.allocation-total>*{text-align:left}}
 @media(max-width:650px){.allocation-progress{grid-template-columns:1fr}.allocation-progress>span{border-right:0;border-bottom:1px solid #d9e6df}.collection-row.allocation-row{grid-template-columns:1fr}.allocation-total{grid-template-columns:1fr;gap:7px}}
 .credit-allocation{margin:18px 0;padding:18px;border:1px solid #d9e6df;border-radius:14px;background:#fbfdfc}.credit-allocation>header{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:12px}.credit-allocation h3{margin:4px 0 0;font-size:15px}.credit-allocation header>strong{font-size:10px}.credit-allocation-row{display:grid;grid-template-columns:minmax(180px,1fr) minmax(150px,.7fr) 130px auto;gap:10px;align-items:end;padding:12px 0;border-top:1px solid #e6ede9}.credit-allocation-row .field{margin:0}.credit-allocation-row .field>span{font-size:8px}.credit-allocation-row .text-button{height:38px}.allocation-help{margin:10px 0 0;color:#a06413;font-size:9px}@media(max-width:800px){.credit-allocation-row{grid-template-columns:1fr 1fr}.credit-allocation-row .text-button{justify-self:start}}@media(max-width:650px){.credit-allocation>header{align-items:flex-start;flex-direction:column}.credit-allocation-row{grid-template-columns:1fr}}
-.allocation-workspace{min-width:0}.collection-row.allocation-row>*{min-width:0}.allocation-total{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));overflow-wrap:anywhere}.allocation-workspace input{font-size:16px!important;min-height:44px}
+.allocation-workspace{min-width:0}.collection-row.allocation-row>*{min-width:0}.allocation-total{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));overflow-wrap:anywhere}.allocation-workspace input{min-height:44px}
 @media(max-width:1100px){.collection-row.allocation-row>label:nth-of-type(1):before{content:'Sales by payment type (₹)'!important}.collection-row.allocation-row>label:nth-of-type(2):before{content:'Verified amount (₹)'!important}.collection-row.allocation-row>b:before{content:'Short / excess (₹)'!important}}
+
+/* Keep reconciliation figures in the same Manrope hierarchy as the rest of FuelNerve. */
+.reconciliation-page .collection-heading { gap: 16px; flex-wrap: wrap; }
+.reconciliation-page .collection-heading h2 { font-size: 22px; letter-spacing: -.035em; }
+.reconciliation-page .collection-heading p { font-size: 11px; line-height: 1.6; }
+.reconciliation-page .allocation-progress strong { font-size: 20px; letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
+.reconciliation-page .allocation-columns { grid-template-columns: minmax(120px,1fr) minmax(130px,.9fr) minmax(130px,.9fr) minmax(100px,.7fr); font-size: 9px; line-height: 1.5; }
+.reconciliation-page .collection-row.allocation-row { grid-template-columns: minmax(120px,1fr) minmax(130px,.9fr) minmax(130px,.9fr) minmax(100px,.7fr); }
+.reconciliation-page .allocation-workspace input,
+.reconciliation-page .allocation-workspace select { font-family: inherit; font-size: 14px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.reconciliation-page .collection-row output { display: block; padding: 12px; border-radius: 10px; background: #f3f8f5; color: var(--forest); font-size: 14px; font-weight: 750; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.reconciliation-page .collection-method strong { font-size: 12px; }
+.reconciliation-page .lock-proof { flex-shrink: 0; }
+.reconciliation-page .reconciliation-note small { line-height: 1.6; }
+.reconciliation-success { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; padding: 14px 18px; border: 1px solid #b9dbcb; border-radius: 12px; background: #e9f6ef; color: var(--green); font-size: 12px; font-weight: 700; animation: reconciliation-arrive .2s ease-out; }
+.reconciliation-success svg { flex-shrink: 0; }
+@keyframes reconciliation-arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .reconciliation-success { animation: none; } }
+@media (max-width: 1100px) { .reconciliation-page .collection-row.allocation-row { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 650px) { .reconciliation-page .collection-row.allocation-row { grid-template-columns: 1fr; } .reconciliation-page .allocation-workspace input, .reconciliation-page .allocation-workspace select { font-size: 16px; } }

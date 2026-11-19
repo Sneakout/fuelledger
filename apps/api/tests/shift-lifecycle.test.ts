@@ -27,16 +27,17 @@ describe('closing shift', () => {
   it('opens with prior meters, stock including an intervening delivery, and chosen attendant', async () => {
     const tx: any = {
       station: { findFirst: vi.fn().mockResolvedValue({id:'station', configurations:[{id:'cfg',tanks:[{id:'t',code:'T1',productId:'fuel',openingStock:d(1000)}],dispensers:[{nozzles:[{id:'n',code:'N1',openingMeter:d(1000)}]}]}]}) },
-      shift: { findFirst: vi.fn().mockResolvedValueOnce({shiftNumber:1,closedAt:new Date('2026-01-01'),tankReadings:[{tankId:'t',closingDip:d(900)}],nozzleReadings:[{nozzleId:'n',closingMeter:d(1100)}]}).mockResolvedValueOnce(null), aggregate:vi.fn().mockResolvedValue({_max:{shiftNumber:1}}),create:vi.fn(async ({data})=>({...data,nozzleReadings:[],tankReadings:[]})) },
+      shift: { findFirst: vi.fn().mockResolvedValueOnce({id:'previous',closingCash:d(50),shiftNumber:1,closedAt:new Date('2026-01-01'),tankReadings:[{tankId:'t',closingDip:d(900)}],nozzleReadings:[{nozzleId:'n',closingMeter:d(1100)}]}).mockResolvedValueOnce(null), aggregate:vi.fn().mockResolvedValue({_max:{shiftNumber:1}}),create:vi.fn(async ({data})=>({...data,nozzleReadings:[],tankReadings:[]})) },
       inventoryLedger:{groupBy:vi.fn().mockResolvedValue([{tankId:'t',stationId:'station',productId:'fuel',type:'RECEIPT',_sum:{quantityDelta:d(200)}}])},
       user:{findMany:vi.fn().mockResolvedValue([{id:'u'}])},
     };
     db.$transaction.mockImplementation(async fn=>fn(tx));
-    await openShift('org',{stationId:'station',managerId:'u',userIds:['u'],nozzleAssignments:[{nozzleId:'n',userId:'u'}],openingCash:50,tankReadings:[{id:'t',value:1100}],nozzleReadings:[{id:'n',value:1100}]});
+    await openShift('org',{stationId:'station',managerId:'u',userIds:['u'],nozzleAssignments:[{nozzleId:'n',userId:'u'}],openingCash:50,tankReadings:[{id:'t',value:1100}],nozzleReadings:[{id:'n',value:1100}]}, 'u');
     const saved = tx.shift.create.mock.calls[0][0].data;
     expect(saved.tankReadings.create[0].openingDip.toNumber()).toBe(1100);
     expect(saved.nozzleReadings.create[0].openingMeter.toNumber()).toBe(1100);
     expect(saved.nozzleAssignments.create).toEqual([{nozzleId:'n',userId:'u'}]);
+    expect(saved.openingCashHandover).toMatchObject({ previousShiftId: 'previous', previousClosingCash: '50.00', expectedOpening: '50.00', actualOpening: '50.00', difference: '0.00', enteredById: 'u' });
   });
   it('opens with an active nozzle left without a fixed attendant', async () => {
     const tx: any = {
