@@ -25,8 +25,9 @@ it('carries cash forward, explains withdrawals and preserves the actual count on
   shiftBootstrap.mockReset().mockResolvedValueOnce(initial).mockResolvedValue(updated);
   openShift.mockReset().mockResolvedValue({ shift: { id: 'new' } });
   render(<MemoryRouter><OperationsPage /></MemoryRouter>);
-  const counted = await screen.findByRole('spinbutton', { name: 'Actual opening cash counted (₹)' });
+  const counted = await screen.findByRole('spinbutton', { name: 'Physical cash at start (₹)' });
   expect(counted).toHaveValue(1000.25);
+  fireEvent.click(screen.getByText('Cash added, removed or handed over (if applicable)'));
   fireEvent.change(screen.getByRole('spinbutton', { name: 'Cash removed between shifts (₹)' }), { target: { value: '800' } });
   fireEvent.change(counted, { target: { value: '200.25' } });
   fireEvent.click(screen.getByRole('button', { name: /^Open shift$/ }));
@@ -101,4 +102,16 @@ it('explains why a fresh opening estimate can differ from book stock and links t
 
   fireEvent.click(screen.getByRole('button', { name: 'Review tank receipt history' }));
   expect(await screen.findByText('No posted tank receipts for this fuel station.')).toBeInTheDocument();
+});
+
+it('keeps the first shift focused on starting cash without historical comparisons', async () => {
+  const first = workspace(0);
+  Object.assign(first.stations[0]!, { lastClosing: null });
+  shiftBootstrap.mockReset().mockResolvedValue(first);
+  render(<MemoryRouter><OperationsPage /></MemoryRouter>);
+  expect(await screen.findByRole('heading', {name:'Starting cash'})).toBeInTheDocument();
+  expect(screen.getByRole('spinbutton', {name:'Physical cash at start (₹)'})).toHaveValue(0);
+  expect(screen.queryByText('Starting count required')).not.toBeInTheDocument();
+  expect(screen.queryByText('No previous count to compare')).not.toBeInTheDocument();
+  expect(screen.getByText('Cash added, removed or handed over (if applicable)').closest('details')).not.toHaveAttribute('open');
 });

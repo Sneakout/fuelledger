@@ -149,8 +149,13 @@ export function AppShell() {
         </Link>)}
       </nav>
       <div className="sidebar-foot">
-        <span className="avatar">{user?.name.slice(0, 2).toUpperCase()}</span>
-        <div><strong>{user?.name}</strong><small>{user?.role.toLowerCase()}</small></div>
+        {access.liveAccount ? <Link className="sidebar-profile" to="/account" aria-label="Open My account" onClick={closeMenu}>
+          <span className="avatar" aria-hidden="true">{user?.name.slice(0, 2).toUpperCase()}</span>
+          <div><strong>{user?.name}</strong><small>{user?.role.toLowerCase()}</small></div>
+        </Link> : <div className="sidebar-profile">
+          <span className="avatar" aria-hidden="true">{user?.name.slice(0, 2).toUpperCase()}</span>
+          <div><strong>{user?.name}</strong><small>{user?.role.toLowerCase()}</small></div>
+        </div>}
         <button className="signout" onClick={() => void logout()}>Sign out</button>
       </div>
     </aside>

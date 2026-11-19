@@ -108,3 +108,5 @@
   .opening-cash-totals { grid-template-columns: 1fr; }
   .opening-cash-bridge .section-heading { flex-direction: column; }
 }
+.opening-cash-details { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+.opening-cash-details > summary { color: var(--green); font-size: 13px; font-weight: 750; cursor: pointer; }

@@ -347,6 +347,7 @@ export function ReconciliationPage() {
                 <strong>{locked ? "Locked" : fullyAllocated ? "Ready" : money(unallocated)}</strong>
               </span>
             </div>
+            <p className="time-note">Cash means physical notes and coins collected from sales. Exclude starting cash, UPI, card and customer credit. Check digital payments in their own rows.</p>
             <div className="allocation-columns">
               <span>Payment method</span>
               <span>Sales by payment type (₹)</span>
@@ -366,7 +367,7 @@ export function ReconciliationPage() {
                     <span>
                       <Icon size={17} />
                     </span>
-                    <strong>{labels[row.paymentMethod]}</strong>
+                    <strong>{row.paymentMethod === "CASH" ? "Cash · notes & coins" : labels[row.paymentMethod]}</strong>
                   </div>
                   <label>
                     {locked ? <output aria-label={`${labels[row.paymentMethod]} sales amount in rupees`}>{money(row.allocationAmount)}</output> : <input
@@ -387,6 +388,7 @@ export function ReconciliationPage() {
                     />}
                   </label>
                   <label>
+                    {row.paymentMethod === "CASH" && <small>Physical cash received from sales</small>}
                     {locked ? <output aria-label={`${labels[row.paymentMethod]} verified amount in rupees`}>{money(row.actualAmount)}</output> : <input
                       aria-label={`${labels[row.paymentMethod]} verified amount in rupees`}
                       type="number"

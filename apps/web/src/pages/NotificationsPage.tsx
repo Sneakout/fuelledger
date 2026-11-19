@@ -1,14 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, BellRing, Check, MessageCircleMore, RefreshCw, TriangleAlert } from 'lucide-react';
+import { ArrowRight, BellRing, Check, MessageCircleMore, TriangleAlert } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../components/AuthProvider';
 import { ApiRequestError, api, type NotificationBootstrap, type NotificationDelivery, type NotificationSettings } from '../lib/api';
 
-const labels: Record<string, string> = {
-  LOW_STOCK: 'Low stock', SHIFT_CLOSED_SUMMARY: 'Shift summary', PURCHASE_RECEIPT_SUMMARY: 'Receipt summary',
-  DAILY_SUMMARY: 'Daily operating summary', OVERDUE_CUSTOMER: 'Customer credit report',
-  CUSTOMER_CREDIT_REMINDER: 'Customer payment reminder', SYSTEM_TEST: 'Test message', OWNER_WELCOME: 'Owner welcome',
-};
 export const whatsappStatus = (status: NotificationDelivery['status']) => ({
   READ: 'Read', DELIVERED: 'Delivered', ACCEPTED: 'Accepted by WhatsApp', SENT: 'Accepted by WhatsApp',
   FAILED: 'Failed', PROCESSING: 'Processing', SUPPRESSED: 'Skipped', PENDING: 'Queued',
@@ -69,11 +64,6 @@ export function NotificationsPage() {
     catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : 'Unable to update WhatsApp settings.'); }
     finally { setBusy(false); }
   }
-  async function refreshHistory() {
-    const result = await api.notificationSettings();
-    setData(result);
-  }
-
   const savedOptIn = Boolean(data.settings.whatsappOptedIn && data.settings.whatsappNumber);
   const changed = JSON.stringify(settings) !== JSON.stringify(data.settings);
 
@@ -89,7 +79,7 @@ export function NotificationsPage() {
         <label><span>WhatsApp number</span><input type="tel" value={settings.whatsappNumber ?? ''} placeholder="+91 98765 43210" onChange={event => setSettings({ ...settings, whatsappNumber: event.target.value, whatsappOptedIn: false })} /></label>
         {choice('whatsappOptedIn', 'I agree to receive FuelNerve alerts on this WhatsApp number')}
       </div>
-      <p className="notification-delivery-note">{changed ? 'Save your changes to update your WhatsApp number and alert choices.' : !savedOptIn ? 'Add your WhatsApp number and agree to receive alerts, then save your preferences.' : data.deliveryAvailable ? 'Your number and consent are saved. Enabled updates are sent when there is a relevant event or scheduled summary.' : 'Your number and consent are saved. WhatsApp delivery is not available yet; your enabled updates will start once delivery is enabled.'}</p>
+      <p className="notification-delivery-note">{changed ? 'Save your changes to update your WhatsApp number and alert choices.' : !savedOptIn ? 'Add your WhatsApp number and agree to receive alerts, then save your preferences.' : 'Your WhatsApp number and alert preferences are saved. You can update them anytime.'}</p>
     </section>
     <section className="notification-layout">
       <article className="notification-rules"><header><h2>Messages to the owner</h2></header>
@@ -121,13 +111,5 @@ export function NotificationsPage() {
         setNotice('WhatsApp preferences saved.');
       })}>Save preferences</button>
     </div>
-    <section className="notification-history"><header><h2>Recent deliveries</h2>
-      <button type="button" className="secondary small" disabled={busy} onClick={() => void act(refreshHistory)}><RefreshCw size={16} /> Refresh</button></header>
-      {data.deliveries.length ? <div>{data.deliveries.map(delivery => <article key={delivery.id}>
-        <div><b>{labels[delivery.type] ?? 'WhatsApp alert'}</b><small>{delivery.station?.name ?? 'All fuel stations'} · {new Date(delivery.createdAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Kolkata' })}</small>
-          <p>{delivery.message}</p>{(whatsappReason(delivery.suppressionReason) || delivery.errorMessage) && <em>{whatsappReason(delivery.suppressionReason) || delivery.errorMessage}</em>}</div>
-        <strong>{whatsappStatus(delivery.status)}</strong>
-      </article>)}</div> : <p className="notification-empty">No WhatsApp delivery history yet.</p>}
-    </section>
   </main>;
 }

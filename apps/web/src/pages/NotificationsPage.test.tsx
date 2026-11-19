@@ -9,10 +9,12 @@ const settings={whatsappNumber:'918086306454',whatsappOptedIn:true,dailySummaryE
 beforeEach(()=>{vi.resetAllMocks();mock.settings.mockResolvedValue({settings,deliveries:[],deliveryAvailable:false,testAvailable:true,intelligenceActive:false});});
 afterEach(cleanup);
 const open=()=>render(<MemoryRouter><NotificationsPage/></MemoryRouter>);
-it('shows saved consent separately from unavailable delivery without owner test controls',async()=>{
+it('focuses on saved preferences without delivery diagnostics or test controls',async()=>{
   open();
   expect(await screen.findByText('Preferences saved')).toBeInTheDocument();
-  expect(screen.getByText(/WhatsApp delivery is not available yet/)).toBeInTheDocument();
+  expect(screen.getByText('Your WhatsApp number and alert preferences are saved. You can update them anytime.')).toBeInTheDocument();
+  expect(screen.queryByText(/delivery is not available/i)).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', {name:'Recent deliveries'})).not.toBeInTheDocument();
   expect(screen.queryByRole('button',{name:/test/i})).not.toBeInTheDocument();
   expect(screen.queryByText('Awaiting activation')).not.toBeInTheDocument();
 });
@@ -30,4 +32,13 @@ it('requires renewed consent and saving when a number changes',async()=>{
 it('shows alerts off when saved consent is withdrawn',async()=>{
   mock.settings.mockResolvedValue({settings:{...settings,whatsappOptedIn:false},deliveries:[],deliveryAvailable:true,intelligenceActive:false});
   open();expect(await screen.findByText('Alerts off')).toBeInTheDocument();
+});
+
+it('keeps provider failures and old suppression reasons out of owner preferences', async () => {
+  mock.settings.mockResolvedValue({settings, deliveryAvailable: false, intelligenceActive: false, deliveries: [{id:'old',type:'LOW_STOCK',status:'SUPPRESSED',message:'Backend message',suppressionReason:'owner_not_opted_in',errorMessage:'Provider unavailable',createdAt:'2026-11-17T00:00:00Z'}]});
+  open(); await screen.findByText('Preferences saved');
+  expect(screen.queryByText('Backend message')).not.toBeInTheDocument();
+  expect(screen.queryByText('Provider unavailable')).not.toBeInTheDocument();
+  expect(screen.queryByText('The owner has not opted in.')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', {name:'Save preferences'})).toBeEnabled();
 });

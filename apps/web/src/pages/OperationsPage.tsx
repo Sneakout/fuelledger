@@ -440,21 +440,22 @@ export function OperationsPage() {
               automatically.
             </p>
             <Field
-              label="Actual closing cash"
+              label="Physical cash counted at closing (₹)"
               value={closeCash}
               onChange={setCloseCash}
             />
+            <p className="time-note">Count all notes and coins remaining, including starting cash. Excludes UPI, card and customer credit.</p>
             <div className="nozzle-closing">
               <div className="nozzle-closing-heading">
                 <div>
                   <h3>Closing nozzle meter readings</h3>
                   <p>
-                    Enter each closing meter and the money handed over. Fuel sales
+                    Enter each closing meter and the physical cash handed over by the employee. Exclude UPI, card and credit. Fuel sales
                     are calculated and added to Sales automatically.
                   </p>
                 </div>
                 <span>
-                  Total handed over
+                  Physical cash handed over
                   <strong>{money(closeCollections.reduce((sum, item) => sum + item.value, 0))}</strong>
                 </span>
               </div>
@@ -464,7 +465,7 @@ export function OperationsPage() {
                   <span>Attendant</span>
                   <span>Opening meter (L)</span>
                   <span>Closing meter (L)</span>
-                  <span>Collection (₹)</span>
+                  <span>Physical cash handed over (₹)</span>
                 </div>
                 {active.nozzleReadings.map((reading) => {
                   const assignment = active.nozzleAssignments.find(
@@ -494,9 +495,9 @@ export function OperationsPage() {
                           }
                         />
                       </label>
-                      <label className="collection-field" data-label="Collection (₹)">
+                      <label className="collection-field" data-label="Physical cash handed over (₹)">
                         <input
-                          aria-label={`Collection in rupees from ${assignment?.user.name ?? reading.nozzle.code}`}
+                          aria-label={`Physical cash handed over in rupees from ${assignment?.user.name ?? reading.nozzle.code}`}
                           type="number"
                           min="0"
                           step="0.01"
@@ -674,26 +675,33 @@ export function OperationsPage() {
           </div>
           <section className="opening-cash-bridge">
             <div className="section-heading">
-              <div><h3>Opening cash handover</h3>
-                <p>Confirm the cash physically available for this shift. Collections, UPI, card and customer dues are tracked separately.</p>
+              <div><h3>{selected?.lastClosing ? "Opening cash handover" : "Starting cash"}</h3>
+                <p>{selected?.lastClosing ? "Count the cash available at the start of this shift." : "How much cash are you starting this shift with? Enter ₹0 if there is no cash."}</p>
               </div>
               <button type="button" className="secondary small" disabled={refreshingCash || saving} onClick={() => void refreshCash()}><RefreshCw size={15} />{refreshingCash ? "Refreshing cash…" : "Refresh cash"}</button>
             </div>
-            {selected?.lastClosing ? <p>Previous shift #{selected.lastClosing.shiftNumber} · {captured(selected.lastClosing.closedAt)}</p> : <p>First shift: enter the starting cash you have counted.</p>}
-            <div className="opening-cash-totals">
+            {selected?.lastClosing && <p>Previous shift #{selected.lastClosing.shiftNumber} · {captured(selected.lastClosing.closedAt)}</p>}
+            {selected?.lastClosing && <div className="opening-cash-totals">
               <div><span>Previous actual closing cash</span><strong>{priorCash === null ? "Not recorded" : cashMoney(priorCash)}</strong></div>
               <div><span>Expected opening cash</span><strong>{expectedCash === null ? "Starting count required" : cashMoney(expectedCash)}</strong></div>
               <div><span>Counted difference</span><strong>{cashDifference === null ? "No previous count to compare" : cashDifference === 0 ? "Match" : `${cashDifference > 0 ? "+" : "−"}${cashMoney(Math.abs(cashDifference))}`}</strong></div>
+            </div>}
+            <div className="form-grid">
+              <Field label="Physical cash at start (₹)" value={openingCash} onChange={setOpeningCash} />
             </div>
+            <p>Required · Notes and coins available before sales begin, including change for customers. Enter ₹0 if none. Excludes UPI, card and credit.</p>
+            <details className="opening-cash-details" open={cashReasonRequired || undefined}>
+              <summary>Cash added, removed or handed over (if applicable)</summary>
+              <p>Leave these at ₹0 unless cash was added or taken away before this shift.</p>
             <div className="form-grid">
               <Field label="Cash added between shifts (₹)" value={cashAdded} onChange={setCashAdded} />
               <Field label="Cash removed between shifts (₹)" value={cashRemoved} onChange={setCashRemoved} />
-              <Field label="Actual opening cash counted (₹)" value={openingCash} onChange={setOpeningCash} />
             </div>
             <label className="field"><span>Cash handover reason{cashReasonRequired ? " *" : " (optional)"}</span>
               <textarea value={cashReason} onChange={event => setCashReason(event.target.value)} required={cashReasonRequired} maxLength={500} placeholder="For example, cash handed to the owner or float added; explain any counted difference." />
             </label>
-            <p>Cash added or removed is a handover record. Record any related expense, payment or bank transaction in its own workflow.</p>
+            <p>This explains the cash handover. Record related expenses, payments or bank transactions separately.</p>
+            </details>
             {cashRefreshStatus && <p role="status">{cashRefreshStatus}</p>}
           </section>
           <section className="opening-nozzle-table">
@@ -1063,11 +1071,11 @@ function ShiftSummary({
         {shift.openingCashHandover.reason && <p>{shift.openingCashHandover.reason}</p>}
       </details>}
       <div>
-        <span>Opening cash</span>
+        <span>Physical cash at start</span>
         <strong>{cashMoney(shift.openingCash)}</strong>
       </div>
       <div>
-        <span>Closing cash</span>
+        <span>Physical cash at closing</span>
         <strong>{cashMoney(closingCash)}</strong>
       </div>
       <div>
@@ -1077,7 +1085,7 @@ function ShiftSummary({
         </strong>
       </div>
       <div>
-        <span>Staff collections handed over</span>
+        <span>Physical cash handed over by staff</span>
         <strong>{money(staffCollections)}</strong>
       </div>
       <div>
