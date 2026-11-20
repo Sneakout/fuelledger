@@ -82,6 +82,7 @@ describe('API', async () => {
     const rejected = await request(createApp()).post('/api/notifications/whatsapp/webhook').set('Content-Type', 'application/json').set('X-Hub-Signature-256', 'sha256=bad').send(body);
     expect(rejected.status).toBe(401);
   });
+  it.each(['email-schedule', 'email-agent-messages', 'email-delivery'])('protects the %s email worker endpoint', async path => { const response = await request(createApp()).get(`/api/notifications/cron/${path}`); expect(response.status).toBe(401); });
   it('rejects unauthorised market outlook triggers', async () => { const response = await request(createApp()).post('/api/notifications/cron/market-outlook').send({}); expect(response.status).toBe(401); expect(response.body.error.code).toBe('CRON_UNAUTHORIZED'); });
   it('returns a structured 404', async () => { const response = await request(createApp()).get('/api/unknown'); expect(response.status).toBe(404); expect(response.body.error.requestId).toBeTruthy(); });
 });

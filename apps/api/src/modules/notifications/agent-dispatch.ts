@@ -7,21 +7,29 @@ import { prisma } from '../../lib/prisma.js';
 import { bookStockAt } from '../../lib/stock.js';
 import { receiptMessage, shiftMessage, stockLevel, stockAlertMessage, isRecentReceipt } from './agent-messages.js';
 import { readReceiptMessageFacts, readShiftMessageFacts, readTankAlertFacts } from './message-facts.js';
-import { getSettings, sendOwnerNotification } from './service.js';
+import { getSettings, sendOwnerNotification, prepareEmailNotifications } from './service.js';
 
 const retryDelay = 15 * 60_000;
 const maximumAge = 24 * 60 * 60_000;
 const stockKey = (tankId: string, episodeId: string, level: string) => `stock-episode:${tankId}:${episodeId}:${level}`;
 
-export async function drainAgentMessages() {
+type DispatchOptions = { channel?: 'EMAIL'; organizationIds?: string[] };
+export async function drainAgentMessages(options: DispatchOptions = {}) {
+  return options.channel === 'EMAIL' ? prepareEmailNotifications(() => dispatchAgentMessages(options)) : dispatchAgentMessages(options);
+}
+async function dispatchAgentMessages(options: DispatchOptions) {
+  const email = options.channel === 'EMAIL';
+  if (email && !options.organizationIds?.length) return { handled: 0, deferred: 0 };
+  const handledField = email ? 'emailHandledAt' : 'notificationHandledAt';
+  const nextField = email ? 'emailNextAt' : 'notificationNextAt';
   const now = new Date();
   const jobs = await prisma.nerveReviewJob.findMany({
-    where: { notificationHandledAt: null, notificationNextAt: { lte: now }, OR: [
+    where: { ...(options.organizationIds ? { organizationId: { in: options.organizationIds } } : {}), [handledField]: null, [nextField]: { lte: now }, OR: [
       { agentKey: 'reconciliation-review', eventType: 'SHIFT_RECONCILED' },
       { agentKey: 'purchase-check', eventType: 'RECEIPT_RECORDED' },
       { agentKey: 'inventory-watch', eventType: { in: ['SHIFT_CLOSED', 'RECEIPT_RECORDED', 'SALE_RECORDED', 'STOCK_ADJUSTED', 'INVOICE_CHANGED', 'DAILY_REVIEW'] } },
     ] },
-    orderBy: [{ notificationNextAt: 'asc' }, { id: 'asc' }],
+    orderBy: [{ [nextField]: 'asc' }, { id: 'asc' }],
     take: 4,
   });
   const totals = { handled: 0, deferred: 0 };
@@ -29,8 +37,8 @@ export async function drainAgentMessages() {
     if (Date.now() - now.getTime() > 60_000) break;
     // Delay the job before work so overlapping ticks cannot process it together.
     const claim = await prisma.nerveReviewJob.updateMany({
-      where: { id: job.id, notificationHandledAt: null, notificationNextAt: job.notificationNextAt },
-      data: { notificationNextAt: new Date(Date.now() + retryDelay) },
+      where: { id: job.id, [handledField]: null, [nextField]: job[nextField] },
+      data: { [nextField]: new Date(Date.now() + retryDelay) },
     });
     if (!claim.count) continue;
     try {
@@ -40,9 +48,10 @@ export async function drainAgentMessages() {
       });
       const expired = Date.now() - job.createdAt.getTime() >= maximumAge;
       const done = !station || !hasActiveIntelligence(station.organization)
-        || (expired && job.agentKey !== 'inventory-watch') || await processMessage(job);
+        || (email && (expired || now.getTime() - job.occurredAt.getTime() >= maximumAge || job.occurredAt > now))
+        || (expired && job.agentKey !== 'inventory-watch') || await processMessage(job, email);
       if (done) {
-        await prisma.nerveReviewJob.update({ where: { id: job.id }, data: { notificationHandledAt: new Date() } });
+        await prisma.nerveReviewJob.update({ where: { id: job.id }, data: { [handledField]: new Date() } });
         totals.handled++;
       } else totals.deferred++;
     } catch (error) {
@@ -53,7 +62,7 @@ export async function drainAgentMessages() {
   return totals;
 }
 
-async function processMessage(job: NerveReviewJob) {
+async function processMessage(job: NerveReviewJob, email = false) {
   const scope = { organizationId: job.organizationId, stationId: job.stationId };
   if (job.eventType === 'SHIFT_RECONCILED') {
     const facts = await readShiftMessageFacts(scope, job.resourceId);
@@ -62,7 +71,10 @@ async function processMessage(job: NerveReviewJob) {
     const path = '/reconciliation';
     const version = facts.collections.reconciliationId;
     const dedupeKey = `shift-summary:${facts.shiftId}:${version}`;
-    const previous = await prisma.ownerNotificationDelivery.findFirst({
+    const previousWhere = {
+      ...scope, type: 'SHIFT_CLOSED_SUMMARY' as const, eventKey: { startsWith: `shift-summary:${facts.shiftId}:`, not: dedupeKey },
+    };
+    const previous = email ? await prisma.ownerEmailDelivery.findFirst({ where: { ...previousWhere, status: 'ACCEPTED' }, select: { id: true } }) : await prisma.ownerNotificationDelivery.findFirst({
       where: { ...scope, type: 'SHIFT_CLOSED_SUMMARY', status: { in: ['SENT', 'ACCEPTED', 'DELIVERED', 'READ'] }, OR: [
         { eventKey: { startsWith: `shift-summary:${facts.shiftId}:`, not: dedupeKey } },
         { eventKey: null, dedupeKey: { startsWith: `shift-summary:${facts.shiftId}:`, not: dedupeKey } },

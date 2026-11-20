@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { hasActiveIntelligence, allowsOwnerWhatsApp } from '@fuelledger/shared';
+import { hasActiveIntelligence } from '@fuelledger/shared';
 import { Prisma, type OwnerEmailDelivery, type OwnerNotificationType, type OwnerNotificationSettings } from '@prisma/client';
 import { env } from '../../config/env.js';
 import { prisma } from '../../lib/prisma.js';
@@ -16,6 +16,11 @@ export function emailCategoryEnabled(settings: OwnerNotificationSettings, type: 
   return (type === 'OWNER_WELCOME' || (type === 'DAILY_SUMMARY' ? settings.dailySummaryEnabled
     : type === 'LOW_STOCK' ? settings.lowStockEnabled : type === 'SHIFT_CLOSED_SUMMARY' ? settings.shiftSummaryEnabled
       : type === 'PURCHASE_RECEIPT_SUMMARY' ? settings.receiptSummaryEnabled : type === 'OVERDUE_CUSTOMER' ? settings.overdueCustomerEnabled : false));
+}
+export function allowsOwnerEmail(type: OwnerNotificationType, recordType: string, intelligenceActive: boolean) {
+  if (type === 'OWNER_WELCOME') return true;
+  if (type === 'DAILY_SUMMARY') return recordType === 'CORE_DAILY_SUMMARY';
+  return intelligenceActive && ['LOW_STOCK', 'SHIFT_CLOSED_SUMMARY', 'PURCHASE_RECEIPT_SUMMARY', 'OVERDUE_CUSTOMER'].includes(type);
 }
 export const emailDeliveryReady = (organizationId: string) => Boolean(env.EMAIL_DELIVERY_ENABLED && env.SMTP2GO_API_KEY && env.EMAIL_ROLLOUT_ORGANIZATION_IDS.split(',').map(id => id.trim()).includes(organizationId));
 const owners = (organizationId: string, db: Prisma.TransactionClient) => db.user.findMany({ where: { organizationId, role: 'OWNER', active: true, loginEnabled: true, ownerEmailPreference: { is: { organizationId, enabled: true } } }, select: { id: true, email: true, name: true } });
@@ -44,7 +49,7 @@ export async function queueEmailWelcome(organizationId: string, db: Prisma.Trans
 export async function emailFactsStillCurrent(job: OwnerEmailDelivery, now: Date) {
   const guard = job.guard as Guard;
   if (job.type === 'OWNER_WELCOME') return true;
-  if (indiaDate(job.createdAt) !== indiaDate(now)) return false;
+  if (['DAILY_SUMMARY', 'OVERDUE_CUSTOMER'].includes(job.type) && (guard.date ?? indiaDate(job.createdAt)) !== indiaDate(now)) return false;
   if (job.type === 'OVERDUE_CUSTOMER') return Boolean(guard.snapshot && (await creditDeliverySnapshot(job.organizationId, now)).snapshot === guard.snapshot);
   if (job.type === 'DAILY_SUMMARY') return coreDailyMessage(await readDailyOperatingFacts({ organizationId: job.organizationId }, guard.date ?? indiaDate(job.createdAt), now), guard.date ?? indiaDate(job.createdAt), env.APP_URL) === job.message;
   if (!job.stationId || !guard.sourceId) return false;
@@ -107,12 +112,12 @@ export async function drainEmailQueue(options: { organizationId?: string; delive
         prisma.ownerEmailPreference.findFirst({ where: { ownerId: job.ownerId, organizationId: job.organizationId, enabled: true } }),
       ]);
       const fresh = new Date();
-      const planActive = organization && (organization.lifetimeAccessPaidAt || (organization.subscriptionActivatedAt && (!organization.subscriptionExpiresAt || organization.subscriptionExpiresAt > fresh)));
+      const planActive = organization && (organization.lifetimeAccessPaidAt || (organization.subscriptionActivatedAt && organization.subscriptionActivatedAt <= fresh && (!organization.subscriptionExpiresAt || organization.subscriptionExpiresAt > fresh)));
       const reason = !owner || owner.email.trim().toLowerCase() !== job.destination || !validOwnerEmail(job.destination) ? 'recipient_changed_or_ineligible'
         : !preference || !settings || !emailCategoryEnabled(settings, job.type) ? 'email_or_category_disabled'
         : !organization || (job.stationId && !station) ? 'fuel_station_unavailable'
         : job.type !== 'OWNER_WELCOME' && !planActive ? 'subscription_inactive'
-        : job.type !== 'OWNER_WELCOME' && !allowsOwnerWhatsApp(job.type, job.recordType, hasActiveIntelligence(organization)) ? 'category_not_in_plan'
+        : job.type !== 'OWNER_WELCOME' && !allowsOwnerEmail(job.type, job.recordType, hasActiveIntelligence(organization)) ? 'category_not_in_plan'
         : fresh.getTime() - job.createdAt.getTime() > 86_400_000 ? 'message_expired'
         : !(await emailFactsStillCurrent(job, fresh)) ? 'source_changed' : null;
       if (reason) { await finish({ status: 'SUPPRESSED', suppressionReason: reason }); continue; }

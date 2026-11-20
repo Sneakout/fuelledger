@@ -17,6 +17,7 @@ const envSchema = z.object({
   PLATFORM_ADMIN_EMAILS: z.string().default(""),
   GOOGLE_CLIENT_ID: z.string().min(20).optional(),
   SMTP2GO_API_KEY: z.preprocess(value => value === "" ? undefined : value, z.string().min(16).optional()),
+  EMAIL_CRON_SECRET: z.preprocess(value => value === "" ? undefined : value, z.string().min(32).optional()),
   EMAIL_FROM: z.string().email().default("hello@mindvector.tech"),
   EMAIL_DELIVERY_ENABLED: z.enum(["true", "false"]).default("false").transform(value => value === "true"),
   EMAIL_ROLLOUT_ORGANIZATION_IDS: z.string().default(""),

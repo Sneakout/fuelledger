@@ -55,3 +55,11 @@ it('saves email opt-in independently of WhatsApp and shows the sign-in address',
  await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.objectContaining({ emailEnabled: true, whatsappOptedIn: false })));
  expect(await screen.findByRole('status')).toHaveTextContent('Email and WhatsApp preferences saved.');
 });
+
+it('lets Intelligence owners choose a daily email summary time', async () => {
+ mock.settings.mockResolvedValue({ settings: { ...settings, emailEnabled: true, creditReportHour: 20 }, emailAddress: 'owner@example.com', intelligenceActive: true });
+ open();
+ expect(await screen.findByText('A daily email with sales quantities, collections and tank stock.')).toBeInTheDocument();
+ expect(screen.getByText('Daily summary time')).toBeInTheDocument();
+ expect(screen.getByText('Credit report time')).toBeInTheDocument();
+});

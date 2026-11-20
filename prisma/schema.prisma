@@ -392,12 +392,15 @@ model NerveReviewJob {
   lastError      String?
   notificationHandledAt DateTime?
   notificationNextAt DateTime @default(now())
+  emailHandledAt DateTime?
+  emailNextAt DateTime @default(now())
   createdAt      DateTime @default(now())
 
   @@unique([organizationId, stationId, eventKey, agentKey], map: "nerve_review_event_agent_key")
   @@index([completedAt, failedAt, availableAt, leaseUntil], map: "nerve_review_claim_idx")
   @@index([organizationId, stationId, agentKey, completedAt], map: "nerve_review_latest_idx")
   @@index([notificationHandledAt, notificationNextAt], map: "nerve_review_notification_idx")
+  @@index([organizationId, emailHandledAt, emailNextAt], map: "nerve_review_email_idx")
   @@map("nerve_review_jobs")
 }
 

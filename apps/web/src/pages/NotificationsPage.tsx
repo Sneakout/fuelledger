@@ -89,17 +89,18 @@ export function NotificationsPage() {
       <p className="notification-delivery-note">{changed ? 'Save your changes to update your WhatsApp number and alert choices.' : !savedOptIn ? 'Add your WhatsApp number and agree to receive alerts, then save your preferences.' : 'Your WhatsApp number and alert preferences are saved. You can update them anytime.'}</p>
     </section>
     <section className="notification-layout">
-      <article className="notification-rules"><header><h2>Messages to the owner</h2><p>These choices and times apply to both email and WhatsApp when enabled. Customer reminders use WhatsApp only.</p></header>
-        {data.intelligenceActive ? <>
+      <article className="notification-rules"><header><h2>Messages to the owner</h2><p>Choose your updates and preferred times. Customer reminders use WhatsApp only.</p></header>
+        {(!data.intelligenceActive || settings.emailEnabled) && <>
+          {choice('dailySummaryEnabled', 'Daily operating summary', data.intelligenceActive ? 'A daily email with sales quantities, collections and tank stock.' : 'Sales quantities, collections and tank stock by email and WhatsApp when enabled.')}
+          <TimePicker label="Daily summary time" value={settings.dailySummaryHour} onChange={hour => edit('dailySummaryHour', hour)} />
+        </>}
+        {data.intelligenceActive && <>
           {choice('lowStockEnabled', 'Low stock')}
           <label className="field"><span>Low-stock threshold (% of working capacity)</span><input type="number" min="1" max="50" value={settings.lowStockPercent} onChange={event => edit('lowStockPercent', Number(event.target.value))} /></label>
           {choice('shiftSummaryEnabled', 'Shift closure summary', 'Sales, collections, differences and closing tank stock.')}
           {choice('receiptSummaryEnabled', 'Purchase receipt summary', 'Product, tank, quantity, invoice and payment due date.')}
           {choice('overdueCustomerEnabled', 'Customer credit report', 'Sent when there are outstanding balances.')}
           <TimePicker label="Credit report time" value={settings.creditReportHour} onChange={hour => edit('creditReportHour', hour)} />
-        </> : <>
-          {choice('dailySummaryEnabled', 'Daily operating summary', 'Sales quantities, reconciled collections and tank stock.')}
-          <TimePicker label="Daily summary time" value={settings.dailySummaryHour} onChange={hour => edit('dailySummaryHour', hour)} />
         </>}
       </article>
       {data.intelligenceActive && <aside className="notification-thresholds">

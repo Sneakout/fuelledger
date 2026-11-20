@@ -100,3 +100,17 @@ it('does not subscribe other owners and rechecks individual email consent', asyn
  expect(mock.preference.mock.calls[0][0].where).toEqual({ ownerId: 'owner-a', organizationId: 'org-a', enabled: true });
  expect(mock.updateMany.mock.calls.at(-1)?.[0].data.suppressionReason).toBe('email_or_category_disabled'); expect(fetch).not.toHaveBeenCalled();
 });
+
+it('keeps email daily-summary entitlement independent of WhatsApp for both paid plans', async () => {
+ const { allowsOwnerEmail } = await import('../src/modules/notifications/email-queue.js');
+ expect(allowsOwnerEmail('DAILY_SUMMARY', 'CORE_DAILY_SUMMARY', true)).toBe(true);
+ expect(allowsOwnerEmail('DAILY_SUMMARY', 'CORE_DAILY_SUMMARY', false)).toBe(true);
+ expect(allowsOwnerEmail('DAILY_SUMMARY', 'DAILY_BRIEFING', true)).toBe(false);
+ expect(allowsOwnerEmail('LOW_STOCK', 'TANK', false)).toBe(false);
+});
+it('renders informative sections, exact decimals, attention states and accessible mobile markup', () => {
+ const result = renderOwnerEmail({ type: 'SHIFT_CLOSED_SUMMARY', message: 'Shift #42 reconciled\nSales: MS: 2,345.123 L · HSD: 1,234.567 L\nExpected collection: ₹5,20,000.00\nActual collection: ₹5,19,750.00\nShortage: ₹250.00\nClosing tank stock:\nMS T-1: 8,240 L measured · 8,250 L book', ownerName: 'Owner', stationName: 'Station', date: '2026-11-20', appUrl: 'https://fuel.mindvector.tech' });
+ expect(result.html).toContain('20 November 2026'); expect(result.html).toContain('WHAT TO REVIEW'); expect(result.html).toContain('Customer dues and staff handovers remain separate');
+ for (const value of ['2,345.123 L', '1,234.567 L', '₹5,20,000.00', '₹5,19,750.00', '₹250.00', '8,240 L measured · 8,250 L book']) expect(result.html).toContain(value);
+ expect(result.html).toContain('#fff6e5'); expect(result.html).toContain('max-width:480px'); expect(result.html).toContain('role="presentation"');
+});

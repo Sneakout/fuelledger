@@ -140,6 +140,12 @@ function alertPresentation(input: AlertInput, packet: OwnerNotificationPacket) {
   return { title: input.title?.(packet) ?? (agent ? agent.name + ': ' + title : title), path: packet.evidence[0]?.path ?? path, severity: input.severity ?? (input.type === 'DAILY_SUMMARY' || input.type === 'SYSTEM_TEST' ? 'INFORMATION' : 'ATTENTION') };
 }
 
+// Isolate email automation: it may reuse verified message builders, but must never
+// create WhatsApp jobs, push notifications, or alter their dispatch progress.
+const emailOnly = new AsyncLocalStorage<boolean>();
+export function prepareEmailNotifications<T>(run: () => Promise<T>) {
+  return emailOnly.run(true, run);
+}
 const whatsappPreview = new AsyncLocalStorage<boolean>();
 export function prepareNotificationPreviews<T>(run: () => Promise<T>) {
   return whatsappPreview.run(true, run);
@@ -172,10 +178,14 @@ export async function sendOwnerNotification(input: AlertInput): Promise<Delivery
   const categoryEnabled = featureEnabled(settings, input.type);
   const intelligenceActive = hasActiveIntelligence(organization);
   const whatsappAllowed = Boolean(organization && allowsOwnerWhatsApp(input.type, input.packet.recordType, intelligenceActive));
-  if (!categoryEnabled && !whatsappAllowed) return { status: 'SKIPPED', reason: 'disabled_by_owner' };
+  if (!emailOnly.getStore() && !categoryEnabled && !whatsappAllowed) return { status: 'SKIPPED', reason: 'disabled_by_owner' };
   if (input.stillRelevant && !(await input.stillRelevant())) return { status: 'SKIPPED', reason: 'facts_changed' };
   const packet = ownerNotificationPacketSchema.parse({ schemaVersion: 1, ...input.packet, responsibleAgent: intelligenceActive ? responsibleAgent(input.type, input.packet.recordType) : null });
   const message = input.message(packet);
+  if (emailOnly.getStore()) {
+    if (emailDesign[input.type]) await queueOwnerEmail({ organizationId: input.organizationId, stationId: input.stationId, type: input.type, eventKey: input.dedupeKey, recordType: packet.recordType, message, guard: { status: packet.status, sourceId: input.evidenceSourceId, quantity: packet.quantity?.value, snapshot: input.snapshot, version: input.version, date: input.type === 'DAILY_SUMMARY' ? input.dedupeKey.split(':').at(-1)! : indiaDate(new Date(packet.eventDate)) } });
+    return { status: 'QUEUED' };
+  }
   if (categoryEnabled) {
     const presentation = alertPresentation(input, packet);
     const alertMessage = message.replace(/\n*[^\n]*https?:\/\/\S+/g, '').trim();

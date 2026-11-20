@@ -16,3 +16,12 @@ it('opting out affects that owner only and does not queue another welcome', asyn
  const result = await updateSettings('org-a', { ...input(), emailEnabled: false }, 'Owner', 'owner-b');
  expect(mock.preference.mock.calls[0][0].where).toEqual({ ownerId: 'owner-b' }); expect(mock.welcome).not.toHaveBeenCalled(); expect(result.emailEnabled).toBe(false);
 });
+
+it('email-only preparation queues email without writing WhatsApp deliveries, alerts or push', async () => {
+ const { prepareEmailNotifications, sendOwnerNotification } = await import('../src/modules/notifications/service.js');
+ const { prisma } = await import('../src/lib/prisma.js');
+ Object.assign(prisma, { ownerNotificationSettings: { findUnique: vi.fn().mockResolvedValue({ dailySummaryEnabled: true }) }, organization: { findUnique: vi.fn().mockResolvedValue({}) } });
+ await prepareEmailNotifications(() => sendOwnerNotification({ organizationId: 'org-a', type: 'DAILY_SUMMARY', dedupeKey: 'daily-summary:org-a:2026-11-20',
+ packet: { subjectName: 'Daily operating summary', recordType: 'CORE_DAILY_SUMMARY', product: null, eventDate: '2026-11-20T15:00:00Z', dueDate: null, amount: null, quantity: null, status: 'COMPLETE', daysOverdueOrWaiting: null, station: { id: null, name: 'All fuel stations' }, evidence: [{ label: 'Daily reports', path: '/reports', recordType: 'REPORT', recordId: '2026-11-20' }], availableActions: ['VIEW_RECORD'] }, message: () => 'Verified daily figures' }));
+ expect(mock.queue).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 'org-a', type: 'DAILY_SUMMARY', message: 'Verified daily figures' }));
+});

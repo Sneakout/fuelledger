@@ -1,0 +1,50 @@
+name: Owner email alerts
+
+on:
+  schedule:
+    # Offset from the top of the hour to reduce congestion. Best-effort, not exact timing.
+    - cron: '2-59/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+concurrency:
+  group: owner-email-alerts-production
+  cancel-in-progress: false
+
+jobs:
+  email-worker:
+    # Set only after the production migration and pilot checks pass.
+    if: vars.OWNER_EMAIL_AUTOMATION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      # No checkout, dependencies or third-party action receives the credential.
+      - name: Prepare and deliver eligible owner emails
+        env:
+          EMAIL_CRON_SECRET: ${{ secrets.EMAIL_CRON_SECRET }}
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          const secret = process.env.EMAIL_CRON_SECRET;
+          if (!secret || secret.length < 32) throw new Error('Configure the EMAIL_CRON_SECRET repository secret.');
+          const origin = 'https://fuel.mindvector.tech';
+          let failures = 0;
+          for (const stage of ['email-schedule', 'email-agent-messages', 'email-delivery']) {
+            try {
+              const response = await fetch(`${origin}/api/notifications/cron/${stage}`, {
+                headers: { Authorization: `Bearer ${secret}` },
+                redirect: 'error', signal: AbortSignal.timeout(110_000),
+              });
+              if (!response.ok) throw new Error(`HTTP ${response.status}`);
+              const result = await response.json();
+              // Print counts only: no message bodies, recipients, credentials or provider IDs.
+              const counts = Object.fromEntries(Object.entries(result).filter(([key, value]) =>
+                ['checkedOrganizations', 'prepared', 'failed', 'handled', 'deferred', 'checked', 'accepted'].includes(key) && typeof value === 'number'));
+              console.log(`${stage}: ${JSON.stringify(counts)}`);
+            } catch (error) {
+              failures++;
+              console.error(`${stage} failed. Check deployment health and scheduler configuration; no immediate retry was made.`);
+            }
+          }
+          if (failures) process.exitCode = 1;
+          JS
