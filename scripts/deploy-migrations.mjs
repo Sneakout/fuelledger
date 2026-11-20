@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { PrismaClient } from "@prisma/client";
+import { migrationConnection } from "./migration-connection.mjs";
 
 const prismaCli = fileURLToPath(
   new URL("../node_modules/prisma/build/index.js", import.meta.url),
@@ -8,14 +9,9 @@ const prismaCli = fileURLToPath(
 const retryDelaysMs = [0, 5_000, 10_000, 20_000];
 const migrationEnvironment = { ...process.env };
 
-if (migrationEnvironment.DIRECT_URL) {
-  migrationEnvironment.DATABASE_URL = migrationEnvironment.DIRECT_URL;
-  process.stdout.write("Running database migrations over DIRECT_URL.\n");
-} else {
-  process.stdout.write(
-    "DIRECT_URL is not configured; running database migrations over DATABASE_URL.\n",
-  );
-}
+const connection = migrationConnection(migrationEnvironment);
+if (connection.url) migrationEnvironment.DATABASE_URL = connection.url;
+process.stdout.write(`Running database migrations over ${connection.source}.\n`);
 
 function wait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
