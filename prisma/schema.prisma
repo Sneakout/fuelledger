@@ -171,6 +171,8 @@ model Organization {
   subscriptionExpiresAt      DateTime?                   @map("subscription_expires_at")
   createdAt                  DateTime                    @default(now()) @map("created_at")
   updatedAt                  DateTime                    @updatedAt @map("updated_at")
+  ownerEmailDeliveries       OwnerEmailDelivery[]
+  ownerEmailPreferences      OwnerEmailPreference[]
   users                      User[]
   stations                   Station[]
   products                   Product[]
@@ -1400,6 +1402,7 @@ model User {
   createdAt                  DateTime                    @default(now()) @map("created_at")
   updatedAt                  DateTime                    @updatedAt @map("updated_at")
   organization               Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  ownerEmailPreference       OwnerEmailPreference?
   shiftsManaged              Shift[]                     @relation("shift_manager")
   shiftAssignments           ShiftUser[]
   nozzleAssignments          ShiftNozzleAssignment[]
@@ -1581,4 +1584,44 @@ model DailyBriefFindingPreference {
 
   @@id([organizationId, stationId, userId, findingKey])
   @@map("daily_brief_finding_preferences")
+}
+
+model OwnerEmailDelivery {
+  id String @id @default(cuid())
+  organizationId String @map("organization_id")
+  stationId String? @map("station_id")
+  ownerId String @map("owner_id")
+  type OwnerNotificationType
+  eventKey String @map("event_key")
+  dedupeKey String @unique @map("dedupe_key")
+  destination String
+  recordType String @map("record_type")
+  message String
+  guard Json
+  status String @default("PENDING")
+  suppressionReason String? @map("suppression_reason")
+  errorMessage String? @map("error_message")
+  providerMessageId String? @map("provider_message_id")
+  attempts Int @default(0)
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+  leaseUntil DateTime? @map("lease_until")
+  claimToken String? @map("claim_token")
+  acceptedAt DateTime? @map("accepted_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  organization Organization @relation(fields:[organizationId], references:[id], onDelete:Restrict)
+  @@index([status,nextAttemptAt])
+  @@index([organizationId,createdAt])
+  @@map("owner_email_deliveries")
+}
+
+model OwnerEmailPreference {
+  ownerId String @id @map("owner_id")
+  organizationId String @map("organization_id")
+  enabled Boolean @default(false)
+  updatedAt DateTime @updatedAt @map("updated_at")
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  @@index([organizationId, enabled])
+  @@map("owner_email_preferences")
 }

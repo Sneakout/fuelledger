@@ -33,7 +33,7 @@ const sections: Section[] = [
   ] },
   { label: 'Settings', icon: Settings, links: [
     { label: 'Fuel stations & equipment', to: '/stations' }, { label: 'Staff & access', to: '/staff', access: 'owner' },
-    { label: 'WhatsApp alerts', to: '/notifications', access: 'liveOwner' }, { label: 'Subscription', to: '/subscription', access: 'owner' },
+    { label: 'Email & WhatsApp alerts', to: '/notifications', access: 'liveOwner' }, { label: 'Subscription', to: '/subscription', access: 'owner' },
     { label: 'My account', to: '/account', access: 'liveAccount' }, { label: 'User guide', to: '/help/guide' }, { label: 'Help & support', to: '/help' },
   ] },
 ];

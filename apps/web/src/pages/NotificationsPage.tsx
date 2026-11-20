@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, BellRing, Check, MessageCircleMore, TriangleAlert } from 'lucide-react';
+import { ArrowRight, BellRing, Mail, Check, MessageCircleMore, TriangleAlert } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../components/AuthProvider';
 import { ApiRequestError, api, type NotificationBootstrap, type NotificationDelivery, type NotificationSettings } from '../lib/api';
@@ -47,30 +47,37 @@ export function NotificationsPage() {
     let active = true;
     void api.notificationSettings().then(result => {
       if (active) { setData(result); setSettings(result.settings); }
-    }).catch(() => { if (active) setError('Unable to load WhatsApp settings.'); });
+    }).catch(() => { if (active) setError('Unable to load alert settings.'); });
     return () => { active = false; };
   }, [allowed]);
-  if (!allowed) return <main className="page"><p className="form-error">Only the owner can manage WhatsApp alerts.</p></main>;
-  if (!data || !settings) return <main className="page">{error ? <p role="alert" className="form-error">{error}</p> : <p>Loading WhatsApp settings…</p>}</main>;
+  if (!allowed) return <main className="page"><p className="form-error">Only the owner can manage email and WhatsApp alerts.</p></main>;
+  if (!data || !settings) return <main className="page">{error ? <p role="alert" className="form-error">{error}</p> : <p>Loading alert settings…</p>}</main>;
 
   const edit = <K extends keyof NotificationSettings>(key: K, value: NotificationSettings[K]) =>
     setSettings(current => current ? { ...current, [key]: value } : current);
-  const choice = (key: 'whatsappOptedIn' | 'dailySummaryEnabled' | 'lowStockEnabled' | 'shiftSummaryEnabled' | 'receiptSummaryEnabled' | 'overdueCustomerEnabled' | 'customerReminderScheduled', title: string, detail?: string) =>
-    <label className="notification-rule"><span className="notification-rule-icon" aria-hidden="true"><BellRing /></span><span className="notification-rule-copy"><b>{title}</b>{detail && <small>{detail}</small>}</span><input type="checkbox" checked={settings[key]} onChange={event => edit(key, event.target.checked)} /><i /></label>;
+  const choice = (key: 'emailEnabled' | 'whatsappOptedIn' | 'dailySummaryEnabled' | 'lowStockEnabled' | 'shiftSummaryEnabled' | 'receiptSummaryEnabled' | 'overdueCustomerEnabled' | 'customerReminderScheduled', title: string, detail?: string) =>
+    <label className="notification-rule"><span className="notification-rule-icon" aria-hidden="true"><BellRing /></span><span className="notification-rule-copy"><b>{title}</b>{detail && <small>{detail}</small>}</span><input type="checkbox" checked={Boolean(settings[key])} onChange={event => edit(key, event.target.checked)} /><i /></label>;
 
   async function act(run: () => Promise<void>) {
     setBusy(true); setError(''); setNotice('');
     try { await run(); }
-    catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : 'Unable to update WhatsApp settings.'); }
+    catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : 'Unable to update alert settings.'); }
     finally { setBusy(false); }
   }
   const savedOptIn = Boolean(data.settings.whatsappOptedIn && data.settings.whatsappNumber);
   const changed = JSON.stringify(settings) !== JSON.stringify(data.settings);
 
   return <main className="page notifications-page">
-    <section className="notification-hero"><div><h1>WhatsApp alerts</h1><p>Choose what FuelNerve sends to you and how customers receive payment reminders.</p></div><span><MessageCircleMore /></span></section>
+    <section className="notification-hero"><div><h1>Email &amp; WhatsApp alerts</h1><p>Choose what FuelNerve sends to you and how customers receive payment reminders.</p></div><span><MessageCircleMore /></span></section>
     {error && <p className="form-error" role="alert">{error}</p>}
     {notice && <p className="success-banner" role="status">{notice}</p>}
+    <section className="notification-setup">
+      <header><div><span className="notification-icon"><Mail /></span><div><h2>Owner’s email</h2><p>Receive FuelNerve updates at your sign-in email.</p></div></div></header>
+      <div className="notification-number"><label><span>Email address</span><input type="email" value={data.emailAddress ?? user?.email ?? ''} readOnly /></label>
+        {choice('emailEnabled', 'Send me FuelNerve email updates', 'A welcome email, followed by the updates selected below. You can turn email off anytime.')}
+      </div>
+      <p className="notification-delivery-note">Sent by FuelNerve from hello@mindvector.tech. Your email preference is independent of WhatsApp.</p>
+    </section>
     <section className="notification-setup">
       <header><div><span className="notification-icon"><MessageCircleMore /></span><div><h2>Owner’s WhatsApp</h2><p>Use the country code when entering your number.</p></div></div>
         <span className={changed || !savedOptIn ? 'notification-pending' : 'notification-ready'}>{changed ? <><TriangleAlert /> Unsaved changes</> : savedOptIn ? <><Check /> Preferences saved</> : <><TriangleAlert /> Alerts off</>}</span>
@@ -82,7 +89,7 @@ export function NotificationsPage() {
       <p className="notification-delivery-note">{changed ? 'Save your changes to update your WhatsApp number and alert choices.' : !savedOptIn ? 'Add your WhatsApp number and agree to receive alerts, then save your preferences.' : 'Your WhatsApp number and alert preferences are saved. You can update them anytime.'}</p>
     </section>
     <section className="notification-layout">
-      <article className="notification-rules"><header><h2>Messages to the owner</h2></header>
+      <article className="notification-rules"><header><h2>Messages to the owner</h2><p>These choices and times apply to both email and WhatsApp when enabled. Customer reminders use WhatsApp only.</p></header>
         {data.intelligenceActive ? <>
           {choice('lowStockEnabled', 'Low stock')}
           <label className="field"><span>Low-stock threshold (% of working capacity)</span><input type="number" min="1" max="50" value={settings.lowStockPercent} onChange={event => edit('lowStockPercent', Number(event.target.value))} /></label>
@@ -108,7 +115,7 @@ export function NotificationsPage() {
         const result = await api.updateNotificationSettings({ ...settings, whatsappNumber: settings.whatsappNumber ?? '', confirmNewNumber: settings.whatsappOptedIn });
         setSettings(result.settings);
         setData({ ...data, settings: result.settings });
-        setNotice('WhatsApp preferences saved.');
+        setNotice('Email and WhatsApp preferences saved.');
       })}>Save preferences</button>
     </div>
   </main>;

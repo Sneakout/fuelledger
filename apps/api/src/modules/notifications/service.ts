@@ -1,3 +1,5 @@
+import { emailDesign } from './email-template.js';
+import { queueOwnerEmail, queueEmailWelcome } from './email-queue.js';
 import { buildWelcomeMessage } from './whatsapp-template.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ownerNotificationPacketSchema, type OwnerNotificationPacket, type OwnerNotificationSettingsInput } from '@fuelledger/shared';
@@ -64,14 +66,14 @@ function responsibleAgent(type: OwnerNotificationType, recordType: string) {
 }
 export function presentNotificationSettings(settings: (NotificationSettingFields & { id?: string; updatedAt?: Date }) | null) {
   const value = settings ?? defaults;
-  return { ...value, varianceThreshold: Number(value.varianceThreshold), stockVarianceTolerance: Number(value.stockVarianceTolerance), providerReady: Boolean(env.WHATSAPP_DELIVERY_ENABLED && env.WHATSAPP_BUSINESS_ACCOUNT_ID && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_APP_SECRET && env.WHATSAPP_WEBHOOK_VERIFY_TOKEN) };
+  return { ...value, emailEnabled: false, varianceThreshold: Number(value.varianceThreshold), stockVarianceTolerance: Number(value.stockVarianceTolerance), providerReady: Boolean(env.WHATSAPP_DELIVERY_ENABLED && env.WHATSAPP_BUSINESS_ACCOUNT_ID && env.WHATSAPP_PHONE_NUMBER_ID && env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_APP_SECRET && env.WHATSAPP_WEBHOOK_VERIFY_TOKEN) };
 }
 
 export async function getSettings(organizationId: string) {
   return presentNotificationSettings(await prisma.ownerNotificationSettings.findUnique({ where: { organizationId } }));
 }
 
-export async function updateSettings(organizationId: string, input: OwnerNotificationSettingsInput, ownerName: string) {
+export async function updateSettings(organizationId: string, input: OwnerNotificationSettingsInput, ownerName: string, ownerId?: string) {
   const data = {
     whatsappNumber: input.whatsappNumber || null,
     whatsappOptedIn: input.whatsappOptedIn,
@@ -92,7 +94,11 @@ export async function updateSettings(organizationId: string, input: OwnerNotific
     ...(input.customerReminderHour !== undefined ? { customerReminderHour: input.customerReminderHour } : {}),
   };
   const settings = await prisma.$transaction(async tx => {
+    if (input.emailEnabled !== undefined && ownerId) {
+      await tx.ownerEmailPreference.upsert({ where: { ownerId }, create: { organizationId, ownerId, enabled: input.emailEnabled }, update: { enabled: input.emailEnabled } });
+    }
     const saved = await tx.ownerNotificationSettings.upsert({ where: { organizationId }, create: { organizationId, ...data }, update: data });
+    if (input.emailEnabled === true) await queueEmailWelcome(organizationId, tx);
     if (!saved.whatsappOptedIn || !saved.whatsappNumber) return saved;
 
     const welcome = await tx.organization.updateMany({
@@ -104,7 +110,7 @@ export async function updateSettings(organizationId: string, input: OwnerNotific
     }
     return saved;
   });
-  return presentNotificationSettings(settings);
+  return { ...presentNotificationSettings(settings), ...(input.emailEnabled !== undefined && ownerId ? { emailEnabled: input.emailEnabled } : {}) };
 }
 
 export async function recentDeliveries(organizationId: string, stationIds?: string[]) {
@@ -176,6 +182,9 @@ export async function sendOwnerNotification(input: AlertInput): Promise<Delivery
     const primaryEvidence = packet.evidence[0]!;
     const alert = await prisma.ownerAlert.upsert({ where: { dedupeKey: input.dedupeKey }, create: { organizationId: input.organizationId, stationId: input.stationId ?? null, type: input.type, dedupeKey: input.dedupeKey, title: presentation.title, message: alertMessage, severity: presentation.severity, evidenceLabel: primaryEvidence.label, evidencePath: presentation.path, evidenceSourceType: input.evidenceSourceType ?? null, evidenceSourceId: input.evidenceSourceId ?? null, packet: packet as unknown as Prisma.InputJsonValue }, update: {} });
     if (input.type !== 'SYSTEM_TEST' && !whatsappPreview.getStore()) await deliverPush(alert);
+  }
+  if (!whatsappPreview.getStore() && emailDesign[input.type]) {
+    await queueOwnerEmail({ organizationId: input.organizationId, stationId: input.stationId, type: input.type, eventKey: input.dedupeKey, recordType: packet.recordType, message, guard: { status: packet.status, sourceId: input.evidenceSourceId, quantity: packet.quantity?.value, snapshot: input.snapshot, version: input.version, date: input.type === 'DAILY_SUMMARY' ? input.dedupeKey.split(':').at(-1)! : indiaDate(new Date(packet.eventDate)) } });
   }
   if (!whatsappAllowed) {
     return { status: 'SKIPPED', reason: 'whatsapp_category_not_in_plan' };

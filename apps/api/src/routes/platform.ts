@@ -1,3 +1,7 @@
+import { drainEmailQueue, emailDeliveryReady, queueEmailWelcome } from '../modules/notifications/email-queue.js';
+import { renderOwnerEmail } from '../modules/notifications/email-template.js';
+import { env } from '../config/env.js';
+import { indiaDate } from '../lib/india-time.js';
 import { manualMessageContext, manualMessageInput, prepareManualOwnerMessage } from '../modules/notifications/manual-owner-messages.js';
 import { Router } from "express";
 import { customerSubscriptionUpdateSchema } from "@fuelledger/shared";
@@ -34,6 +38,41 @@ const requirePlatformAdmin = (email: string) => {
   if (!isPlatformAdminEmail(email))
     throw new AppError(403, "PLATFORM_ADMIN_REQUIRED", "This area is restricted to the FuelNerve team.");
 };
+platformRouter.get('/customers/:id/email-deliveries', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const organizationId = req.params.id;
+  const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } });
+  if (!organization) throw new AppError(404, 'ORGANIZATION_NOT_FOUND', 'Owner account not found.');
+  const deliveries = await prisma.ownerEmailDelivery.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' }, take: 10 });
+  res.json({ ready: emailDeliveryReady(organizationId), deliveries: deliveries.map(job => ({ id: job.id, type: job.type, destination: job.destination, status: job.status, attempts: job.attempts, createdAt: job.createdAt, suppressionReason: job.suppressionReason, errorMessage: job.errorMessage, providerMessageId: job.providerMessageId })) });
+});
+platformRouter.post('/customers/:id/email-welcome', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  await queueEmailWelcome(req.params.id);
+  res.json({ prepared: true });
+});
+platformRouter.post('/customers/:id/email-deliveries/:deliveryId/retry', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const result = await prisma.ownerEmailDelivery.updateMany({ where: { id: req.params.deliveryId, organizationId: req.params.id, status: 'FAILED' }, data: { status: 'PENDING', nextAttemptAt: new Date(), errorMessage: null } });
+  res.json({ queued: result.count === 1 });
+});
+platformRouter.get('/customers/:id/email-deliveries/:deliveryId/preview', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const job = await prisma.ownerEmailDelivery.findFirst({ where: { id: req.params.deliveryId, organizationId: req.params.id } });
+  if (!job) throw new AppError(404, 'EMAIL_NOT_FOUND', 'Email not found.');
+  const [organization, owner, station] = await Promise.all([
+    prisma.organization.findUniqueOrThrow({ where: { id: job.organizationId }, select: { name: true } }),
+    prisma.user.findFirst({ where: { id: job.ownerId, organizationId: job.organizationId }, select: { name: true } }),
+    job.stationId ? prisma.station.findFirst({ where: { id: job.stationId, organizationId: job.organizationId }, select: { name: true } }) : Promise.resolve(null),
+  ]);
+  const guard = job.guard as { sourceId?: string };
+  res.json(renderOwnerEmail({ type: job.type, message: job.message, ownerName: owner?.name ?? 'Owner', stationName: station?.name ?? organization.name, date: indiaDate(job.createdAt), appUrl: env.APP_URL, sourceId: guard.sourceId }));
+});
+platformRouter.post('/customers/:id/email-deliveries/:deliveryId/process', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  res.json(await drainEmailQueue({ organizationId: req.params.id, deliveryId: req.params.deliveryId, limit: 1 }));
+});
+
 platformRouter.get("/demo-leads", async (req, res) => {
   requirePlatformAdmin(req.user!.email);
   const leads = await prisma.demoSession.findMany({

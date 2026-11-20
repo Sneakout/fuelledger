@@ -96,6 +96,7 @@ export const ownerNotificationSettingsSchema = z
   .object({
     whatsappNumber: whatsappNumber.optional().or(z.literal("")),
     whatsappOptedIn: z.boolean(),
+    emailEnabled: z.boolean().optional(),
     densityMissingEnabled: z.boolean(),
     lowStockEnabled: z.boolean(),
     shiftVarianceEnabled: z.boolean(),

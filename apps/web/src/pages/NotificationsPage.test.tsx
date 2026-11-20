@@ -42,3 +42,16 @@ it('keeps provider failures and old suppression reasons out of owner preferences
   expect(screen.queryByText('The owner has not opted in.')).not.toBeInTheDocument();
   expect(screen.getByRole('button', {name:'Save preferences'})).toBeEnabled();
 });
+
+it('saves email opt-in independently of WhatsApp and shows the sign-in address', async () => {
+ mock.settings.mockResolvedValue({ settings: { ...settings, whatsappOptedIn: false, emailEnabled: false }, emailAddress: 'owner@example.com', deliveries: [], intelligenceActive: false });
+ mock.save.mockResolvedValue({ settings: { ...settings, whatsappOptedIn: false, emailEnabled: true } });
+ open();
+ expect(await screen.findByRole('textbox', { name: 'Email address' })).toHaveValue('owner@example.com');
+ expect(screen.getByRole('textbox', { name: 'Email address' })).toHaveAttribute('readonly');
+ fireEvent.click(screen.getByRole('checkbox', { name: /Send me FuelNerve email updates/ }));
+ expect(screen.getByRole('checkbox', { name: /I agree to receive/ })).not.toBeChecked();
+ fireEvent.click(screen.getByRole('button', { name: 'Save preferences' }));
+ await waitFor(() => expect(mock.save).toHaveBeenCalledWith(expect.objectContaining({ emailEnabled: true, whatsappOptedIn: false })));
+ expect(await screen.findByRole('status')).toHaveTextContent('Email and WhatsApp preferences saved.');
+});

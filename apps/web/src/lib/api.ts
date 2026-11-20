@@ -621,9 +621,15 @@ export const api = {
   platformServiceTickets: () => request<{ tickets: PlatformServiceTicket[] }>("/platform/service-tickets"),
   updatePlatformServiceTicket: (id: string, input: { status: ServiceTicketStatus; adminNote?: string }) =>
     request<{ ticket: Pick<PlatformServiceTicket, "id" | "status" | "adminNote" | "resolvedAt" | "updatedAt"> }>(`/platform/service-tickets/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+  ownerEmailDeliveries: (id: string) => request<{ ready: boolean; deliveries: OwnerEmailDelivery[] }>(`/platform/customers/${id}/email-deliveries`),
+  prepareOwnerEmailWelcome: (id: string) => request<{ prepared: boolean }>(`/platform/customers/${id}/email-welcome`, { method: 'POST' }),
+  previewOwnerEmail: (id: string, deliveryId: string) => request<{ subject: string; html: string; text: string }>(`/platform/customers/${id}/email-deliveries/${deliveryId}/preview`),
+  retryOwnerEmail: (id: string, deliveryId: string) => request<{ queued: boolean }>(`/platform/customers/${id}/email-deliveries/${deliveryId}/retry`, { method: 'POST' }),
+  processOwnerEmail: (id: string, deliveryId: string) => request<{ accepted: number }>(`/platform/customers/${id}/email-deliveries/${deliveryId}/process`, { method: 'POST' }),
   subscription: () => request<SubscriptionStatus>("/platform/subscription"),
 };
 export type NotificationSettings = {
+  emailEnabled?: boolean;
   whatsappNumber: string | null;
   whatsappOptedIn: boolean;
   densityMissingEnabled: boolean;
@@ -733,6 +739,7 @@ export type CustomerReminderDraft = {
   preview: string;
 };
 export type NotificationBootstrap = {
+  emailAddress?: string;
   settings: NotificationSettings;
   deliveries: NotificationDelivery[];
   deliveryAvailable?: boolean;
@@ -2006,3 +2013,5 @@ export type AccessBootstrap = {
     mustChangePassword: boolean;
   }>;
 };
+
+export type OwnerEmailDelivery = { id: string; type: string; destination: string; status: string; attempts: number; createdAt: string; suppressionReason: string | null; errorMessage: string | null; providerMessageId: string | null };
