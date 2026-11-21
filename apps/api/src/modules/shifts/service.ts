@@ -1,3 +1,4 @@
+import { closingCollectionFacts } from '../../lib/shift-collections.js';
 import { requiresFuelShift } from '@fuelledger/shared';
 import { safeTransaction } from '../../lib/safe-save.js';
 import { enqueueReview } from '../nerve/review-events.js';
@@ -843,6 +844,7 @@ function summary(shift: any) {
     ...shift,
     summary: {
       fuelVolume: volume,
+      closingCollections: closingCollectionFacts(shift),
       tanksCaptured: shift.tankReadings.filter(
         (reading: any) => reading.closingDip !== null,
       ).length,

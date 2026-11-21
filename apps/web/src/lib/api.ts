@@ -1353,6 +1353,7 @@ export type ReconciliationShift = {
   autoUnallocated: number;
   salesTotal: number;
   suggestedActual: Record<string, number>;
+  closingCollections?: { basis: "MIXED_PAYMENTS"; declaredStaffCollections: number; missingDeclarations: number; physicalOpeningCash: number; physicalClosingCash: number | null };
   recordedCreditAllocations?: Array<{ customerId: string; vehicleId: string | null; paymentMethod: string; amount: number }>;
   collectionDifferences?: { shortage: number; excess: number };
   reconciliation: {

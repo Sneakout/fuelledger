@@ -115,3 +115,17 @@ it('keeps the first shift focused on starting cash without historical comparison
   expect(screen.queryByText('No previous count to compare')).not.toBeInTheDocument();
   expect(screen.getByText('Cash added, removed or handed over (if applicable)').closest('details')).not.toHaveAttribute('open');
 });
+
+it('labels staff totals as mixed collections while keeping closing till cash separate', async () => {
+  const data: any = workspace(0);
+  data.shifts = [{ id: 'live', shiftNumber: 1, status: 'OPEN', openedAt: '2026-11-21T06:00:00Z',
+    station: { id: 'station-1', name: 'Test fuel station' }, manager: { name: 'Owner' }, openingCash: 500,
+    nozzleReadings: [{ nozzleId: 'n', openingMeter: 1000, nozzle: { code: 'N1', product: { name: 'MS', code: 'MS' }, dispenser: { code: 'D1', location: null } } }],
+    nozzleAssignments: [{ nozzleId: 'n', collectionAmount: 10000, user: { name: 'Staff' } }], tankReadings: [] }];
+  shiftBootstrap.mockReset().mockResolvedValue(data);
+  render(<MemoryRouter><OperationsPage /></MemoryRouter>);
+  expect(await screen.findByRole('spinbutton', { name: 'Total collections in rupees from Staff' })).toHaveValue(10000);
+  expect(screen.getByRole('spinbutton', { name: 'Physical cash counted at closing (₹)' })).toHaveValue(500);
+  expect(screen.getByText(/Split and verify payment methods in reconciliation next/)).toBeInTheDocument();
+  expect(screen.queryByText('Physical cash handed over (₹)')).not.toBeInTheDocument();
+});

@@ -329,6 +329,12 @@ export function ReconciliationPage() {
                 </div>
               )}
             </div>
+            {shift.closingCollections && <div className="reconciliation-closing-facts">
+              <strong>Staff collections · all payment methods: {money(shift.closingCollections.declaredStaffCollections)}</strong>
+              <p>Reported at closing across cash, UPI, card and other payments. Verify the split below. Unpaid credit and prepaid balance used are separate from money collected.</p>
+              <p>Physical cash counted at closing: {shift.closingCollections.physicalClosingCash === null ? "Not recorded" : money(shift.closingCollections.physicalClosingCash)} · Includes starting cash.</p>
+              {shift.closingCollections.missingDeclarations > 0 && <p>{shift.closingCollections.missingDeclarations} staff collection total(s) not recorded.</p>}
+            </div>}
             <div
               className={`allocation-progress ${fullyAllocated ? "complete" : ""}`}
             >
@@ -388,7 +394,6 @@ export function ReconciliationPage() {
                     />}
                   </label>
                   <label>
-                    {row.paymentMethod === "CASH" && <small>Physical cash received from sales</small>}
                     {locked ? <output aria-label={`${labels[row.paymentMethod]} verified amount in rupees`}>{money(row.actualAmount)}</output> : <input
                       aria-label={`${labels[row.paymentMethod]} verified amount in rupees`}
                       type="number"

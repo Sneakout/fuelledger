@@ -13,7 +13,12 @@ const retryDelay = 15 * 60_000;
 const maximumAge = 24 * 60 * 60_000;
 const stockKey = (tankId: string, episodeId: string, level: string) => `stock-episode:${tankId}:${episodeId}:${level}`;
 
-type DispatchOptions = { channel?: 'EMAIL'; organizationIds?: string[] };
+type DispatchOptions = { channel?: 'EMAIL'; organizationIds?: string[]; reconciledShiftId?: string };
+
+/** Prepare only this committed shift's email. Provider sending remains in the durable worker. */
+export async function prepareReconciledShiftEmail(organizationId: string, shiftId: string) {
+  return drainAgentMessages({ channel: 'EMAIL', organizationIds: [organizationId], reconciledShiftId: shiftId });
+}
 export async function drainAgentMessages(options: DispatchOptions = {}) {
   return options.channel === 'EMAIL' ? prepareEmailNotifications(() => dispatchAgentMessages(options)) : dispatchAgentMessages(options);
 }
@@ -24,7 +29,7 @@ async function dispatchAgentMessages(options: DispatchOptions) {
   const nextField = email ? 'emailNextAt' : 'notificationNextAt';
   const now = new Date();
   const jobs = await prisma.nerveReviewJob.findMany({
-    where: { ...(options.organizationIds ? { organizationId: { in: options.organizationIds } } : {}), [handledField]: null, [nextField]: { lte: now }, OR: [
+    where: { ...(options.reconciledShiftId ? { resourceId: options.reconciledShiftId, eventType: 'SHIFT_RECONCILED', agentKey: 'reconciliation-review' } : {}), ...(options.organizationIds ? { organizationId: { in: options.organizationIds } } : {}), [handledField]: null, [nextField]: { lte: now }, OR: [
       { agentKey: 'reconciliation-review', eventType: 'SHIFT_RECONCILED' },
       { agentKey: 'purchase-check', eventType: 'RECEIPT_RECORDED' },
       { agentKey: 'inventory-watch', eventType: { in: ['SHIFT_CLOSED', 'RECEIPT_RECORDED', 'SALE_RECORDED', 'STOCK_ADJUSTED', 'INVOICE_CHANGED', 'DAILY_REVIEW'] } },

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { additionalCustomerDebt, collectionDifferences } from '../src/lib/shift-collections.js';
+import { additionalCustomerDebt, collectionDifferences, closingCollectionFacts } from '../src/lib/shift-collections.js';
 
 describe('shift customer reconciliation', () => {
   it('posts only new credit, never a previously recorded sale twice', () => {
@@ -19,4 +19,19 @@ describe('shift customer reconciliation', () => {
   it('keeps offsetting shortages and excesses visible', () => {
     expect(collectionDifferences([{expectedAmount:100,adjustmentAmount:0,actualAmount:80},{expectedAmount:100,adjustmentAmount:0,actualAmount:120}])).toEqual({shortage:20,excess:20});
   });
+});
+
+it('keeps a mixed staff declaration separate from physical cash and payment allocations', () => {
+  const facts = closingCollectionFacts({ openingCash: 500, closingCash: 2500,
+    nozzleAssignments: [{ collectionAmount: 7000 }, { collectionAmount: 3000 }] });
+  // Cash 2,000 + UPI 5,000 + card 3,000 can be declared as 10,000.
+  // The till holds only 2,500 including the opening float.
+  expect(facts).toEqual({ basis: 'MIXED_PAYMENTS', declaredStaffCollections: 10000,
+    missingDeclarations: 0, physicalOpeningCash: 500, physicalClosingCash: 2500 });
+  expect(facts).not.toHaveProperty('CASH');
+});
+it('distinguishes a missing handover or cash count from a recorded zero', () => {
+  expect(closingCollectionFacts({ openingCash: 0, closingCash: null,
+    nozzleAssignments: [{ collectionAmount: null }, { collectionAmount: 0 }] }))
+    .toMatchObject({ declaredStaffCollections: 0, missingDeclarations: 1, physicalClosingCash: null });
 });

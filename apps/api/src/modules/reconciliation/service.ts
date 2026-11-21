@@ -1,6 +1,8 @@
+import { prepareReconciledShiftEmail } from '../notifications/agent-dispatch.js';
+import { logger } from '../../lib/logger.js';
 import { safeTransaction } from '../../lib/safe-save.js';
 import { enqueueReview } from '../nerve/review-events.js';
-import { additionalCustomerDebt, collectionDifferences } from '../../lib/shift-collections.js';
+import { additionalCustomerDebt, collectionDifferences, closingCollectionFacts } from '../../lib/shift-collections.js';
 import type { ReconciliationInput } from "@fuelledger/shared";
 import { paymentMethods } from "@fuelledger/shared";
 import { Prisma } from "@prisma/client";
@@ -410,6 +412,11 @@ export async function reconcile(
     }).catch(() => undefined)));
   }
   await notifyShiftVariance(organizationId, result).catch(() => undefined);
+  // The committed review event remains available to cron if preparation fails.
+  // Never let an email problem roll back a completed reconciliation.
+  await prepareReconciledShiftEmail(organizationId, result.id).catch(error => {
+    logger.warn({ shiftId: result.id, errorName: error instanceof Error ? error.name : 'EmailPreparationError' }, 'Shift email preparation deferred to worker');
+  });
   return result;
 }
 function presentShift(
@@ -472,6 +479,7 @@ function presentShift(
     autoUnallocated,
     salesTotal: Object.values(expected).reduce((sum, value) => sum + value, 0),
     suggestedActual,
+    closingCollections: closingCollectionFacts(shift),
     recordedCreditAllocations: shift.sales?.filter((sale: any) => sale.customerId).map((sale: any) => ({ customerId: sale.customerId, vehicleId: sale.vehicleId, paymentMethod: sale.paymentMethod, amount: Number(sale.totalAmount) })) ?? [],
     collectionDifferences: collectionDifferences(collections.map((row: any) => ({ actualAmount: Number(row.actualAmount), expectedAmount: Number(row.expectedAmount), adjustmentAmount: Number(row.adjustmentAmount) }))),
     totals,

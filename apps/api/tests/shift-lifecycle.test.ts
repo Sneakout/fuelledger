@@ -30,7 +30,7 @@ describe('closing shift', () => {
       tankReading:{findMany:vi.fn().mockResolvedValue([])},
       shiftTankReading:{findMany:vi.fn().mockResolvedValue([])},
       station: { findFirst: vi.fn().mockResolvedValue({id:'station', configurations:[{id:'cfg',tanks:[{id:'t',code:'T1',productId:'fuel',openingStock:d(1000)}],dispensers:[{nozzles:[{id:'n',code:'N1',openingMeter:d(1000)}]}]}]}) },
-      shift: { findFirst: vi.fn().mockResolvedValueOnce({id:'previous',closingCash:d(50),shiftNumber:1,closedAt:new Date('2026-01-01'),tankReadings:[{tankId:'t',closingDip:d(900)}],nozzleReadings:[{nozzleId:'n',closingMeter:d(1100)}]}).mockResolvedValueOnce(null), aggregate:vi.fn().mockResolvedValue({_max:{shiftNumber:1}}),create:vi.fn(async ({data})=>({...data,nozzleReadings:[],tankReadings:[]})) },
+      shift: { findFirst: vi.fn().mockResolvedValueOnce({id:'previous',closingCash:d(50),shiftNumber:1,closedAt:new Date('2026-01-01'),tankReadings:[{tankId:'t',closingDip:d(900)}],nozzleReadings:[{nozzleId:'n',closingMeter:d(1100)}]}).mockResolvedValueOnce(null), aggregate:vi.fn().mockResolvedValue({_max:{shiftNumber:1}}),create:vi.fn(async ({data})=>({...data,nozzleAssignments:data.nozzleAssignments.create,nozzleReadings:[],tankReadings:[]})) },
       inventoryLedger:{groupBy:vi.fn().mockResolvedValue([{tankId:'t',stationId:'station',productId:'fuel',type:'RECEIPT',_sum:{quantityDelta:d(200)}}])},
       user:{findMany:vi.fn().mockResolvedValue([{id:'u'}])},
     };
@@ -48,7 +48,7 @@ describe('closing shift', () => {
       tankReading:{findMany:vi.fn().mockResolvedValue([])},
       shiftTankReading:{findMany:vi.fn().mockResolvedValue([])},
       station: { findFirst: vi.fn().mockResolvedValue({id:'station', configurations:[{id:'cfg',tanks:[{id:'t',code:'T1',productId:'fuel',openingStock:d(1000)}],dispensers:[{nozzles:[{id:'n',code:'N1',openingMeter:d(1000)}]}]}]}) },
-      shift: { findFirst: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(null), aggregate:vi.fn().mockResolvedValue({_max:{shiftNumber:0}}),create:vi.fn(async ({data})=>({...data,nozzleReadings:[],tankReadings:[]})) },
+      shift: { findFirst: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(null), aggregate:vi.fn().mockResolvedValue({_max:{shiftNumber:0}}),create:vi.fn(async ({data})=>({...data,nozzleAssignments:data.nozzleAssignments.create,nozzleReadings:[],tankReadings:[]})) },
       inventoryLedger:{groupBy:vi.fn().mockResolvedValue([])},
       user:{findMany:vi.fn().mockResolvedValue([{id:'u'}])},
     };
@@ -75,12 +75,14 @@ describe('closing shift', () => {
       shiftTankReading:{findMany:vi.fn().mockResolvedValue([]),update:vi.fn()},shiftNozzleReading:{update:vi.fn()},shiftNozzleAssignment:{update:vi.fn()},
     };
     db.$transaction.mockImplementation(async fn => fn(tx));
-    const input = { closingCash: 7500, tankReadings:[{id:'t',value:895}], nozzleReadings:[{id:'n',value:1100,testingQuantity:5,testingReturned:false}], nozzleCollections:[{nozzleId:'n',amount:7500}] };
+    const input = { closingCash: 2000, tankReadings:[{id:'t',value:895}], nozzleReadings:[{id:'n',value:1100,testingQuantity:5,testingReturned:false}], nozzleCollections:[{nozzleId:'n',amount:7500}] };
     await expect(closeShift('org','s',input)).rejects.toMatchObject({code:'STOCK_VARIANCE_NOTE_REQUIRED'});
     expect(tx.shift.updateMany).not.toHaveBeenCalled();
     await expect(closeShift('org','s',{...input,tankReadings:[{id:'t',value:1000}],notes:'Opening dip copied at close'})).rejects.toMatchObject({code:'TANK_READING_UNCHANGED'});
     expect(tx.shift.updateMany).not.toHaveBeenCalled();
     await closeShift('org','s',input);
+    expect(tx.shift.update.mock.calls[0][0].data.closingCash.toNumber()).toBe(2000);
+    expect(tx.shiftNozzleAssignment.update.mock.calls[0][0].data.collectionAmount.toNumber()).toBe(7500);
     expect(tx.sale.create).toHaveBeenCalledTimes(1);
     expect(tx.sale.create.mock.calls[0][0].data.quantity.toNumber()).toBe(75);
     expect(tx.sale.create.mock.calls[0][0].data.totalAmount.toNumber()).toBe(7500);

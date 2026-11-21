@@ -450,12 +450,12 @@ export function OperationsPage() {
                 <div>
                   <h3>Closing nozzle meter readings</h3>
                   <p>
-                    Enter each closing meter and the physical cash handed over by the employee. Exclude UPI, card and credit. Fuel sales
+                    Enter each closing meter and the employee’s total collections across cash, UPI, card and other payments. Split and verify payment methods in reconciliation next. Exclude unpaid credit and prepaid balance used. Fuel sales
                     are calculated and added to Sales automatically.
                   </p>
                 </div>
                 <span>
-                  Physical cash handed over
+                  Staff collections · all payment methods
                   <strong>{money(closeCollections.reduce((sum, item) => sum + item.value, 0))}</strong>
                 </span>
               </div>
@@ -465,7 +465,7 @@ export function OperationsPage() {
                   <span>Attendant</span>
                   <span>Opening meter (L)</span>
                   <span>Closing meter (L)</span>
-                  <span>Physical cash handed over (₹)</span>
+                  <span>Total collections (₹)</span>
                 </div>
                 {active.nozzleReadings.map((reading) => {
                   const assignment = active.nozzleAssignments.find(
@@ -495,9 +495,9 @@ export function OperationsPage() {
                           }
                         />
                       </label>
-                      <label className="collection-field" data-label="Physical cash handed over (₹)">
+                      <label className="collection-field" data-label="Total collections (₹)">
                         <input
-                          aria-label={`Physical cash handed over in rupees from ${assignment?.user.name ?? reading.nozzle.code}`}
+                          aria-label={`Total collections in rupees from ${assignment?.user.name ?? reading.nozzle.code}`}
                           type="number"
                           min="0"
                           step="0.01"
@@ -1086,7 +1086,7 @@ function ShiftSummary({
         </strong>
       </div>
       <div>
-        <span>Physical cash handed over by staff</span>
+        <span>Staff collections · all payment methods</span>
         <strong>{money(staffCollections)}</strong>
       </div>
       <div>

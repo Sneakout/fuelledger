@@ -802,6 +802,7 @@ model ShiftNozzleAssignment {
   shiftId          String   @map("shift_id")
   nozzleId         String   @map("nozzle_id")
   userId           String   @map("user_id")
+  /// Employee-declared mixed payment total, not physical cash or a verified method split.
   collectionAmount Decimal? @map("collection_amount") @db.Decimal(14, 2)
   shift            Shift    @relation(fields: [shiftId], references: [id], onDelete: Restrict)
   nozzle           Nozzle   @relation(fields: [nozzleId], references: [id], onDelete: Restrict)

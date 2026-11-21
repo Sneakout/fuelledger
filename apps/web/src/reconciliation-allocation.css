@@ -25,3 +25,16 @@
 @media (prefers-reduced-motion: reduce) { .reconciliation-success { animation: none; } }
 @media (max-width: 1100px) { .reconciliation-page .collection-row.allocation-row { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 650px) { .reconciliation-page .collection-row.allocation-row { grid-template-columns: 1fr; } .reconciliation-page .allocation-workspace input, .reconciliation-page .allocation-workspace select { font-size: 16px; } }
+
+.reconciliation-closing-facts {
+  margin: 1rem 0;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border, #d7e5df);
+  border-radius: 16px;
+  background: #f3f9f6;
+  color: #17483b;
+  font-size: .875rem;
+  line-height: 1.6;
+}
+.reconciliation-closing-facts strong { font-size: .9375rem; }
+.reconciliation-closing-facts p { margin: .4rem 0 0; font-size: inherit; }

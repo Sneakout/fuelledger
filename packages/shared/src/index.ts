@@ -680,6 +680,8 @@ export const openShiftSchema = z.object({
   nozzleReadings: z.array(reading),
   notes: z.string().max(500).optional(),
 });
+// Closing cash is physical notes/coins, including float. Nozzle collection totals
+// are mixed payments; their method allocation is verified later in reconciliation.
 export const closeShiftSchema = z.object({
   closingCash: z.coerce.number().min(0),
   tankReadings: z.array(reading),

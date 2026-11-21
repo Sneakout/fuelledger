@@ -22,3 +22,20 @@ export function collectionDifferences(rows: Array<{ actualAmount: number; expect
     return { shortage: totals.shortage + Math.max(0, -difference), excess: totals.excess + Math.max(0, difference) };
   }, { shortage: 0, excess: 0 });
 }
+
+/** Read-only closing facts: mixed declarations never allocate cash or create money movements. */
+export function closingCollectionFacts(shift: {
+  openingCash: unknown;
+  closingCash: unknown;
+  nozzleAssignments?: Array<{ collectionAmount?: unknown }>;
+}) {
+  const assignments = shift.nozzleAssignments ?? [];
+  const missingDeclarations = assignments.filter(row => row.collectionAmount == null).length;
+  return {
+    basis: 'MIXED_PAYMENTS' as const,
+    declaredStaffCollections: assignments.reduce((sum, row) => sum + Number(row.collectionAmount ?? 0), 0),
+    missingDeclarations,
+    physicalOpeningCash: Number(shift.openingCash ?? 0),
+    physicalClosingCash: shift.closingCash == null ? null : Number(shift.closingCash),
+  };
+}
