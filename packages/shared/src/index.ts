@@ -1187,6 +1187,7 @@ export const historicalSalesCorrectionSchema = z.object({
   rows: z.array(historicalSalesRowSchema).min(1).max(31),
   reason: z.string().trim().min(3).max(300),
   expectedUpdatedAt: z.string().datetime(),
+  mode: z.enum(['APPEND', 'CORRECT']).optional(),
 }).strict().superRefine((value, context) => {
   const dates = new Set<string>();
   for (const [index, row] of value.rows.entries()) {
@@ -1200,6 +1201,26 @@ export const historicalSalesCorrectionSchema = z.object({
 });
 export type HistoricalSalesCorrectionInput = z.infer<typeof historicalSalesCorrectionSchema>;
 
+/** Compare entered facts only; derived neighbour sales are expected to change on append. */
+export function historicalSalesChanges(saved: HistoricalSalesRowInput[], draft: HistoricalSalesRowInput[]) {
+  const facts = (row: HistoricalSalesRowInput) => JSON.stringify({
+    tankReadings: [...row.tankReadings].sort((a,b) => a.tankId.localeCompare(b.tankId)).map(reading => ({ tankId: reading.tankId, dipReading: reading.dipReading, openingStock: reading.openingStock, calibration: reading.calibration ? Object.fromEntries(Object.entries(reading.calibration).sort(([a],[b]) => a.localeCompare(b))) : undefined })),
+    nozzleReadings: [...row.nozzleReadings].sort((a,b) => a.nozzleId.localeCompare(b.nozzleId)).map(reading => ({ nozzleId: reading.nozzleId, meterReading: reading.meterReading })),
+    receiptQuantity: row.receiptQuantity, testingQuantity: row.testingQuantity,
+    sellingPrice: row.sellingPrice, notes: row.notes ?? '',
+  });
+  const before = new Map(saved.map(row => [row.date, row]));
+  const after = new Map(draft.map(row => [row.date, row]));
+  return {
+    added: draft.filter(row => !before.has(row.date)).map(row => row.date),
+    updated: draft.filter(row => before.has(row.date) && facts(before.get(row.date)!) !== facts(row)).map(row => row.date),
+    removed: saved.filter(row => !after.has(row.date)).map(row => row.date),
+  };
+}
+export function hasFollowingMorning(current: Pick<HistoricalSalesRowInput, 'date'>, next: Pick<HistoricalSalesRowInput, 'date'> | undefined) {
+  return Boolean(next && Date.parse(`${next.date}T00:00:00Z`) - Date.parse(`${current.date}T00:00:00Z`) === 86_400_000);
+}
+
 export function calculateHistoricalTotalStock(row: Pick<HistoricalSalesRowInput, 'tankReadings' | 'receiptQuantity'>): number {
   return Number((row.tankReadings.reduce((sum, reading) => sum + reading.openingStock, 0) + row.receiptQuantity).toFixed(3));
 }
@@ -1209,6 +1230,7 @@ export function deriveHistoricalTotalStock(rows: HistoricalSalesRowInput[]): His
 }
 
 export function calculateHistoricalNozzleSales(current: HistoricalSalesRowInput, next: HistoricalSalesRowInput): number | undefined {
+  if (!hasFollowingMorning(current, next)) return undefined;
   const currentMeters = new Map(current.nozzleReadings.map(reading => [reading.nozzleId, reading.meterReading]));
   if (currentMeters.size !== next.nozzleReadings.length) return undefined;
   let movement = 0;
@@ -1221,6 +1243,7 @@ export function calculateHistoricalNozzleSales(current: HistoricalSalesRowInput,
 }
 
 export function calculateHistoricalTankSales(current: HistoricalSalesRowInput, next: HistoricalSalesRowInput): number | undefined {
+  if (!hasFollowingMorning(current, next)) return undefined;
   const available = calculateHistoricalTotalStock(current);
   const nextMorningStock = next.tankReadings.reduce((sum, reading) => sum + reading.openingStock, 0);
   const movement = available - nextMorningStock;
@@ -1249,7 +1272,7 @@ export function deriveHistoricalNozzleSales(rows: HistoricalSalesRowInput[]): Hi
     const next = rows[index + 1];
     if (!next) return row;
     const salesQuantity = calculateHistoricalNozzleSales(row, next);
-    return salesQuantity === undefined ? row : { ...row, salesQuantity };
+    return salesQuantity === undefined ? { ...row, salesQuantity: 0 } : { ...row, salesQuantity };
   });
 }
 
@@ -1262,20 +1285,22 @@ export function deriveHistoricalNozzleSales(rows: HistoricalSalesRowInput[]): Hi
 export function deriveHistoricalSalesMetrics(rows: HistoricalSalesRowInput[]): HistoricalSalesRowInput[] {
   let cumulativeSales = 0;
   let hasCompletedDay = false;
-  return rows.map((source, index) => {
+  let cumulativeReliable = true;
+  const ordered = [...rows].sort((a,b) => a.date.localeCompare(b.date));
+  return ordered.map((source, index) => {
     const { cumulativeSales: _sourceCumulative, stockGainLoss: _sourceGainLoss, ...withoutImportedMetrics } = source;
     const row: HistoricalSalesRowInput = { ...withoutImportedMetrics, totalStock: calculateHistoricalTotalStock(source) };
-    const next = rows[index + 1];
-    if (!next) return hasCompletedDay ? { ...row, salesQuantity: 0, cumulativeSales: Number(cumulativeSales.toFixed(3)) } : { ...row, salesQuantity: 0 };
+    const next = ordered[index + 1];
+    if (!next) return hasCompletedDay && cumulativeReliable ? { ...row, salesQuantity: 0, cumulativeSales: Number(cumulativeSales.toFixed(3)) } : { ...row, salesQuantity: 0 };
     const salesQuantity = calculateHistoricalNozzleSales(row, next);
-    if (salesQuantity === undefined) return { ...row, salesQuantity: 0 };
+    if (salesQuantity === undefined) { cumulativeReliable = false; return { ...row, salesQuantity: 0 }; }
     cumulativeSales += salesQuantity;
     hasCompletedDay = true;
     const stockGainLoss = calculateHistoricalStockGainLoss(row, next);
     return {
       ...row,
       salesQuantity,
-      cumulativeSales: Number(cumulativeSales.toFixed(3)),
+      ...(cumulativeReliable ? { cumulativeSales: Number(cumulativeSales.toFixed(3)) } : {}),
       ...(stockGainLoss !== undefined ? { stockGainLoss } : {}),
     };
   });

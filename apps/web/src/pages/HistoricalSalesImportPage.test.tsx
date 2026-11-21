@@ -334,27 +334,57 @@ describe('HistoricalSalesImportPage', () => {
     await waitFor(() => expect(screen.getByLabelText('RSP 2026-11-01')).toHaveClass('server-needs-review'));
     expect(screen.getByLabelText('RSP 2026-11-01').closest('tr')).toHaveClass('server-needs-review');
   });
-  it('checks the server before manual entry and offers the saved days without replacing anything', async () => {
+  it('continues a partial month without blocking, preserves saved mornings and recomputes the boundary day', async () => {
     const rows = [
       {date:'2026-11-01',tankReadings:[{tankId:'tank-1',openingStock:8000}],receiptQuantity:0,totalStock:8000,nozzleReadings:[{nozzleId:'nozzle-1',meterReading:1000}],testingQuantity:0,salesQuantity:100,cumulativeSales:100,sellingPrice:94},
       {date:'2026-11-02',tankReadings:[{tankId:'tank-1',openingStock:7900}],receiptQuantity:0,totalStock:7900,nozzleReadings:[{nozzleId:'nozzle-1',meterReading:1100}],testingQuantity:0,salesQuantity:0,cumulativeSales:100,sellingPrice:94},
     ];
     const record = {id:'existing',stationId:'station-1',productId:'product-1',month:'2026-11',monthStart:'2026-10-31T18:30:00Z',sourceFileName:'saved.pdf',cutoverApplied:false,createdAt:'2026-11-15T10:00:00Z',updatedAt:'2026-11-15T10:00:00Z',product:{code:'HSD',name:'Diesel'},importedBy:{name:'Owner'},corrections:[],rows};
-    historicalSalesImports.mockResolvedValue({imports:[{...record,_count:{corrections:0}}]});
-    historicalSalesImport.mockResolvedValue({record});
+    historicalSalesImports.mockResolvedValue({imports:[{...record,_count:{corrections:0}}]}); historicalSalesImport.mockResolvedValue({record});
+    correctHistoricalSalesImport.mockImplementationOnce(async (_id, payload) => ({ record: { ...record, rows: payload.rows }, issues: [] }));
     render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
-    fireEvent.click(await screen.findByRole('button',{name:/Enter manually/}));
-    expect(await screen.findByRole('dialog',{name:'Data already exists for this period'})).toBeInTheDocument();
-    expect(createHistoricalSalesImport).not.toHaveBeenCalled(); expect(correctHistoricalSalesImport).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button',{name:'Keep existing data'}));
-    expect(screen.queryByLabelText('Nozzle sales 2026-11-01')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button',{name:/Enter manually/}));
-    fireEvent.click(await screen.findByRole('button',{name:'Open saved data to edit'}));
-    expect(await screen.findByLabelText('Nozzle sales 2026-11-01')).toHaveValue(100);
-    fireEvent.change(screen.getByDisplayValue('1100'),{target:{value:'1120'}});
-    expect(screen.getByLabelText('Nozzle sales 2026-11-01')).toHaveValue(120);
-    expect(screen.getByLabelText('Cumulative sales 2026-11-01')).toHaveValue(120);
-    expect(screen.getByRole('button',{name:/Save corrections/})).toBeDisabled();
+    fireEvent.click(await screen.findByRole('button',{name:/Add missing days/}));
+    expect(await screen.findByText(/Continue saved register/)).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('HSD-1 stock 2026-11-01')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('HSD-1 stock 2026-11-03')).toHaveValue(null);
+    expect(screen.getByLabelText('D-1/HSD-1 meter 2026-11-03')).toHaveValue(null);
+    fireEvent.change(screen.getByLabelText('HSD-1 stock 2026-11-03'),{target:{value:'7800'}});
+    fireEvent.change(screen.getByLabelText('D-1/HSD-1 meter 2026-11-03'),{target:{value:'1200'}});
+    expect(screen.getByText(/Awaiting next morning’s readings/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Review & save days'}));
+    expect(await screen.findByRole('dialog',{name:'Review register changes'})).toHaveTextContent('Adding 1 day · Updating 0 existing days');
+    expect(correctHistoricalSalesImport).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button',{name:'Confirm changes'}));
+    await waitFor(() => expect(correctHistoricalSalesImport).toHaveBeenCalledWith('existing',expect.objectContaining({ mode:'APPEND', expectedUpdatedAt:record.updatedAt, rows:expect.arrayContaining([expect.objectContaining({ date:'2026-11-02',salesQuantity:100 }),expect.objectContaining({date:'2026-11-03',salesQuantity:0})]) })));
+    expect(createHistoricalSalesImport).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText('Add missing days', { selector: '.eyebrow' })).not.toBeInTheDocument());
+    historicalSalesImports.mockResolvedValue({imports:[]});
+  });
+
+  it.each([false, true])('merges a new upload and replaces a saved date only when selected (%s)', async (replace) => {
+    const makeRow = (day: number, meter: number) => ({date:`2026-11-0${day}`,tankReadings:[{tankId:'tank-1',openingStock:8100-day*100}],receiptQuantity:0,nozzleReadings:[{nozzleId:'nozzle-1',meterReading:meter}],testingQuantity:0,salesQuantity:0,sellingPrice:94});
+    const record = {id:'saved-upload',stationId:'station-1',productId:'product-1',month:'2026-11',monthStart:'2026-10-31T18:30:00Z',sourceFileName:'saved.pdf',cutoverApplied:false,createdAt:'2026-11-15T10:00:00Z',updatedAt:'2026-11-15T10:00:00Z',product:{code:'HSD',name:'Diesel'},importedBy:{name:'Owner'},corrections:[],rows:[makeRow(1,1000),makeRow(2,1100)]};
+    historicalSalesImports.mockResolvedValue({imports:[{...record,_count:{corrections:0}}]}); historicalSalesImport.mockResolvedValue({record});
+    extractHistoricalSales.mockResolvedValueOnce({rows:[makeRow(1,1005),makeRow(3,1200)],warnings:[],layoutIssues:[],uncertainCells:[],periodNeedsConfirmation:false,effectiveMonth:'2026-11',periodSource:'DOCUMENT',confidence:1});
+    const view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    await screen.findByRole('option',{name:/HSD/});
+    fireEvent.change(view.container.querySelector<HTMLInputElement>('input[type="file"]')!,{target:{files:[new File(['new source'],'more-days.pdf',{type:'application/pdf'})]}});
+    await screen.findByText(/Draft ready/);
+    fireEvent.click(screen.getByRole('checkbox',{name:/Confirm DSR period/}));
+    fireEvent.click(screen.getByRole('button',{name:'Confirm historical import'}));
+    expect(await screen.findByRole('dialog',{name:'Review matching dates'})).toBeInTheDocument();
+    const checkbox = screen.getByRole('checkbox',{name:'Replace 2026-11-01'});
+    expect(checkbox).not.toBeChecked(); if (replace) fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole('button',{name:'Review combined register'}));
+    await screen.findByText(/Continue saved register/);
+    if (replace) {
+      expect(screen.getByLabelText('D-1/HSD-1 meter 2026-11-01')).toHaveValue(1005);
+      expect(screen.getByRole('button',{name:'Review & save days'})).toBeDisabled();
+      fireEvent.change(screen.getByPlaceholderText('What was corrected, and why?'),{target:{value:'Corrected from original DSR'}});
+    } else expect(screen.queryByLabelText('D-1/HSD-1 meter 2026-11-01')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Review & save days'}));
+    expect(await screen.findByRole('dialog',{name:'Review register changes'})).toHaveTextContent(`Updating ${replace ? 1 : 0} existing day`);
     expect(correctHistoricalSalesImport).not.toHaveBeenCalled();
     historicalSalesImports.mockResolvedValue({imports:[]});
   });

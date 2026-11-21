@@ -1,6 +1,6 @@
 import { Prisma, type HistoricalSalesImport } from '@prisma/client';
 import { createHash } from 'node:crypto';
-import { calculateHistoricalNozzleSales, calculateHistoricalStockGainLoss, calculateHistoricalTankSales, deriveHistoricalSalesMetrics, type HistoricalSalesCorrectionInput, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
+import { hasFollowingMorning, historicalSalesChanges, calculateHistoricalNozzleSales, calculateHistoricalStockGainLoss, calculateHistoricalTankSales, deriveHistoricalSalesMetrics, type HistoricalSalesCorrectionInput, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { AppError } from '../../lib/errors.js';
 import { indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
@@ -57,16 +57,20 @@ export function validateHistoricalRows(rows: HistoricalSalesRowInput[]): Histori
       }
     }
     if (!next) continue;
+    if (!hasFollowingMorning(row, next)) {
+      issues.push({ date: row.date, level: 'WARNING', field: 'salesQuantity', message: 'Awaiting next morning’s readings. Daily sales are not yet available for this date.' });
+      continue;
+    }
     if (row.salesQuantity > 0 && row.sellingPrice <= 0) issues.push({ date: row.date, level: 'ERROR', field: 'sellingPrice', message: 'Enter the retail selling price (RSP) for this date so the sales value can be calculated.' });
-    const calculatedSales = calculateHistoricalNozzleSales(row, next);
+    const calculatedSales = calculateHistoricalNozzleSales(row, next!);
     if (calculatedSales === undefined) {
       issues.push({ date: next.date, level: 'ERROR', field: 'nozzleReadings', message: 'A nozzle meter reading moves backwards or does not match the configured nozzles.' });
       continue;
     }
     if (Math.abs(calculatedSales - row.salesQuantity) > tolerance) issues.push({ date: row.date, level: 'WARNING', field: 'salesQuantity', message: `Meter movement less returned testing gives ${calculatedSales.toFixed(1)} L, not ${row.salesQuantity.toFixed(1)} L.` });
-    const tankSales = calculateHistoricalTankSales(row, next);
+    const tankSales = calculateHistoricalTankSales(row, next!);
     if (tankSales === undefined) issues.push({ date: row.date, level: 'ERROR', field: 'tankReadings', message: 'The following morning tank stock is above the available stock. Check the dip and receipt quantity.' });
-    const gainLoss = calculateHistoricalStockGainLoss(row, next);
+    const gainLoss = calculateHistoricalStockGainLoss(row, next!);
     if (gainLoss !== undefined && row.stockGainLoss !== undefined && Math.abs(gainLoss - row.stockGainLoss) > tolerance) issues.push({ date: row.date, level: 'WARNING', field: 'stockGainLoss', message: `Nozzle sales minus tank sales gives ${gainLoss.toFixed(1)} L, not ${row.stockGainLoss.toFixed(1)} L.` });
   }
   return issues;
@@ -194,6 +198,9 @@ export async function validateHistoricalCorrection(organizationId: string, id: s
 export async function correctHistoricalImport(organizationId: string, userId: string, id: string, input: HistoricalSalesCorrectionInput) {
   const existing = await prisma.historicalSalesImport.findFirst({ where: { id, organizationId }, select: { id: true, stationId: true, productId: true, monthStart: true, rows: true, updatedAt: true } });
   if (!existing) throw new AppError(404, 'HISTORICAL_IMPORT_NOT_FOUND', 'The imported register could not be found.');
+  if (existing.updatedAt.getTime() !== new Date(input.expectedUpdatedAt).getTime()) throw new AppError(409, 'HISTORICAL_IMPORT_CHANGED', 'This register was changed in another session. Reopen it before saving your corrections.');
+  const changes = historicalSalesChanges(importRows(existing), input.rows);
+  if (input.mode === 'APPEND' && (changes.updated.length || changes.removed.length)) throw new AppError(409, 'HISTORICAL_APPEND_CONFLICT', 'Adding missing days cannot replace or remove saved readings. Review the affected dates as corrections.');
   const setup = await equipment(organizationId, existing.stationId, existing.productId);
   const prepared = prepareHistoricalRows(setup, input.rows, indiaDate(existing.monthStart).slice(0, 7));
   return prisma.$transaction(async tx => {
