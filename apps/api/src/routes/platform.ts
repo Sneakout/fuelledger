@@ -1,3 +1,4 @@
+import { demoFollowUpState, prepareDemoFollowUp, sendDemoFollowUp } from '../modules/notifications/demo-follow-up.js';
 import { readOwnerEmailState } from '../modules/notifications/email-owner-state.js';
 import { drainEmailQueue, emailDeliveryReady, queueEmailWelcome } from '../modules/notifications/email-queue.js';
 import { renderOwnerEmail } from '../modules/notifications/email-template.js';
@@ -88,6 +89,15 @@ platformRouter.post('/customers/:id/email-deliveries/:deliveryId/process', async
   res.json(await drainEmailQueue({ organizationId: req.params.id, deliveryId: req.params.deliveryId, limit: 1, manualWelcome: true }));
 });
 
+platformRouter.post('/demo-leads/:id/follow-up/preview', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  res.json(await prepareDemoFollowUp(req.params.id, req.user!.id));
+});
+platformRouter.post('/demo-leads/:id/follow-up/send', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const input = z.object({ id: z.string().min(1), previewHash: z.string().length(64), permissionConfirmed: z.literal(true) }).parse(req.body);
+  res.json(await sendDemoFollowUp(req.params.id, input, req.user!.id));
+});
 platformRouter.get("/demo-leads", async (req, res) => {
   requirePlatformAdmin(req.user!.email);
   const leads = await prisma.demoSession.findMany({
@@ -96,7 +106,9 @@ platformRouter.get("/demo-leads", async (req, res) => {
     select: { id: true, contact: true, kind: true, createdAt: true, expiresAt: true },
   });
   const uniqueContacts = new Set(leads.map((lead) => lead.contact.toLowerCase())).size;
-  res.json({ leads, summary: { sessions: leads.length, uniqueContacts } });
+  const followUps = await prisma.demoFollowUpEmail.findMany({ where: { destination: { in: leads.filter(lead => lead.kind === 'EMAIL').map(lead => lead.contact.trim().toLowerCase()) } } });
+  const byDestination = new Map(followUps.map(job => [job.destination, demoFollowUpState(job)]));
+  res.json({ leads: leads.map(lead => ({ ...lead, followUp: lead.kind === 'EMAIL' ? byDestination.get(lead.contact.trim().toLowerCase()) ?? null : null })), summary: { sessions: leads.length, uniqueContacts } });
 });
 platformRouter.get("/customers", async (req, res) => {
   requirePlatformAdmin(req.user!.email);

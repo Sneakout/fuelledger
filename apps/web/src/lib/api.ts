@@ -562,6 +562,8 @@ export const api = {
       { method: "POST" },
     ),
   demoLeads: () => request<DemoLeadsBootstrap>("/platform/demo-leads"),
+  previewDemoFollowUp: (id: string) => request<DemoFollowUpPreview>(`/platform/demo-leads/${encodeURIComponent(id)}/follow-up/preview`, { method: 'POST' }),
+  sendDemoFollowUp: (id: string, input: { id: string; previewHash: string; permissionConfirmed: true }) => request<DemoFollowUpState>(`/platform/demo-leads/${encodeURIComponent(id)}/follow-up/send`, { method: 'POST', body: JSON.stringify(input) }),
   platformCustomers: () =>
     request<PlatformCustomersBootstrap>("/platform/customers"),
   updateCustomerSubscription: (
@@ -751,7 +753,10 @@ export type NotificationBootstrap = {
   testAvailable?: boolean;
   intelligenceActive: boolean;
 };
+export type DemoFollowUpState = { id: string; destination: string; status: string; attempts: number; acceptedAt: string | null; createdAt: string; errorMessage: string | null };
+export type DemoFollowUpPreview = DemoFollowUpState & { ready: boolean; previewHash: string; subject: string; html: string; text: string };
 export type DemoLead = {
+  followUp?: DemoFollowUpState | null;
   id: string;
   contact: string;
   kind: string;

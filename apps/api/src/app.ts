@@ -1,3 +1,4 @@
+import { demoEmailRouter } from './routes/demo-email.js';
 import crypto from "node:crypto";
 import cookieParser from "cookie-parser";
 import cors from "cors";
@@ -40,8 +41,8 @@ export function createApp() {
     pinoHttp({
       logger,
       serializers: {
-        req: (req) => req.url?.split("?")[0] === "/api/notifications/whatsapp/webhook"
-          ? { ...req, url: "/api/notifications/whatsapp/webhook", query: undefined }
+        req: (req) => ["/api/notifications/whatsapp/webhook", "/api/demo-email/unsubscribe"].includes(req.url?.split("?")[0] ?? "")
+          ? { ...req, url: req.url?.split("?")[0], query: undefined }
           : req,
       },
       genReqId: (req, res) => {
@@ -117,6 +118,7 @@ export function createApp() {
   app.use("/api/dashboard", dashboardRouter);
   app.use("/api/access", accessRouter);
   app.use("/api/platform", platformRouter);
+  app.use("/api/demo-email", demoEmailRouter);
   app.use("/api/notifications", notificationsRouter);
   app.use("/api/intelligence", intelligenceRouter);
   app.use("/api/approvals", approvalsRouter);

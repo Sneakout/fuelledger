@@ -1630,3 +1630,30 @@ model OwnerEmailPreference {
   @@index([organizationId, enabled])
   @@map("owner_email_preferences")
 }
+
+// A manually reviewed prospect follow-up, separate from owner alert activation.
+model DemoFollowUpEmail {
+  id String @id @default(cuid())
+  destination String @unique
+  demoSessionId String @map("demo_session_id")
+  templateVersion String @map("template_version")
+  subject String
+  html String
+  text String
+  previewHash String @map("preview_hash")
+  unsubscribeToken String @unique @map("unsubscribe_token")
+  optedOutAt DateTime? @map("opted_out_at")
+  status String @default("PENDING")
+  attempts Int @default(0)
+  preparedBy String @map("prepared_by")
+  sentBy String? @map("sent_by")
+  permissionConfirmedAt DateTime? @map("permission_confirmed_at")
+  claimToken String? @map("claim_token")
+  leaseUntil DateTime? @map("lease_until")
+  providerMessageId String? @map("provider_message_id")
+  errorMessage String? @map("error_message")
+  acceptedAt DateTime? @map("accepted_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  @@map("demo_follow_up_emails")
+}

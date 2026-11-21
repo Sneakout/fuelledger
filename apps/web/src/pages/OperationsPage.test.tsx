@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { OperationsPage } from './OperationsPage';
@@ -124,7 +124,7 @@ it('labels staff totals as mixed collections while keeping closing till cash sep
     nozzleAssignments: [{ nozzleId: 'n', collectionAmount: 10000, user: { name: 'Staff' } }], tankReadings: [] }];
   shiftBootstrap.mockReset().mockResolvedValue(data);
   render(<MemoryRouter><OperationsPage /></MemoryRouter>);
-  expect(await screen.findByRole('spinbutton', { name: 'Total collections in rupees from Staff' })).toHaveValue(10000);
+  await waitFor(() => expect(screen.getByRole('spinbutton', { name: 'Total collections in rupees from Staff' })).toHaveValue(10000));
   expect(screen.getByRole('spinbutton', { name: 'Physical cash counted at closing (₹)' })).toHaveValue(500);
   expect(screen.getByText(/Split and verify payment methods in reconciliation next/)).toBeInTheDocument();
   expect(screen.queryByText('Physical cash handed over (₹)')).not.toBeInTheDocument();

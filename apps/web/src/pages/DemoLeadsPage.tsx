@@ -1,3 +1,5 @@
+import { DemoFollowUpAction, DemoFollowUpPanel } from './DemoFollowUpPanel';
+import type { DemoLead, DemoFollowUpState } from '../lib/api';
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight, BadgeCheck, Building2, Clipboard, ExternalLink, LayoutDashboard, LifeBuoy, Mail, MessageCircleMore, Phone, Save, Search, Sparkles, Users } from "lucide-react";
 import { ApiRequestError, api, type DemoLeadsBootstrap, type PlatformCustomer, type PlatformCustomersBootstrap, type PlatformServiceTicket, type ServiceTicketStatus, type SubscriptionBillingPeriod, type SubscriptionPlan } from "../lib/api";
@@ -92,6 +94,8 @@ export function DemoLeadsPage() {
   const [tickets, setTickets] = useState<PlatformServiceTicket[] | null>(null);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState("");
+  const [followUpLead, setFollowUpLead] = useState<DemoLead | null>(null);
+  function updateFollowUp(state: DemoFollowUpState) { setData(current => current ? { ...current, leads: current.leads.map(lead => lead.kind === 'EMAIL' && lead.contact.trim().toLowerCase() === state.destination ? { ...lead, followUp: state } : lead) } : current); }
   const loadAccounts = async () => setAccounts(await api.platformCustomers());
   const loadTickets = async () => setTickets((await api.platformServiceTickets()).tickets);
   useEffect(() => {
@@ -140,7 +144,7 @@ export function DemoLeadsPage() {
     </div>
     <div hidden={section !== 'accounts'} className="growth-desk-section"><section className="leads-list customer-list"><header><div><span className="eyebrow">Customer activation</span><h2>Registered FuelNerve accounts</h2><p>Select the customer’s exact plan and billing choice. Approve access only after independently verifying payment.</p></div><small>Latest 250 accounts</small></header>{filteredAccounts.length ? filteredAccounts.map((customer) => <CustomerActivation key={`${customer.id}-${customer.subscriptionUpdatedAt}`} customer={customer} onSaved={loadAccounts} />) : <div className="leads-empty"><Building2/><h2>{query ? "No matching accounts" : "No customer signups yet"}</h2></div>}</section>
     </div>
-    <div hidden={section !== 'enquiries'} className="growth-desk-section"><section className="leads-list"><header><div><span className="eyebrow">Follow-up list</span><h2>Recent demo visitors</h2></div><small>Latest 250 sessions</small></header>{filteredLeads.length ? filteredLeads.map((lead) => { const email = lead.kind === "EMAIL"; return <article key={lead.id}><span className={email ? "lead-kind email" : "lead-kind phone"}>{email ? <Mail/> : <Phone/>}</span><div><strong>{lead.contact}</strong><small>Started {dateTime(lead.createdAt)} · Demo ends {dateTime(lead.expiresAt)}</small></div><button className="secondary small" onClick={() => void copy(lead.contact)}><Clipboard size={14}/>{copied === lead.contact ? "Copied" : "Copy"}</button></article>; }) : <div className="leads-empty"><Users/><h2>{query ? "No matching enquiries" : "No demo enquiries yet"}</h2><p>When someone starts a demo, it will appear here.</p></div>}</section>
+    {followUpLead && <DemoFollowUpPanel key={followUpLead.id} lead={followUpLead} onClose={() => setFollowUpLead(null)} onUpdated={updateFollowUp}/>}<div hidden={section !== 'enquiries'} className="growth-desk-section"><section className="leads-list"><header><div><span className="eyebrow">Follow-up list</span><h2>Recent demo visitors</h2><p className="demo-enquiries-intro">Start a personal conversation. Preview a branded benefits email for visitors who shared an email address, then send when you have their permission.</p></div><small>Latest 250 sessions</small></header>{filteredLeads.length ? filteredLeads.map((lead) => { const email = lead.kind === "EMAIL"; return <article className="demo-enquiry-row" key={lead.id}><span className={email ? "lead-kind email" : "lead-kind phone"}>{email ? <Mail/> : <Phone/>}</span><div><strong>{lead.contact}</strong><small>Started {dateTime(lead.createdAt)} · Demo ends {dateTime(lead.expiresAt)}</small></div>{email && <DemoFollowUpAction lead={lead} onOpen={() => setFollowUpLead(lead)}/>}<button className="secondary small" onClick={() => void copy(lead.contact)}><Clipboard size={14}/>{copied === lead.contact ? "Copied" : "Copy"}</button></article>; }) : <div className="leads-empty"><Users/><h2>{query ? "No matching enquiries" : "No demo enquiries yet"}</h2><p>When someone starts a demo, it will appear here.</p></div>}</section>
     </div>
   </main>;
 }
