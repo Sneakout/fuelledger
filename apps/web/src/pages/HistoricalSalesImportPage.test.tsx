@@ -300,7 +300,7 @@ describe('HistoricalSalesImportPage', () => {
     historicalSalesImports.mockResolvedValueOnce({ imports: [{ ...record, _count: { corrections: 0 } }] });
     historicalSalesImport.mockResolvedValueOnce({ record });
     validateHistoricalSalesCorrection.mockResolvedValueOnce({ issues: [] });
-    correctHistoricalSalesImport.mockResolvedValueOnce({ record: { ...record, updatedAt: '2026-11-15T11:00:00.000Z', corrections: [{ id: 'correction-1', reason: 'Corrected meter', changedAt: '2026-11-15T11:00:00.000Z', changedBy: { name: 'Owner' } }] }, issues: [], liveBalancesUnchanged: true });
+    correctHistoricalSalesImport.mockResolvedValueOnce({ record: { ...record, updatedAt: '2026-11-15T11:00:00.000Z', corrections: [{ id: 'correction-1', reason: 'Corrected meter', changedAt: '2026-11-15T11:00:00.000Z', changedBy: { name: 'Owner' } }] }, issues: [], stockTimelineRecalculated: true, financialEntriesUnchanged: true });
 
     render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
     fireEvent.click(await screen.findByRole('button', { name: /View \/ edit data/ }));

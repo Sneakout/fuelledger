@@ -1,3 +1,6 @@
+import { Prisma } from '@prisma/client';
+import { bookStockAt, tankBookStocksAt, tankOpeningBalances } from '../src/lib/stock.js';
+import { buildReport } from '../src/modules/reports/service.js';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { readLatestTankObservations } from '../src/lib/tank-observations.js';
@@ -59,10 +62,38 @@ suite('Continuing partially saved DSRs with isolated records', () => {
     const observed = await readLatestTankObservations(prisma,org.id,scope,new Date('2026-11-07T12:00:00Z'));
     expect(observed.get(tank.id)).toMatchObject({volume:7600,date:'2026-11-05',precision:'MORNING',observedAt:null,source:'DSR'});
     const inventory = await inventoryBootstrap(org.id,[station.id]);
-    expect(inventory.tanks[0]).toMatchObject({bookStock:8000,physicalStock:7600,variance:null,latestObservation:{date:'2026-11-05'}});
+    expect(inventory.tanks[0]).toMatchObject({bookStock:7600,physicalStock:7600,variance:null,latestObservation:{date:'2026-11-05'}});
     expect((await readLatestTankObservations(prisma,otherOrg.id,scope)).size).toBe(0);
     await prisma.tankReading.create({data:{organizationId:org.id,stationId:station.id,tankId:tank.id,physicalStock:7500,recordedById:owner.id,recordedAt:new Date('2026-11-06T06:00:00Z')}});
     expect((await readLatestTankObservations(prisma,org.id,scope,new Date('2026-11-07T12:00:00Z'))).get(tank.id)).toMatchObject({volume:7500,source:'TANK_CHECK',precision:'EXACT'});
     expect((await prisma.nozzle.findUniqueOrThrow({where:{id:nozzle.id}})).openingMeter.toNumber()).toBe(1000);
+    // More than 80 live components of a DSR day must not double-deduct stock.
+    await prisma.inventoryLedger.createMany({data:Array.from({length:100},()=>({organizationId:org.id,stationId:station.id,productId:product.id,tankId:tank.id,type:'SALE' as const,quantityDelta:-1,occurredAt:new Date('2026-11-03T10:00:00Z')}))});
+    await prisma.inventoryLedger.createMany({data:[
+      {organizationId:org.id,stationId:station.id,productId:product.id,tankId:tank.id,type:'RECEIPT',quantityDelta:1000,occurredAt:new Date('2026-11-06T10:00:00Z')},
+      {organizationId:org.id,stationId:station.id,productId:product.id,tankId:tank.id,type:'SALE',quantityDelta:-100,occurredAt:new Date('2026-11-06T11:00:00Z')},
+    ]});
+    const asOf=new Date('2026-11-07T12:00:00Z');
+    const stockScope={organizationId:org.id,stationId:station.id,productId:product.id,tankId:tank.id};
+    const sources=[{id:tank.id,stationId:station.id,productId:product.id,openingStock:8000}];
+    expect(Number(await bookStockAt(prisma,stockScope,asOf))).toBe(8500);
+    expect(Number((await tankBookStocksAt(prisma,org.id,sources,asOf)).get(tank.id))).toBe(8500);
+    expect((await inventoryBootstrap(org.id,[station.id])).tanks[0]?.bookStock).toBe(8500);
+    const report=await buildReport(org.id,{startDate:'2026-11-01',endDate:'2026-11-07',stationId:station.id,asOf});
+    expect(report.inventory[0]?.quantity).toBe(8500);
+    expect(report.quality.unavailableReportSections.join(' ')).toContain('Historical stock valuation');
+    const opening=(await tankOpeningBalances(prisma,org.id,sources,asOf)).get(tank.id)!;
+    expect(Number(opening.expectedOpening)).toBe(8500);
+    const boundaryOpening=(await tankOpeningBalances(prisma,org.id,sources,asOf,{closedAt:new Date('2026-11-06T10:00:00Z'),tankReadings:[{tankId:tank.id,closingDip:new Prisma.Decimal(7600)}]})).get(tank.id)!;
+    expect(Number(boundaryOpening.received)).toBe(1000);
+    expect(Number(boundaryOpening.expectedOpening)).toBe(8500);
+    // Corrections change derived stock, not cash, quantities in posted movements or journals.
+    const updatedRows=final.rows.map(day=>day.date==='2026-11-05'?{...day,nozzleReadings:[{nozzleId:nozzle.id,meterReading:1500}]}:day);
+    await save(final,updatedRows,'CORRECT');
+    expect(Number(await bookStockAt(prisma,stockScope,asOf))).toBe(8400);
+    expect(await prisma.inventoryLedger.count({where:{stationId:station.id}})).toBe(102);
+    expect(await prisma.journal.count({where:{organizationId:org.id}})).toBe(0);
+    expect(await prisma.supplierPayment.count({where:{organizationId:org.id}})).toBe(0);
+
   });
 });

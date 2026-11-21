@@ -10,7 +10,7 @@ These definitions are the authoritative vocabulary for fuel and other inventory.
 
 ## Stock values
 
-- **Book stock** is `configured opening balance + receipts - sales +/- approved adjustments`, calculated at a stated cutoff time.
+- **Book stock** is `configured opening balance (or confirmed historical opening checkpoint) + receipts - sales +/- approved adjustments`, calculated at a stated cutoff time.
 - **Physical stock** is a measured tank quantity captured at a stated time. A measurement is evidence and never changes book stock automatically.
 - **Shift opening** is the physical reading captured when the shift begins. It remains fixed even if stock is delivered during the shift.
 - **Expected closing** is `shift opening + receipts during shift - sales during shift - testing not returned +/- other approved adjustments during shift`.
@@ -63,15 +63,34 @@ A DSR has a **morning business date**, not an exact timestamp. The API retains
 Timestamped operational evidence is preferred when observations share a date.
 This is a tie policy, not proof of the precise sequence of a date-only DSR.
 
-Tank gauges show **last measured stock** when a confirmed observation exists,
-otherwise clearly labelled book stock. Source, measurement date and live book
-balance remain visible. An old measurement is never labelled a live dip. No
-current physical estimate is fabricated from incomplete historical records.
-Same-time book variance is withheld for date-only DSR readings. Exact-time
-observations compare against ledger movements effective at that time.
+Tank gauges show **calculated book stock**. Last measured stock remains separate,
+with its source and actual measurement date. Neither editing an older DSR nor
+upload time makes an observation current.
 
-This read model does not create or change inventory ledger movements, supplier
-payments, invoices, journals, shift openings or approved stock adjustments. Book
-stock, inventory valuation, availability checks and receipt/shift bridges retain
-their existing ledger rules. Chart-derived quantities retain their precision and
-are not capped to the tank's nominal capacity.
+## Confirmed DSR stock coverage
+
+The earliest confirmed DSR morning for a tank supplies the verified historical
+opening checkpoint. Earlier ledger entries are incorporated in that opening and
+are not added again. Later physical dips are observations, not silent resets.
+From the checkpoint, add DSR receipts, subtract consecutive-morning nozzle sales
+less returned testing, and apply saved live movements and approved adjustments.
+The final morning needs the following morning to establish that day's sales.
+
+A DSR is a whole business-day summary. Live receipts and sales on a covered day
+are components of that total. Only the remaining historical quantity is added.
+If live quantities exceed the DSR total, preserve live entries and require review;
+never create a negative balancing receipt or sale. Missing days remain explicit.
+Multi-tank aggregate receipts/testing require allocation; the service does not
+invent allocations. Date-only receipts cannot be put at a guessed intraday time.
+
+One shared read model supplies dashboard, inventory, reports, stock checks and
+opening expectations. Shift bridges include the change in this timeline between
+readings; contributions without exact shift timing are flagged for review.
+Saved shift openings and closings are never rewritten. Unsaved closing meters
+and testing affect the local provisional closing preview only, until submitted.
+
+This is a read-time composition: no duplicate ledger entries, invoices, supplier
+payments, cash or journals are created. Historical corrections change derived
+stock on the next read. DSR quantities do not supply purchase costs, so reports
+flag historical stock valuation as incomplete rather than inventing costs.
+Chart-derived quantities retain precision and are not capped to nominal capacity.

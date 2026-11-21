@@ -1,3 +1,4 @@
+import { readTankStockTimelines } from '../../lib/historical-stock.js';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
@@ -73,6 +74,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
     prisma.approvalRequest.findMany({where:{organizationId,status:'PENDING',actionType:'PRODUCT_PRICE_CHANGE',...(scopeIds?{stationId:{in:scopeIds}}:{})},select:{id:true,reason:true,evidence:true},orderBy:{requestedAt:'desc'},take:20}),
   ]);
   const bookStockByTank=await tankBookStocksAt(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),now);
+  const timelines=await readTankStockTimelines(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),now);
   const observations=await readLatestTankObservations(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId})),now);
   const stationIds=[...new Set(tanks.map(tank=>tank.configuration.station.id))];
   const lastClosings=stationIds.length?await prisma.shift.findMany({where:{stationId:{in:stationIds},closedAt:{not:null}},distinct:['stationId'],orderBy:{closedAt:'desc'},select:{stationId:true,closedAt:true,tankReadings:{select:{tankId:true,closingDip:true}}}}):[];
@@ -113,6 +115,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
       id:tank.id,code:tank.code,product:tank.product.name,productCode:tank.product.code,unit:tank.product.unit,
       station:tank.configuration.station,bookStock,workingCapacity,fillPercent,sellingPrice:number(effectivePriceAt(tank.product.sellingPrice,tank.product.sellingPriceHistory,now)),density:latestDensity?number(latestDensity.density):null,densityRecordedAt:latestDensity?.recordedAt.toISOString()??null,
       expectedFromLastDip:shiftBasis?.stock??null,bookDifferenceFromLastDip:shiftBasis?bookStock-shiftBasis.stock:null,lastClosingDipAt:shiftBasis?.closedAt??null,
+      stockTimeline:timelines.has(tank.id)?{anchorDate:timelines.get(tank.id)!.anchorDate,throughDate:timelines.get(tank.id)!.throughDate,opening:Number(timelines.get(tank.id)!.opening),receipts:Number(timelines.get(tank.id)!.receipts),sales:Number(timelines.get(tank.id)!.sales),adjustments:Number(timelines.get(tank.id)!.adjustments),issues:timelines.get(tank.id)!.issues}:null,
       latestObservation:observations.get(tank.id)??null,
       physicalStock:latestReading?number(latestReading.physicalStock):null,
       physicalReadingAt:latestReading?.recordedAt.toISOString()??null,

@@ -1,6 +1,7 @@
 import { Prisma, type PaymentMethod } from '@prisma/client';
 import { indiaDayRange } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
+import { readTankStockTimelines } from '../../lib/historical-stock.js';
 import { bookStockAt } from '../../lib/stock.js';
 import { customerLedgerBalances } from '../customers/ledger-balances.js';
 
@@ -50,8 +51,9 @@ export async function readTankAlertFacts(scope: Scope, tankId: string, asOf = ne
   if (!tank) return null;
   const station = tank.configuration.station;
   const bookStock = await tankBookStock(scope.organizationId, station.id, tank, asOf);
+  const history=(await readTankStockTimelines(prisma,scope.organizationId,[{id:tank.id,stationId:station.id,productId:tank.productId,openingStock:tank.openingStock}],asOf)).get(tank.id);
   return { ...metadata({ ...scope, stationId: station.id }, asOf, asOf, asOf), station, tank, bookStock,
-    completeness: tank.workingCapacity.gt(0) ? 'COMPLETE' : 'INCOMPLETE' };
+    stockIssues:history?.issues??[], completeness: tank.workingCapacity.gt(0) && !history?.issues.length ? 'COMPLETE' : 'INCOMPLETE' };
 }
 
 export async function readDailyOperatingFacts(scope: Scope, date: string, asOf = new Date()) {
@@ -69,6 +71,8 @@ export async function readDailyOperatingFacts(scope: Scope, date: string, asOf =
       select: { id: true, reconciliation: { select: { id: true, reconciledAt: true, collections: { select: { paymentMethod: true, actualAmount: true } } } } },
     }),
   ]);
+  const timelines=await readTankStockTimelines(prisma,scope.organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),end);
+  const stockIssues=[...timelines.values()].flatMap(timeline=>timeline.issues);
   const reconciled = shifts.flatMap(shift => shift.reconciliation && shift.reconciliation.reconciledAt <= asOf && shift.reconciliation.collections.length ? [shift.reconciliation] : []);
   const actual = reconciled.flatMap(row => row.collections).filter(row => collectedMethod(row.paymentMethod));
   const closedShiftIds = new Set(shifts.map(shift => shift.id));
@@ -76,7 +80,8 @@ export async function readDailyOperatingFacts(scope: Scope, date: string, asOf =
   const counterCollections = sales.filter(sale => sale.shiftId === null && collectedMethod(sale.paymentMethod));
   return {
     ...metadata(scope, start, end, asOf),
-    completeness: incomplete || !tanks.length ? 'INCOMPLETE' : 'COMPLETE',
+    stockIssues,
+    completeness: incomplete || stockIssues.length || !tanks.length ? 'INCOMPLETE' : 'COMPLETE',
     sales: productSales(sales),
     collections: {
       actual: reconciled.length || counterCollections.length ? counterCollections.reduce((sum, sale) => sum.plus(sale.totalAmount), actual.reduce((sum, row) => sum.plus(row.actualAmount), zero())) : null,
@@ -86,6 +91,7 @@ export async function readDailyOperatingFacts(scope: Scope, date: string, asOf =
     tanks: await Promise.all(tanks.map(async tank => ({
       id: tank.id, code: tank.code, product: tank.product, station: tank.configuration.station,
       bookStock: await tankBookStock(scope.organizationId, tank.configuration.station.id, tank, end),
+      stockIssues:timelines.get(tank.id)?.issues??[],
     }))),
   };
 }

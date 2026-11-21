@@ -44,7 +44,7 @@ export function FuelTankBank({ tanks, asOf }: { tanks: Tank[]; asOf: string }) {
   const counters: Record<string, number> = {};
   return <section className="fuel-bank">
     <header>
-      <div><span className="eyebrow">Fuel tank stock</span><h2>Current tank stock</h2><p>Latest confirmed tank measurements, with the live book balance shown separately.</p></div>
+      <div><span className="eyebrow">Fuel tank stock</span><h2>Current tank stock</h2><p>Calculated stock from confirmed DSRs and saved live transactions. Measurement dates and any gaps stay visible.</p></div>
       <Link to="/inventory">Review inventory <ArrowRight /></Link>
     </header>
     {tanks.length ? <div className="fuel-bank-grid">{tanks.map(tank => {
@@ -52,11 +52,11 @@ export function FuelTankBank({ tanks, asOf }: { tanks: Tank[]; asOf: string }) {
       const colour = tank.productCode === 'MS' ? 'ms' : 'hsd';
       const todayDone = saved[tank.id] !== undefined || recordedToday(tank.densityRecordedAt, asOf);
       const shownDensity = saved[tank.id] ?? tank.density;
-      const currentStock = tank.latestObservation?.volume ?? tank.bookStock;
+      const currentStock = tank.bookStock;
       const currentFill = tank.workingCapacity > 0 ? Math.max(0, currentStock / tank.workingCapacity * 100) : 0;
       const overflow = currentStock > tank.workingCapacity;
       return <article className={`fuel-orb-card ${colour}${overflow ? ' over-capacity' : ''}`} key={tank.id}>
-        <div className="fuel-orb" aria-label={`${tank.productCode} Tank ${sequence}: ${amount(currentFill)} percent ${tank.latestObservation ? 'last measured stock' : 'book stock'}`}>
+        <div className="fuel-orb" aria-label={`${tank.productCode} Tank ${sequence}: ${amount(currentFill)} percent book stock`}>
           <span className="fuel-liquid" style={{ height: `${Math.min(100, currentFill)}%` }} />
           <span className="fuel-percent">{amount(currentFill)}%</span>
         </div>
@@ -65,12 +65,12 @@ export function FuelTankBank({ tanks, asOf }: { tanks: Tank[]; asOf: string }) {
           <h3>{tank.productCode} Tank {sequence}</h3>
           {overflow && <p className="tank-capacity-warning">Displayed stock exceeds safe capacity. Review the measurement and tank allocation.</p>}
           <dl>
-            <div><dt>{tank.latestObservation ? 'Last measured stock' : 'Current book stock'}</dt><dd>{amount(currentStock)} L</dd></div>
+            <div><dt>{tank.stockTimeline?.issues.length ? 'Calculated stock · review needed' : 'Current book stock'}</dt><dd>{amount(currentStock)} L</dd></div>
             <div><dt>Total capacity</dt><dd>{amount(tank.workingCapacity)} L</dd></div>
             <div><dt>Selling price</dt><dd>₹{amount(tank.sellingPrice)}/L</dd></div>
             <div className="density-cell"><dt>Morning density</dt><dd>{todayDone && shownDensity !== null ? <span className="density-saved"><Check /> {amount(shownDensity)} kg/m³</span> : editing === tank.id ? <span className="density-entry"><input autoFocus type="number" min="600" max="1200" step=".001" value={density} onChange={event => setDensity(event.target.value)} placeholder="e.g. 745" /><button disabled={saving} onClick={() => void save(tank)}>{saving ? 'Saving…' : 'Save'}</button><button onClick={() => { setEditing(null); setError(''); }}>Cancel</button>{error && <small>{error}</small>}</span> : <button className="density-due" onClick={() => { setEditing(tank.id); setDensity(''); setError(''); }}>Enter morning density</button>}</dd></div>
           </dl>
-          {tank.latestObservation && <TankObservationNote observation={tank.latestObservation} bookStock={tank.bookStock}/>}
+          {tank.latestObservation && <TankObservationNote observation={tank.latestObservation} bookStock={tank.bookStock} timeline={tank.stockTimeline}/>}
         </div>
       </article>;
     })}</div> : <div className="owner-all-clear compact"><Droplets /><h3>No MS or HSD tanks configured</h3><p>Add fuel tanks in Petrol Pump setup to see them here.</p></div>}

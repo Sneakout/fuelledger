@@ -1,4 +1,5 @@
 import { customerLedgerBalances } from '../customers/ledger-balances.js';
+import { readTankStockTimelines } from '../../lib/historical-stock.js';
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
 import { AppError } from '../../lib/errors.js';
@@ -164,6 +165,17 @@ export async function buildReport(organizationId: string, filter: ReportFilter) 
     const itemKey = stockKey(entry.stationId, entry.productId);
     const purchasePrice=effectivePriceAt(entry.product.purchasePrice,entry.product.purchasePriceHistory);
     add(stock, itemKey, () => ({ key: itemKey, product: entry.product.name, code: entry.product.code, unit: entry.product.unit, station: entry.station.name, stationCode: entry.station.code, quantity: 0, value: 0, purchasePrice: number(purchasePrice) }), row => { const quantity=number(entry.quantityDelta),unitCost=number(entry.unitCost??purchasePrice);row.quantity+=quantity;row.value+=quantity*unitCost; });
+  }
+  const history=await readTankStockTimelines(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),asOf);
+  if(history.size)unavailableReportSections.push('Historical stock valuation: DSR purchase costs are not recorded; financial inventory value remains based on posted costs.');
+  for(const tank of tanks) {
+    const position=history.get(tank.id);if(!position)continue;
+    const row=stock.get(stockKey(tank.configuration.station.id,tank.productId));if(!row)continue;
+    const prior=number(tank.openingStock)+inventoryEntries.filter(entry=>entry.tankId===tank.id).reduce((sum,entry)=>sum+number(entry.quantityDelta),0);
+    row.quantity+=Number(position.quantity)-prior;
+    // Historical DSRs do not establish supplier costs. Keep the posted inventory
+    // value unchanged; expose missing valuation explicitly instead of creating money.
+    Object.assign(row,{quantityBasis:'CONFIRMED_DSR_AND_LIVE',valuationComplete:false,stockIssues:position.issues});
   }
   const inventory = [...stock.values()].sort((a, b) => b.value - a.value);
 

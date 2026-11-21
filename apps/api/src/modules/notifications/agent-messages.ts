@@ -14,7 +14,7 @@ export const stockLevel = (stock: number, capacity: number, threshold: number) =
 export function coreDailyMessage(facts: Awaited<ReturnType<typeof readDailyOperatingFacts>>, date: string, appUrl: string) {
   const sales = facts.sales.map(row => `${row.product.code}: ${volume(row.quantity, row.product.unit)}`).join(', ');
   const collected = facts.collections.actual;
-  const stock = facts.tanks.map(tank => `${tank.station.name} · ${tank.product.code} ${tank.code}: ${volume(tank.bookStock, tank.product.unit)}`);
+  const stock = facts.tanks.map(tank => `${tank.station.name} · ${tank.product.code} ${tank.code}: ${tank.stockIssues?.length ? 'Stock history needs review — open inventory' : volume(tank.bookStock, tank.product.unit)}`);
   return [
     `FuelNerve · Daily operating summary · ${date}`,
     `Sales: ${sales || 'No live sales recorded'}`,

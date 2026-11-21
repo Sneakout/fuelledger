@@ -299,7 +299,7 @@ export const api = {
   validateHistoricalSalesCorrection: (id: string, input: HistoricalSalesCorrectionInput) =>
     request<{ issues: HistoricalImportIssue[] }>(`/historical-sales/${encodeURIComponent(id)}/validate-correction`, { method: "POST", body: JSON.stringify(input) }),
   correctHistoricalSalesImport: (id: string, input: HistoricalSalesCorrectionInput) =>
-    request<{ record: HistoricalSalesImportDetail; issues: HistoricalImportIssue[]; liveBalancesUnchanged: true }>(`/historical-sales/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }),
+    request<{ record: HistoricalSalesImportDetail; issues: HistoricalImportIssue[]; stockTimelineRecalculated: true; financialEntriesUnchanged: true }>(`/historical-sales/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(input) }),
   catalog: () => request<Catalog>("/products"),
   createProduct: (input: ProductForm) =>
     request<ProductMutationResult>("/products", {
@@ -844,6 +844,7 @@ export type ShiftStation = {
   name: string;
   code: string;
   availableTankStock: Array<{
+    stockIssues?:string[];
     id: string;
     value: string;
     lastActual: string | null;
@@ -1258,6 +1259,7 @@ export type InventoryStation = {
     }>;
   }>;
 };
+export type TankStockTimeline = { anchorDate:string|null; throughDate:string|null; opening?:number; receipts?:number; sales?:number; adjustments?:number; issues:string[] };
 export type TankObservation = {
   volume: number; dipCm: number | null; date: string; observedAt: string | null;
   precision: 'MORNING' | 'EXACT'; source: 'DSR' | 'TANK_CHECK' | 'SHIFT_OPENING' | 'SHIFT_CLOSING';
@@ -1265,6 +1267,7 @@ export type TankObservation = {
 };
 export type ReconciliationLine = {
   latestObservation?: TankObservation | null;
+  stockTimeline?: TankStockTimeline | null;
   station: { id: string; name: string; code: string } | undefined;
   tank: { id: string; code: string; nominalCapacity: number; workingCapacity: number } | null;
   product: {
@@ -1836,6 +1839,7 @@ export type DashboardBootstrap = {
   }>;
   tankStocks: Array<{
     latestObservation?: TankObservation | null;
+  stockTimeline?: TankStockTimeline | null;
     id: string;
     code: string;
     product: string;

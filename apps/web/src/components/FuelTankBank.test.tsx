@@ -42,9 +42,9 @@ it('displays the latest DSR measurement, date and source separately from book st
     bookStock:2809,workingCapacity:20000,fillPercent:14,sellingPrice:114,density:null,densityRecordedAt:null,physicalStock:null,physicalReadingAt:null,status:'LOW',
     latestObservation:{volume:10000,dipCm:99,date:'2026-11-20',observedAt:null,precision:'MORNING',source:'DSR',sourceId:'r',sourceLabel:'Confirmed DSR · morning',sourcePath:'/sales/history/import?month=2026-11',savedAt:'2026-11-21T08:00:00Z'},
   }]} /></MemoryRouter>);
-  expect(screen.getByLabelText(/50 percent last measured stock/)).toBeInTheDocument();
-  expect(screen.getByText('10,000 L')).toBeInTheDocument();
-  expect(screen.getByText('2,809 L')).toBeInTheDocument();
+  expect(screen.getByLabelText(/14 percent book stock/)).toBeInTheDocument();
+  expect(screen.getByText('Last measured: 10,000 L')).toBeInTheDocument();
+  expect(screen.getAllByText('2,809 L')[0]).toBeInTheDocument();
   expect(screen.getByText(/20 Nov 2026 · morning/)).toBeInTheDocument();
   expect(screen.getByText(/not a live dip/)).toBeInTheDocument();
   expect(screen.getByRole('link',{name:/View source/})).toHaveAttribute('href','/sales/history/import?month=2026-11');

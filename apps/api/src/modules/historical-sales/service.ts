@@ -216,7 +216,7 @@ export async function correctHistoricalImport(organizationId: string, userId: st
       reason: input.reason, changedById: userId,
     } });
     const record = await tx.historicalSalesImport.findUniqueOrThrow({ where: { id }, select: { id: true, stationId: true, productId: true, monthStart: true, sourceFileName: true, cutoverApplied: true, createdAt: true, updatedAt: true, rows: true, product: { select: { name: true, code: true } }, importedBy: { select: { name: true } }, corrections: { orderBy: { changedAt: 'desc' }, select: { id: true, reason: true, changedAt: true, changedBy: { select: { name: true } } } } } });
-    return { record: { ...record, month: indiaDate(record.monthStart).slice(0, 7) }, issues: prepared.issues, liveBalancesUnchanged: true };
+    return { record: { ...record, month: indiaDate(record.monthStart).slice(0, 7) }, issues: prepared.issues, stockTimelineRecalculated: true, financialEntriesUnchanged: true };
   });
 }
 

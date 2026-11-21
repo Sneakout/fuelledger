@@ -29,7 +29,7 @@ function measurementAge(line: ReconciliationLine) {
   const days = Math.floor((Date.parse(today) - Date.parse(line.latestObservation.date)) / 86_400_000);
   return {label:`Morning reading · ${line.latestObservation.date}`,stale:days >= 7};
 }
-const needsReview = (line: ReconciliationLine) => Boolean(line.tank) && (measurementAge(line).stale || (line.latestObservation?.precision !== 'MORNING' && (line.variance === null || Math.abs(line.variance) > .001)));
+const needsReview = (line: ReconciliationLine) => Boolean(line.tank) && (Boolean(line.stockTimeline?.issues.length) || measurementAge(line).stale || (line.latestObservation?.precision !== 'MORNING' && (line.variance === null || Math.abs(line.variance) > .001)));
 
 export function InventoryPage() {
   const requestedTankId = new URLSearchParams(window.location.search).get('tankId');
@@ -125,7 +125,7 @@ function StockCard({ line, sequence }: { line: ReconciliationLine; sequence: num
   const variance = line.variance;
   const isTank = Boolean(line.tank);
   const capacity = line.tank?.workingCapacity ?? 0;
-  const shownStock = line.latestObservation?.volume ?? line.bookStock;
+  const shownStock = line.bookStock;
   const fill = capacity > 0 ? shownStock / capacity * 100 : 0;
   const age = measurementAge(line);
   const review = needsReview(line);
@@ -140,7 +140,7 @@ function StockCard({ line, sequence }: { line: ReconciliationLine; sequence: num
     <div className="inventory-tank-intel">
       <header><div><span className="fuel-product">{line.product.code}</span><h3>{line.product.code} Tank {sequence}</h3><small>Equipment ID {line.tank?.code}</small></div><span className={`tank-health ${review ? 'review' : 'clear'}`}>{review ? <AlertTriangle/> : <CheckCircle2/>}{line.latestObservation?.precision === 'MORNING' ? 'DSR morning reading' : variance === null ? 'Dip needed' : age.stale ? 'Check is old' : Math.abs(variance) < .001 ? 'Verified' : 'Review difference'}</span></header>
       <div className="inventory-tank-kpis">{line.latestObservation && <span><small>Last measured stock</small><b>{quantity(shownStock)} {unit(line.product.unit)}</b></span>}<span><small>Book stock now</small><b>{quantity(line.bookStock)} {unit(line.product.unit)}</b></span><span><small>Book stock value</small><b>{money(stockValue)}</b></span><span><small>Purchase price</small><b>{money(line.product.purchasePrice)}/L</b></span>{line.density !== null && <span><small>Latest density</small><b>{quantity(line.density)} kg/m³</b></span>}</div>
-      {line.latestObservation && <TankObservationNote observation={line.latestObservation} bookStock={line.bookStock}/>}
+      {line.latestObservation && <TankObservationNote observation={line.latestObservation} bookStock={line.bookStock} timeline={line.stockTimeline ? {...line.stockTimeline,opening:line.opening,receipts:line.receipts,sales:line.sales,adjustments:line.adjustments} : undefined}/>}
       <div className="inventory-check-comparison">
         <span><small>System expected at check</small><b>{line.bookStockAtReading === null || line.bookStockAtReading === undefined ? '—' : `${quantity(line.bookStockAtReading)} ${unit(line.product.unit)}`}</b></span>
         <span><small>Physical stock at check</small><b>{line.physicalStock === null ? 'Not recorded' : `${quantity(line.physicalStock)} ${unit(line.product.unit)}`}</b></span>
@@ -153,5 +153,5 @@ function StockCard({ line, sequence }: { line: ReconciliationLine; sequence: num
 }
 
 function StockEquation({ line }: { line: ReconciliationLine }) {
-  return <div className="stock-equation"><span>Opening <b>{quantity(line.opening)}</b></span><i>+</i><span>Purchased <b>{quantity(line.receipts)}</b></span><i>−</i><span>Sold <b>{quantity(line.sales)}</b></span><i>{line.adjustments >= 0 ? '+' : '−'}</i><span>Approved corrections <b>{quantity(Math.abs(line.adjustments))}</b></span><i>=</i><strong>Book stock now <b>{quantity(line.bookStock)}</b></strong></div>;
+  return <div className="stock-equation"><span>{line.stockTimeline?.anchorDate ? `Verified opening ${line.stockTimeline.anchorDate}` : 'Opening'} <b>{quantity(line.opening)}</b></span><i>+</i><span>Purchased <b>{quantity(line.receipts)}</b></span><i>−</i><span>Sold <b>{quantity(line.sales)}</b></span><i>{line.adjustments >= 0 ? '+' : '−'}</i><span>Approved corrections <b>{quantity(Math.abs(line.adjustments))}</b></span><i>=</i><strong>Book stock now <b>{quantity(line.bookStock)}</b></strong></div>;
 }

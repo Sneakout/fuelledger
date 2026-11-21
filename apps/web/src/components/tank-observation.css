@@ -6,3 +6,7 @@
 .tank-observation-note a { color:#19765b; font-weight:700; text-decoration:none; }
 .tank-observation-note a:hover { text-decoration:underline; }
 .tank-observation-note small { display:block; margin-top:.6rem; font-size:8px; }
+
+.tank-stock-review { padding: .75rem 1rem; border: 1px solid #ead3aa; border-radius: 12px; background: #fff8e8; color: #775419; }
+.tank-stock-review summary { cursor: pointer; font-weight: 600; margin-top: .4rem; }
+.tank-stock-review ul { padding-left: 1.25rem; font-size: .875rem; line-height: 1.5; }

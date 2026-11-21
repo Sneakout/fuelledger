@@ -946,7 +946,7 @@ function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance,
 }) {
   return <section className="closing-stock-bridge">
     <div className="closing-stock-heading">
-      <div><h3>Closing tank readings</h3><p>{onChange ? "Enter the measured dip. Expected stock updates from this shift’s movements." : "Expected stock uses the saved opening dip and posted stock movements."}</p></div>
+      <div><h3>Closing tank readings</h3><p>{onChange ? "Enter the measured dip. Provisional book stock below includes the nozzle readings and testing entered here; it is confirmed only when you save the shift." : "Expected stock uses the saved opening dip and posted stock movements."}</p></div>
       {action}
       <small>Allowed difference: {litres(tolerance)}</small>
     </div>
@@ -1020,6 +1020,7 @@ function Readings({
                   <small>{balance.lastActual == null ? "Receipts before opening" : "Received between shifts"} {litres(Number(balance.received))} · Adjustments {litres(Number(balance.adjustments))}{Number(balance.netOther) !== 0 && ` · Other movements ${litres(Number(balance.netOther))}`}</small>
                 </>}
                 <small><b>Expected opening {litres(expected)}</b>{balance && ` · Book stock now ${litres(Number(balance.value))}`}</small>
+                {balance?.stockIssues?.map(issue=><small className="form-error" key={issue}>{issue}</small>)}
                 {Math.abs(bookDifference) > 0.001 && <small>Book stock is {litres(Math.abs(bookDifference))} {bookDifference > 0 ? "higher" : "lower"}.</small>}
               </span>
               <span className="opening-tank-input">
