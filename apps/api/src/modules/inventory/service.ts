@@ -6,11 +6,12 @@ import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
+import { readLatestTankObservations } from '../../lib/tank-observations.js';
 import { assertStockAvailable } from '../../lib/stock.js';
 import { postJournal } from '../accounting/service.js';
 import { addIndiaDays, indiaDate, indiaDayStart } from '../../lib/india-time.js';
 
-const tankInclude = (asOf: Date) => ({ product: { select: { id: true, name: true, code: true, unit: true, category: true, purchasePrice: true, purchasePriceHistory: { where: { effectiveFrom: { lte: asOf } }, orderBy: { effectiveFrom: 'desc' as const }, take: 1 } } }, physicalReadings: { take: 1, orderBy: { recordedAt: 'desc' as const } }, densityReadings: { take: 1, orderBy: { recordedAt: 'desc' as const } } } as const);
+const tankInclude = (asOf: Date) => ({ product: { select: { id: true, name: true, code: true, unit: true, category: true, purchasePrice: true, purchasePriceHistory: { where: { effectiveFrom: { lte: asOf } }, orderBy: { effectiveFrom: 'desc' as const }, take: 1 } } }, physicalReadings: { where:{recordedAt:{lte:asOf}}, take: 1, orderBy: { recordedAt: 'desc' as const } }, densityReadings: { take: 1, orderBy: { recordedAt: 'desc' as const } } } as const);
 export async function bootstrap(organizationId: string,stationIds?:string[]) {
   const asOf = new Date();
   const [stations, products, ledger, receipts, movements] = await Promise.all([
@@ -25,7 +26,16 @@ export async function bootstrap(organizationId: string,stationIds?:string[]) {
       throw new AppError(409, 'STOCK_SCOPE_INVALID', 'A stock movement does not match its fuel station, product and tank. Review inventory consistency before continuing.');
   }
   const ledgerByTank = group(movements.filter(entry => entry.tankId), entry => entry.tankId!); const ledgerByStationProduct = group(movements.filter(entry => !entry.tankId), entry => `${entry.stationId}:${entry.productId}`);
-  const tanks = stations.flatMap(station => station.configurations[0]?.tanks.map(tank => reconciliation({ station, tank, entries: ledgerByTank.get(tank.id) ?? [] })) ?? []);
+  const observations = await readLatestTankObservations(prisma, organizationId, stations.flatMap(station => station.configurations[0]?.tanks.map(tank => ({id:tank.id,stationId:station.id,productId:tank.productId})) ?? []), asOf);
+  const tanks = stations.flatMap(station => station.configurations[0]?.tanks.map(tank => {
+    const entries = ledgerByTank.get(tank.id) ?? [];
+    const line = reconciliation({station,tank,entries});
+    const observation = observations.get(tank.id) ?? null;
+    if (!observation) return {...line,latestObservation:null};
+    const at = observation.observedAt ? new Date(observation.observedAt) : null;
+    const bookThen = at ? Number(tank.openingStock) + sum(entries.filter(entry => entry.occurredAt <= at)) : null;
+    return {...line,latestObservation:observation,physicalStock:observation.volume,dipReading:observation.dipCm,readAt:at,bookStockAtReading:bookThen,variance:bookThen === null ? null : observation.volume-bookThen};
+  }) ?? []);
   const untanked = stations.flatMap(station => products.filter(product => !product.tankLinked).map(product => reconciliation({ station, product, entries: ledgerByStationProduct.get(`${station.id}:${product.id}`) ?? [] })));
   return { asOf, stations, products, tanks, untanked, ledger, receipts };
 }

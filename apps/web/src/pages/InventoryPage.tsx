@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AlertTriangle, Boxes, CheckCircle2, Droplets, History, Info, PackageCheck, ReceiptText, Scale, ShoppingCart } from 'lucide-react';
+import { indiaDate } from '../lib/india-time';
+import { TankObservationNote } from '../components/TankObservationNote';
 import { useStation } from '../components/StationProvider';
 import { ApiRequestError, api, type InventoryBootstrap, type ReconciliationLine } from '../lib/api';
 
@@ -21,7 +23,13 @@ function checkAge(readAt: string | null) {
   return { label: `Checked ${days} day${days === 1 ? '' : 's'} ago`, stale: days >= 7 };
 }
 
-const needsReview = (line: ReconciliationLine) => Boolean(line.tank) && (line.variance === null || Math.abs(line.variance) > .001 || checkAge(line.readAt).stale);
+function measurementAge(line: ReconciliationLine) {
+  if (line.latestObservation?.precision !== 'MORNING') return checkAge(line.readAt);
+  const today = indiaDate();
+  const days = Math.floor((Date.parse(today) - Date.parse(line.latestObservation.date)) / 86_400_000);
+  return {label:`Morning reading · ${line.latestObservation.date}`,stale:days >= 7};
+}
+const needsReview = (line: ReconciliationLine) => Boolean(line.tank) && (measurementAge(line).stale || (line.latestObservation?.precision !== 'MORNING' && (line.variance === null || Math.abs(line.variance) > .001)));
 
 export function InventoryPage() {
   const requestedTankId = new URLSearchParams(window.location.search).get('tankId');
@@ -47,7 +55,7 @@ export function InventoryPage() {
   const fuelLines = lines.filter(line => Boolean(line.tank) || ['FUEL', 'DEF'].includes(line.product.category ?? '')).sort((left, right) => productOrder(left.product.code) - productOrder(right.product.code) || left.product.code.localeCompare(right.product.code) || (left.tank?.code ?? '').localeCompare(right.tank?.code ?? ''));
   const packagedLines = lines.filter(line => !line.tank && !['FUEL', 'DEF'].includes(line.product.category ?? ''));
   const attentionLines = fuelLines.filter(needsReview);
-  const currentChecks = fuelLines.filter(line => line.readAt && !checkAge(line.readAt).stale && line.variance !== null).length;
+  const currentChecks = fuelLines.filter(line => (line.latestObservation || line.readAt) && !measurementAge(line).stale).length;
   const productPosition = [...fuelLines.reduce((map, line) => {
     const current = map.get(line.product.code) ?? { code: line.product.code, name: line.product.name, stock: 0, capacity: 0, tanks: 0, value: 0, purchasePrice: line.product.purchasePrice };
     current.stock += line.bookStock;
@@ -70,14 +78,14 @@ export function InventoryPage() {
     {error && <div className="form-error">{error}</div>}
 
     <section className="inventory-product-board" aria-label="Inventory by product">
-      <header><div><span className="eyebrow">Inventory by product</span><h2>Fuel quantity and stock value</h2><p>Valued at each product’s current effective purchase price.</p></div></header>
+      <header><div><span className="eyebrow">Inventory by product</span><h2>Fuel quantity and stock value</h2><p>Book balances valued at each product’s current effective purchase price. Tank cards also show the latest measured quantity.</p></div></header>
       <div>{productPosition.map(product => {
         const productFill = product.capacity > 0 ? product.stock / product.capacity * 100 : 0;
-        return <article className={product.code.toLowerCase()} key={product.code}><div className="inventory-product-name"><b>{product.code}</b><span><strong>{product.name}</strong><small>{product.tanks} tank{product.tanks === 1 ? '' : 's'} · {percentage(productFill)} full</small></span></div><div className="inventory-product-numbers"><span><small>Available</small><strong>{quantity(product.stock)} L</strong></span><span><small>Stock value</small><strong>{money(product.value)}</strong></span></div><div className="inventory-product-bar"><i style={{ width: `${clamp(productFill)}%` }}/></div><footer><span>{quantity(product.capacity)} L safe capacity</span><span>{money(product.purchasePrice)}/L purchase price</span></footer></article>;
+        return <article className={product.code.toLowerCase()} key={product.code}><div className="inventory-product-name"><b>{product.code}</b><span><strong>{product.name}</strong><small>{product.tanks} tank{product.tanks === 1 ? '' : 's'} · {percentage(productFill)} full</small></span></div><div className="inventory-product-numbers"><span><small>Book stock</small><strong>{quantity(product.stock)} L</strong></span><span><small>Stock value</small><strong>{money(product.value)}</strong></span></div><div className="inventory-product-bar"><i style={{ width: `${clamp(productFill)}%` }}/></div><footer><span>{quantity(product.capacity)} L safe capacity</span><span>{money(product.purchasePrice)}/L purchase price</span></footer></article>;
       })}</div>
     </section>
 
-    <section className="inventory-control-strip"><button type="button" className={attentionLines.length ? 'attention' : 'clear'} onClick={() => setView('attention')}><AlertTriangle/><span><small>Needs attention</small><b>{attentionLines.length} tank{attentionLines.length === 1 ? '' : 's'}</b></span></button><span><CheckCircle2/><span><small>Current physical checks</small><b>{currentChecks} of {fuelLines.length}</b></span></span><span><Boxes/><span><small>Shop products</small><b>{packagedLines.length} tracked</b></span></span></section>
+    <section className="inventory-control-strip"><button type="button" className={attentionLines.length ? 'attention' : 'clear'} onClick={() => setView('attention')}><AlertTriangle/><span><small>Needs attention</small><b>{attentionLines.length} tank{attentionLines.length === 1 ? '' : 's'}</b></span></button><span><CheckCircle2/><span><small>Recent measurements</small><b>{currentChecks} of {fuelLines.length}</b></span></span><span><Boxes/><span><small>Shop products</small><b>{packagedLines.length} tracked</b></span></span></section>
 
     <section className="inventory-guide"><Info/><div><strong>Two truths, clearly separated</strong><p><b>Book stock</b> is the live system balance. <b>Physical stock</b> is a snapshot from the last dip. Compare both only at the time that dip was taken.</p></div><div className="inventory-source-flow"><span><ReceiptText/> Purchases</span><b>−</b><span><ShoppingCart/> Sales</span><b>±</b><span><Scale/> Corrections</span><b>=</b><span><PackageCheck/> Book stock</span></div></section>
 
@@ -109,7 +117,7 @@ function TankInventorySection({ lines, attention }: { lines: ReconciliationLine[
   return <section className="inventory-overview-section tank-bank-section"><div className="reconciliation-list-head"><div className="inventory-section-title"><span className="metric-icon green">{attention ? <AlertTriangle/> : <Droplets/>}</span><div><span className="eyebrow">{attention ? 'Action list' : 'Inventory'}</span><h2>{attention ? 'Tanks to check' : 'Fuel tanks'}</h2>{attention && <p>Missing, old, or different physical checks.</p>}</div></div><span>{lines.length} {lines.length === 1 ? 'tank' : 'tanks'}</span></div>{groups.map(([code, productLines]) => {
     const stock = productLines.reduce((sum, line) => sum + line.bookStock, 0);
     const value = productLines.reduce((sum, line) => sum + line.bookStock * line.product.purchasePrice, 0);
-    return <section className="inventory-product-tank-group" key={code}><header><span className={code.toLowerCase()}>{code}</span><div><strong>{productLines[0]!.product.name}</strong><small>{productLines.length} tank{productLines.length === 1 ? '' : 's'} · {quantity(stock)} L · {money(value)} stock value</small></div></header><div>{productLines.map((line, index) => <StockCard key={line.tank?.id ?? line.product.id} line={line} sequence={index + 1}/>)}</div></section>;
+    return <section className="inventory-product-tank-group" key={code}><header><span className={code.toLowerCase()}>{code}</span><div><strong>{productLines[0]!.product.name}</strong><small>{productLines.length} tank{productLines.length === 1 ? '' : 's'} · {quantity(stock)} L book stock · {money(value)} book value</small></div></header><div>{productLines.map((line, index) => <StockCard key={line.tank?.id ?? line.product.id} line={line} sequence={index + 1}/>)}</div></section>;
   })}{!lines.length && <div className="inventory-all-clear"><CheckCircle2/><strong>{attention ? 'Everything looks current. No tank needs attention.' : 'No active fuel tanks are configured for this fuel station.'}</strong></div>}</section>;
 }
 
@@ -117,10 +125,11 @@ function StockCard({ line, sequence }: { line: ReconciliationLine; sequence: num
   const variance = line.variance;
   const isTank = Boolean(line.tank);
   const capacity = line.tank?.workingCapacity ?? 0;
-  const fill = capacity > 0 ? line.bookStock / capacity * 100 : 0;
-  const age = checkAge(line.readAt);
+  const shownStock = line.latestObservation?.volume ?? line.bookStock;
+  const fill = capacity > 0 ? shownStock / capacity * 100 : 0;
+  const age = measurementAge(line);
   const review = needsReview(line);
-  const differenceCopy = variance === null ? 'Take a physical dip to verify the system balance.' : Math.abs(variance) < .001 ? 'The physical dip matched the system exactly.' : `${quantity(Math.abs(variance))} ${unit(line.product.unit)} ${variance < 0 ? 'less' : 'more'} than the system expected at the last check.`;
+  const differenceCopy = line.latestObservation?.precision === 'MORNING' ? 'Morning dip recorded in the confirmed DSR. An exact-time book comparison is unavailable.' : variance === null ? 'Take a physical dip to verify the system balance.' : Math.abs(variance) < .001 ? 'The physical dip matched the system exactly.' : `${quantity(Math.abs(variance))} ${unit(line.product.unit)} ${variance < 0 ? 'less' : 'more'} than the system expected at the last check.`;
 
   if (!isTank) return <article className="inventory-shop-card"><span className="tank-mark"><PackageCheck size={18}/></span><div><strong>{line.product.name}</strong><small>{line.product.code} · {line.product.packSizeLitres ? `${quantity(Number(line.product.packSizeLitres))} L per pack · pieces` : unit(line.product.unit)}</small></div><span><small>On hand</small><b>{quantity(line.bookStock)} {unit(line.product.unit)}</b></span><details><summary>How calculated</summary><StockEquation line={line}/></details></article>;
 
@@ -129,14 +138,15 @@ function StockCard({ line, sequence }: { line: ReconciliationLine; sequence: num
   return <article id={`inventory-tank-${line.tank?.id}`} className={`inventory-tank-card inventory-orb-card ${colour} ${review ? 'review' : 'clear'}`}>
     <div className="inventory-tank-visual"><div className="fuel-orb" aria-label={`${line.product.code} Tank ${sequence}: ${percentage(fill)} full`}><span className="fuel-liquid" style={{ height: `${clamp(fill)}%` }}/><span className="fuel-percent">{percentage(fill)}</span></div><small>{quantity(capacity)} L safe capacity</small></div>
     <div className="inventory-tank-intel">
-      <header><div><span className="fuel-product">{line.product.code}</span><h3>{line.product.code} Tank {sequence}</h3><small>Equipment ID {line.tank?.code}</small></div><span className={`tank-health ${review ? 'review' : 'clear'}`}>{review ? <AlertTriangle/> : <CheckCircle2/>}{variance === null ? 'Dip needed' : age.stale ? 'Check is old' : Math.abs(variance) < .001 ? 'Verified' : 'Review difference'}</span></header>
-      <div className="inventory-tank-kpis"><span><small>Book stock now</small><b>{quantity(line.bookStock)} {unit(line.product.unit)}</b></span><span><small>Equivalent stock value</small><b>{money(stockValue)}</b></span><span><small>Purchase price</small><b>{money(line.product.purchasePrice)}/L</b></span>{line.density !== null && <span><small>Latest density</small><b>{quantity(line.density)} kg/m³</b></span>}</div>
+      <header><div><span className="fuel-product">{line.product.code}</span><h3>{line.product.code} Tank {sequence}</h3><small>Equipment ID {line.tank?.code}</small></div><span className={`tank-health ${review ? 'review' : 'clear'}`}>{review ? <AlertTriangle/> : <CheckCircle2/>}{line.latestObservation?.precision === 'MORNING' ? 'DSR morning reading' : variance === null ? 'Dip needed' : age.stale ? 'Check is old' : Math.abs(variance) < .001 ? 'Verified' : 'Review difference'}</span></header>
+      <div className="inventory-tank-kpis">{line.latestObservation && <span><small>Last measured stock</small><b>{quantity(shownStock)} {unit(line.product.unit)}</b></span>}<span><small>Book stock now</small><b>{quantity(line.bookStock)} {unit(line.product.unit)}</b></span><span><small>Book stock value</small><b>{money(stockValue)}</b></span><span><small>Purchase price</small><b>{money(line.product.purchasePrice)}/L</b></span>{line.density !== null && <span><small>Latest density</small><b>{quantity(line.density)} kg/m³</b></span>}</div>
+      {line.latestObservation && <TankObservationNote observation={line.latestObservation} bookStock={line.bookStock}/>}
       <div className="inventory-check-comparison">
         <span><small>System expected at check</small><b>{line.bookStockAtReading === null || line.bookStockAtReading === undefined ? '—' : `${quantity(line.bookStockAtReading)} ${unit(line.product.unit)}`}</b></span>
         <span><small>Physical stock at check</small><b>{line.physicalStock === null ? 'Not recorded' : `${quantity(line.physicalStock)} ${unit(line.product.unit)}`}</b></span>
         <span className={variance === null ? '' : Math.abs(variance) < .001 ? 'good' : 'variance'}><small>Difference at that moment</small><b>{variance === null ? '—' : `${signed(variance)} ${unit(line.product.unit)}`}</b></span>
       </div>
-      <div className="inventory-plain-language"><span className={review ? 'review' : 'clear'}>{review ? <AlertTriangle/> : <CheckCircle2/>}</span><div><strong>{differenceCopy}</strong><small>{age.label}{line.readAt ? ` · ${new Date(line.readAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}</small></div></div>
+      <div className="inventory-plain-language"><span className={review ? 'review' : 'clear'}>{review ? <AlertTriangle/> : <CheckCircle2/>}</span><div><strong>{differenceCopy}</strong><small>{line.latestObservation?.precision === 'MORNING' ? 'See the measurement date above' : age.label}{line.readAt ? ` · ${new Date(line.readAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}</small></div></div>
       <details className="inventory-calculation"><summary>Show how the current balance was calculated</summary><StockEquation line={line}/></details>
     </div>
   </article>;

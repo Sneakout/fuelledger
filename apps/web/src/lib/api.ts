@@ -1258,7 +1258,13 @@ export type InventoryStation = {
     }>;
   }>;
 };
+export type TankObservation = {
+  volume: number; dipCm: number | null; date: string; observedAt: string | null;
+  precision: 'MORNING' | 'EXACT'; source: 'DSR' | 'TANK_CHECK' | 'SHIFT_OPENING' | 'SHIFT_CLOSING';
+  sourceId: string; sourceLabel: string; sourcePath: string; savedAt: string | null; timingNote?: string;
+};
 export type ReconciliationLine = {
+  latestObservation?: TankObservation | null;
   station: { id: string; name: string; code: string } | undefined;
   tank: { id: string; code: string; nominalCapacity: number; workingCapacity: number } | null;
   product: {
@@ -1829,6 +1835,7 @@ export type DashboardBootstrap = {
     status: "ATTENTION" | "RUNNING" | "CALM";
   }>;
   tankStocks: Array<{
+    latestObservation?: TankObservation | null;
     id: string;
     code: string;
     product: string;

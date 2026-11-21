@@ -18,7 +18,7 @@ describe('FuelTankBank', () => {
     expect(screen.getByText('25,900 L')).toBeInTheDocument();
     expect(screen.queryByText(/closing-dip/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/below book stock/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Book stock exceeds safe capacity/)).toBeInTheDocument();
+    expect(screen.getByText(/Displayed stock exceeds safe capacity/)).toBeInTheDocument();
     expect(screen.getByLabelText(/136.3 percent book stock/)).toBeInTheDocument();
   });
 
@@ -34,4 +34,18 @@ describe('FuelTankBank', () => {
     expect(screen.getByText('13,000 L')).toBeInTheDocument();
     expect(screen.queryByText(/closing-dip/i)).not.toBeInTheDocument();
   });
+});
+
+it('displays the latest DSR measurement, date and source separately from book stock', () => {
+  render(<MemoryRouter><FuelTankBank asOf="2026-11-21T08:00:00Z" tanks={[{
+    id:'ms',code:'T-1',product:'Motor Spirit',productCode:'MS',unit:'LITRE',station:{id:'one',name:'One',code:'ONE'},
+    bookStock:2809,workingCapacity:20000,fillPercent:14,sellingPrice:114,density:null,densityRecordedAt:null,physicalStock:null,physicalReadingAt:null,status:'LOW',
+    latestObservation:{volume:10000,dipCm:99,date:'2026-11-20',observedAt:null,precision:'MORNING',source:'DSR',sourceId:'r',sourceLabel:'Confirmed DSR · morning',sourcePath:'/sales/history/import?month=2026-11',savedAt:'2026-11-21T08:00:00Z'},
+  }]} /></MemoryRouter>);
+  expect(screen.getByLabelText(/50 percent last measured stock/)).toBeInTheDocument();
+  expect(screen.getByText('10,000 L')).toBeInTheDocument();
+  expect(screen.getByText('2,809 L')).toBeInTheDocument();
+  expect(screen.getByText(/20 Nov 2026 · morning/)).toBeInTheDocument();
+  expect(screen.getByText(/not a live dip/)).toBeInTheDocument();
+  expect(screen.getByRole('link',{name:/View source/})).toHaveAttribute('href','/sales/history/import?month=2026-11');
 });

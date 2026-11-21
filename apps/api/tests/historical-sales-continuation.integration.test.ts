@@ -1,5 +1,7 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import { readLatestTankObservations } from '../src/lib/tank-observations.js';
+import { bootstrap as inventoryBootstrap } from '../src/modules/inventory/service.js';
 import { prisma } from '../src/lib/prisma.js';
 import { correctHistoricalImport, createHistoricalImport, historicalImportDetail } from '../src/modules/historical-sales/service.js';
 import type { HistoricalSalesRowInput } from '@fuelledger/shared';
@@ -53,6 +55,14 @@ suite('Continuing partially saved DSRs with isolated records', () => {
     expect(await prisma.journal.count({where:{organizationId:org.id}})).toBe(0);
     expect(await prisma.supplierPayment.count({where:{organizationId:org.id}})).toBe(0);
     expect((await prisma.tank.findUniqueOrThrow({where:{id:tank.id}})).openingStock.toNumber()).toBe(8000);
+    const scope = [{id:tank.id,stationId:station.id,productId:product.id}];
+    const observed = await readLatestTankObservations(prisma,org.id,scope,new Date('2026-11-07T12:00:00Z'));
+    expect(observed.get(tank.id)).toMatchObject({volume:7600,date:'2026-11-05',precision:'MORNING',observedAt:null,source:'DSR'});
+    const inventory = await inventoryBootstrap(org.id,[station.id]);
+    expect(inventory.tanks[0]).toMatchObject({bookStock:8000,physicalStock:7600,variance:null,latestObservation:{date:'2026-11-05'}});
+    expect((await readLatestTankObservations(prisma,otherOrg.id,scope)).size).toBe(0);
+    await prisma.tankReading.create({data:{organizationId:org.id,stationId:station.id,tankId:tank.id,physicalStock:7500,recordedById:owner.id,recordedAt:new Date('2026-11-06T06:00:00Z')}});
+    expect((await readLatestTankObservations(prisma,org.id,scope,new Date('2026-11-07T12:00:00Z'))).get(tank.id)).toMatchObject({volume:7500,source:'TANK_CHECK',precision:'EXACT'});
     expect((await prisma.nozzle.findUniqueOrThrow({where:{id:nozzle.id}})).openingMeter.toNumber()).toBe(1000);
   });
 });

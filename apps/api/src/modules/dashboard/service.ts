@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
+import { readLatestTankObservations } from '../../lib/tank-observations.js';
 import { tankBookStocksAt, tankOpeningBalances } from '../../lib/stock.js';
 import { addIndiaDays, indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { buildReport } from '../reports/service.js';
@@ -63,7 +64,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
       include:{
         product:{select:{name:true,code:true,unit:true,sellingPrice:true,sellingPriceHistory:{where:{effectiveFrom:{lte:now}},orderBy:{effectiveFrom:'desc'},take:1}}},
         configuration:{select:{station:{select:{id:true,name:true,code:true}}}},
-        physicalReadings:{orderBy:{recordedAt:'desc'},take:1,select:{physicalStock:true,recordedAt:true}},
+        physicalReadings:{where:{recordedAt:{lte:now}},orderBy:{recordedAt:'desc'},take:1,select:{physicalStock:true,recordedAt:true}},
         densityReadings:{orderBy:{recordedAt:'desc'},take:1,select:{density:true,recordedAt:true}},
       },
       orderBy:[{configuration:{station:{name:'asc'}}},{code:'asc'}],
@@ -72,6 +73,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
     prisma.approvalRequest.findMany({where:{organizationId,status:'PENDING',actionType:'PRODUCT_PRICE_CHANGE',...(scopeIds?{stationId:{in:scopeIds}}:{})},select:{id:true,reason:true,evidence:true},orderBy:{requestedAt:'desc'},take:20}),
   ]);
   const bookStockByTank=await tankBookStocksAt(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),now);
+  const observations=await readLatestTankObservations(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId})),now);
   const stationIds=[...new Set(tanks.map(tank=>tank.configuration.station.id))];
   const lastClosings=stationIds.length?await prisma.shift.findMany({where:{stationId:{in:stationIds},closedAt:{not:null}},distinct:['stationId'],orderBy:{closedAt:'desc'},select:{stationId:true,closedAt:true,tankReadings:{select:{tankId:true,closingDip:true}}}}):[];
   const expectedFromLastDip=new Map<string,{stock:number;closedAt:string}>();
@@ -111,6 +113,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
       id:tank.id,code:tank.code,product:tank.product.name,productCode:tank.product.code,unit:tank.product.unit,
       station:tank.configuration.station,bookStock,workingCapacity,fillPercent,sellingPrice:number(effectivePriceAt(tank.product.sellingPrice,tank.product.sellingPriceHistory,now)),density:latestDensity?number(latestDensity.density):null,densityRecordedAt:latestDensity?.recordedAt.toISOString()??null,
       expectedFromLastDip:shiftBasis?.stock??null,bookDifferenceFromLastDip:shiftBasis?bookStock-shiftBasis.stock:null,lastClosingDipAt:shiftBasis?.closedAt??null,
+      latestObservation:observations.get(tank.id)??null,
       physicalStock:latestReading?number(latestReading.physicalStock):null,
       physicalReadingAt:latestReading?.recordedAt.toISOString()??null,
       status:bookStock>workingCapacity?'OVER_CAPACITY':bookStock<=0?'EMPTY':fillPercent<=20?'LOW':'HEALTHY' as 'OVER_CAPACITY'|'EMPTY'|'LOW'|'HEALTHY',

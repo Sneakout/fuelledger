@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { describe, expect, it, vi } from 'vitest';
 import { assertStockAvailable, bookStockAt, tankBookStocksAt } from '../src/lib/stock.js';
 
-const db = vi.hoisted(() => ({ station: { findMany: vi.fn() }, product: { findMany: vi.fn() }, inventoryLedger: { findMany: vi.fn() }, purchaseReceipt: { findMany: vi.fn() } }));
+const db = vi.hoisted(() => ({ historicalSalesImport:{findMany:vi.fn().mockResolvedValue([])}, tankReading:{findMany:vi.fn().mockResolvedValue([])}, shiftTankReading:{findMany:vi.fn().mockResolvedValue([])}, station: { findMany: vi.fn() }, product: { findMany: vi.fn() }, inventoryLedger: { findMany: vi.fn() }, purchaseReceipt: { findMany: vi.fn() } }));
 vi.mock('../src/lib/prisma.js', () => ({ prisma: db }));
 const d = (n: number) => new Prisma.Decimal(n);
 
@@ -28,6 +28,15 @@ describe('inventory balances', () => {
     expect(result.tanks.map(row => row.bookStockAtReading)).toEqual([1100, 1100]);
     expect(result.tanks.map(row => row.variance)).toEqual([0, 0]);
     expect(result.untanked.map(row => row.bookStock)).toEqual([98, 198]);
+    // A later confirmed DSR changes the displayed observation, never the ledger balance.
+    db.historicalSalesImport.findMany.mockResolvedValueOnce([{id:'r',stationId:'a',productId:'fuel',updatedAt:new Date(),rows:[{date:'2026-01-04',tankReadings:[{tankId:'a-tank',openingStock:875,dipReading:30}]}]}]);
+    // Real tank records carry productId; keep the scope explicit in this fixture too.
+    const stationRows = await db.station.findMany();
+    for (const station of stationRows) station.configurations[0].tanks[0].productId = 'fuel';
+    db.station.findMany.mockResolvedValue(stationRows);
+    const updated = await bootstrap('org', ['a','b']);
+    expect(updated.tanks[0]).toMatchObject({bookStock:1000,physicalStock:875,readAt:null,bookStockAtReading:null,variance:null,latestObservation:{date:'2026-01-04',precision:'MORNING',source:'DSR'}});
+    expect(updated.tanks[1]?.latestObservation).toBeNull();
     expect(db.inventoryLedger.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ organizationId: 'org', stationId: { in: ['a', 'b'] } }), select: expect.any(Object) }));
   });
 });

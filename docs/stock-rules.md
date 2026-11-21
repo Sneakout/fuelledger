@@ -48,3 +48,30 @@ When a deliberately backdated receipt time falls inside a closed shift, the purc
 For new purchase invoices that receive stock, the API defaults `receivedAt` to the server's current time. An explicitly earlier time requires a reason; a future physical receipt is rejected. Invoice date continues to control the payable document and journal date only. Existing receipt times are not migrated or rewritten.
 
 Authorized users can run the read-only `GET /api/purchases/receipt-timing-audit` report. It returns `recordsChanged: false` and flags linked historical receipts where the receipt time exactly matches the invoice date, was entered later, and has no recorded timing explanation. The report is evidence for review, not permission to repair records automatically.
+
+## Latest physical measurement (dashboard and inventory)
+
+Confirmed historical DSR morning readings, tank checks and shift opening/closing
+readings are read through `readLatestTankObservations`. The selected tank must
+match the fuel station and product within the organization. Measurement dates,
+not upload/correction dates, determine which observation is newest. A correction
+to the latest measurement is reflected on the next data load. Future readings,
+invalid quantities and unconfirmed chart comparisons are excluded.
+
+A DSR has a **morning business date**, not an exact timestamp. The API retains
+`observedAt: null` and `precision: MORNING`; no midnight timestamp is invented.
+Timestamped operational evidence is preferred when observations share a date.
+This is a tie policy, not proof of the precise sequence of a date-only DSR.
+
+Tank gauges show **last measured stock** when a confirmed observation exists,
+otherwise clearly labelled book stock. Source, measurement date and live book
+balance remain visible. An old measurement is never labelled a live dip. No
+current physical estimate is fabricated from incomplete historical records.
+Same-time book variance is withheld for date-only DSR readings. Exact-time
+observations compare against ledger movements effective at that time.
+
+This read model does not create or change inventory ledger movements, supplier
+payments, invoices, journals, shift openings or approved stock adjustments. Book
+stock, inventory valuation, availability checks and receipt/shift bridges retain
+their existing ledger rules. Chart-derived quantities retain their precision and
+are not capped to the tank's nominal capacity.
