@@ -77,7 +77,7 @@ describe('authoritative stock timeline', () => {
       { tankId: 'tank-a', stationId: 'station-a', productId: 'ms', _sum: { quantityDelta: d(500) } },
       { tankId: 'tank-b', stationId: 'station-b', productId: 'hsd', _sum: { quantityDelta: d(-250) } },
     ]);
-    const reader = { historicalSalesImport:{findMany:vi.fn().mockResolvedValue([])}, inventoryLedger: { groupBy } } as unknown as Prisma.TransactionClient;
+    const reader = { tankReading:{findMany:vi.fn().mockResolvedValue([])},shiftTankReading:{findMany:vi.fn().mockResolvedValue([])},historicalSalesImport:{findMany:vi.fn().mockResolvedValue([])}, inventoryLedger: { groupBy } } as unknown as Prisma.TransactionClient;
     const balances = await tankBookStocksAt(reader, 'org', [
       { id: 'tank-a', stationId: 'station-a', productId: 'ms', openingStock: 8000 },
       { id: 'tank-b', stationId: 'station-b', productId: 'hsd', openingStock: 9000 },

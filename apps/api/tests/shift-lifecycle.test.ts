@@ -27,6 +27,8 @@ describe('closing shift', () => {
   it('opens with prior meters, stock including an intervening delivery, and chosen attendant', async () => {
     const tx: any = {
       historicalSalesImport:{findMany:vi.fn().mockResolvedValue([])},
+      tankReading:{findMany:vi.fn().mockResolvedValue([])},
+      shiftTankReading:{findMany:vi.fn().mockResolvedValue([])},
       station: { findFirst: vi.fn().mockResolvedValue({id:'station', configurations:[{id:'cfg',tanks:[{id:'t',code:'T1',productId:'fuel',openingStock:d(1000)}],dispensers:[{nozzles:[{id:'n',code:'N1',openingMeter:d(1000)}]}]}]}) },
       shift: { findFirst: vi.fn().mockResolvedValueOnce({id:'previous',closingCash:d(50),shiftNumber:1,closedAt:new Date('2026-01-01'),tankReadings:[{tankId:'t',closingDip:d(900)}],nozzleReadings:[{nozzleId:'n',closingMeter:d(1100)}]}).mockResolvedValueOnce(null), aggregate:vi.fn().mockResolvedValue({_max:{shiftNumber:1}}),create:vi.fn(async ({data})=>({...data,nozzleReadings:[],tankReadings:[]})) },
       inventoryLedger:{groupBy:vi.fn().mockResolvedValue([{tankId:'t',stationId:'station',productId:'fuel',type:'RECEIPT',_sum:{quantityDelta:d(200)}}])},
@@ -43,6 +45,8 @@ describe('closing shift', () => {
   it('opens with an active nozzle left without a fixed attendant', async () => {
     const tx: any = {
       historicalSalesImport:{findMany:vi.fn().mockResolvedValue([])},
+      tankReading:{findMany:vi.fn().mockResolvedValue([])},
+      shiftTankReading:{findMany:vi.fn().mockResolvedValue([])},
       station: { findFirst: vi.fn().mockResolvedValue({id:'station', configurations:[{id:'cfg',tanks:[{id:'t',code:'T1',productId:'fuel',openingStock:d(1000)}],dispensers:[{nozzles:[{id:'n',code:'N1',openingMeter:d(1000)}]}]}]}) },
       shift: { findFirst: vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(null), aggregate:vi.fn().mockResolvedValue({_max:{shiftNumber:0}}),create:vi.fn(async ({data})=>({...data,nozzleReadings:[],tankReadings:[]})) },
       inventoryLedger:{groupBy:vi.fn().mockResolvedValue([])},
@@ -59,6 +63,7 @@ describe('closing shift', () => {
       nozzleAssignments: [{ nozzleId: 'n', userId: 'u', user: { name: 'Staff' } }] };
     const tx: any = {
       historicalSalesImport:{findMany:vi.fn().mockResolvedValue([])},
+      tankReading:{findMany:vi.fn().mockResolvedValue([])},
       shift: { findFirst: vi.fn(async () => shift), updateMany: vi.fn(async () => ({ count: 1 })), update: vi.fn(async ({data}) => Object.assign(shift, data)) },
       sale: { groupBy: vi.fn().mockResolvedValue([{ nozzleId: 'n', _sum: { quantity: d(20) } }]), create: vi.fn(async ({data}) => ({id:'sale', ...data})) },
       nozzle: { findMany: vi.fn().mockResolvedValue([{id:'n',code:'N1',productId:'fuel',product:{code:'MS',category:'FUEL'},dispenser:{code:'D1'},tankMappings:[{tankId:'t'}]}]), findUnique: vi.fn().mockResolvedValue({id:'n',productId:'fuel',product:{name:'Fuel', code:'MS', inventoryTracked:true,sellingPrice:d(100),purchasePrice:d(90),sellingPriceHistory:[],purchasePriceHistory:[]},tankMappings:[{tankId:'t',tank:{productId:'fuel'}}]}) },
@@ -67,7 +72,7 @@ describe('closing shift', () => {
       ownerNotificationSettings: { findUnique: vi.fn().mockResolvedValueOnce({stockVarianceTolerance:d(1)}).mockResolvedValue({stockVarianceTolerance:d(50)}) },
       organization: { findUnique: vi.fn().mockResolvedValue({ intelligenceEnabledAt: new Date(0), intelligenceExpiresAt: null }) },
       nerveReviewJob: { createMany: vi.fn() },
-      shiftTankReading:{update:vi.fn()},shiftNozzleReading:{update:vi.fn()},shiftNozzleAssignment:{update:vi.fn()},
+      shiftTankReading:{findMany:vi.fn().mockResolvedValue([]),update:vi.fn()},shiftNozzleReading:{update:vi.fn()},shiftNozzleAssignment:{update:vi.fn()},
     };
     db.$transaction.mockImplementation(async fn => fn(tx));
     const input = { closingCash: 7500, tankReadings:[{id:'t',value:895}], nozzleReadings:[{id:'n',value:1100,testingQuantity:5,testingReturned:false}], nozzleCollections:[{nozzleId:'n',amount:7500}] };

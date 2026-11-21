@@ -1,3 +1,4 @@
+import { readOperationalStocks } from '../../lib/operational-stock.js';
 import { readTankStockTimelines } from '../../lib/historical-stock.js';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
@@ -76,6 +77,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
   const bookStockByTank=await tankBookStocksAt(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),now);
   const timelines=await readTankStockTimelines(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),now);
   const observations=await readLatestTankObservations(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId})),now);
+  const operationalStocks=await readOperationalStocks(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),observations,now);
   const stationIds=[...new Set(tanks.map(tank=>tank.configuration.station.id))];
   const lastClosings=stationIds.length?await prisma.shift.findMany({where:{stationId:{in:stationIds},closedAt:{not:null}},distinct:['stationId'],orderBy:{closedAt:'desc'},select:{stationId:true,closedAt:true,tankReadings:{select:{tankId:true,closingDip:true}}}}):[];
   const expectedFromLastDip=new Map<string,{stock:number;closedAt:string}>();
@@ -109,17 +111,19 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
     const bookStock=number(bookStockByTank.get(tank.id)??tank.openingStock);
     const shiftBasis=expectedFromLastDip.get(tank.id);
     const workingCapacity=number(tank.workingCapacity);
-    const fillPercent=workingCapacity>0?Math.max(0,bookStock/workingCapacity*100):0;
+    const availableStock=operationalStocks.get(tank.id)?.quantity??bookStock;
+    const fillPercent=workingCapacity>0?Math.max(0,availableStock/workingCapacity*100):0;
     const latestReading=tank.physicalReadings[0],latestDensity=tank.densityReadings[0];
     return{
       id:tank.id,code:tank.code,product:tank.product.name,productCode:tank.product.code,unit:tank.product.unit,
       station:tank.configuration.station,bookStock,workingCapacity,fillPercent,sellingPrice:number(effectivePriceAt(tank.product.sellingPrice,tank.product.sellingPriceHistory,now)),density:latestDensity?number(latestDensity.density):null,densityRecordedAt:latestDensity?.recordedAt.toISOString()??null,
       expectedFromLastDip:shiftBasis?.stock??null,bookDifferenceFromLastDip:shiftBasis?bookStock-shiftBasis.stock:null,lastClosingDipAt:shiftBasis?.closedAt??null,
+      operationalStock:operationalStocks.get(tank.id)??null,
       stockTimeline:timelines.has(tank.id)?{anchorDate:timelines.get(tank.id)!.anchorDate,throughDate:timelines.get(tank.id)!.throughDate,opening:Number(timelines.get(tank.id)!.opening),receipts:Number(timelines.get(tank.id)!.receipts),sales:Number(timelines.get(tank.id)!.sales),adjustments:Number(timelines.get(tank.id)!.adjustments),issues:timelines.get(tank.id)!.issues}:null,
       latestObservation:observations.get(tank.id)??null,
       physicalStock:latestReading?number(latestReading.physicalStock):null,
       physicalReadingAt:latestReading?.recordedAt.toISOString()??null,
-      status:bookStock>workingCapacity?'OVER_CAPACITY':bookStock<=0?'EMPTY':fillPercent<=20?'LOW':'HEALTHY' as 'OVER_CAPACITY'|'EMPTY'|'LOW'|'HEALTHY',
+      status:availableStock>workingCapacity?'OVER_CAPACITY':availableStock<=0?'EMPTY':fillPercent<=20?'LOW':'HEALTHY' as 'OVER_CAPACITY'|'EMPTY'|'LOW'|'HEALTHY',
     };
   });
   return{asOf:now.toISOString(),today:report.summary,collections:report.sales.byPayment,topProducts:report.sales.byProduct.slice(0,5),trend:{days:trend,thisWeek,previousWeek,weekChange},operations:{openShifts:open.length,pendingReconciliations:pending.length,cashVariance},actions,stationHealth,tankStocks};

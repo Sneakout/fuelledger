@@ -845,6 +845,7 @@ export type ShiftStation = {
   code: string;
   availableTankStock: Array<{
     stockIssues?:string[];
+    checkpoint?:{source:string;date:string;at:string|null;incomplete:boolean}|null;
     id: string;
     value: string;
     lastActual: string | null;
@@ -1259,6 +1260,7 @@ export type InventoryStation = {
     }>;
   }>;
 };
+export type OperationalStock = { quantity:number; opening:number; receipts:number; sales:number; adjustments:number; checkpointDate:string; checkpointAt:string|null; source:string; asOf:string; incomplete:boolean; issues:string[] };
 export type TankStockTimeline = { anchorDate:string|null; throughDate:string|null; opening?:number; receipts?:number; sales?:number; adjustments?:number; issues:string[] };
 export type TankObservation = {
   volume: number; dipCm: number | null; date: string; observedAt: string | null;
@@ -1267,6 +1269,7 @@ export type TankObservation = {
 };
 export type ReconciliationLine = {
   latestObservation?: TankObservation | null;
+  operationalStock?: OperationalStock | null;
   stockTimeline?: TankStockTimeline | null;
   station: { id: string; name: string; code: string } | undefined;
   tank: { id: string; code: string; nominalCapacity: number; workingCapacity: number } | null;
@@ -1839,6 +1842,7 @@ export type DashboardBootstrap = {
   }>;
   tankStocks: Array<{
     latestObservation?: TankObservation | null;
+  operationalStock?: OperationalStock | null;
   stockTimeline?: TankStockTimeline | null;
     id: string;
     code: string;

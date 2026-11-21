@@ -1,3 +1,4 @@
+import { readOperationalStocks } from '../../lib/operational-stock.js';
 import { assertDefPackQuantity } from '../products/def-format.js';
 import { safeTransaction } from '../../lib/safe-save.js';
 import { enqueueReview } from '../nerve/review-events.js';
@@ -29,17 +30,18 @@ export async function bootstrap(organizationId: string,stationIds?:string[]) {
   const ledgerByTank = group(movements.filter(entry => entry.tankId), entry => entry.tankId!); const ledgerByStationProduct = group(movements.filter(entry => !entry.tankId), entry => `${entry.stationId}:${entry.productId}`);
   const timelines = await readTankStockTimelines(prisma,organizationId,stations.flatMap(station => station.configurations[0]?.tanks.map(tank => ({id:tank.id,stationId:station.id,productId:tank.productId,openingStock:tank.openingStock})) ?? []),asOf);
   const observations = await readLatestTankObservations(prisma, organizationId, stations.flatMap(station => station.configurations[0]?.tanks.map(tank => ({id:tank.id,stationId:station.id,productId:tank.productId})) ?? []), asOf);
+  const operationalStocks=await readOperationalStocks(prisma,organizationId,stations.flatMap(station=>station.configurations[0]?.tanks.map(tank=>({id:tank.id,stationId:station.id,productId:tank.productId,openingStock:tank.openingStock}))??[]),observations,asOf);
   const tanks = await Promise.all(stations.flatMap(station => station.configurations[0]?.tanks.map(async tank => {
     const entries = ledgerByTank.get(tank.id) ?? [];
     const base = reconciliation({station,tank,entries});
     const history=timelines.get(tank.id);
     const line=history?{...base,opening:Number(history.opening),receipts:Number(history.receipts),sales:Number(history.sales),adjustments:Number(history.adjustments),bookStock:Number(history.quantity),stockTimeline:{anchorDate:history.anchorDate,throughDate:history.throughDate,issues:history.issues}}:base;
     const observation = observations.get(tank.id) ?? null;
-    if (!observation) return {...line,latestObservation:null};
+    if (!observation) return {...line,latestObservation:null,operationalStock:null};
     const at = observation.observedAt ? new Date(observation.observedAt) : null;
     const atHistory=at?(await readTankStockTimelines(prisma,organizationId,[{id:tank.id,stationId:station.id,productId:tank.productId,openingStock:tank.openingStock}],at)).get(tank.id):null;
     const bookThen = at ? atHistory ? Number(atHistory.quantity) : Number(tank.openingStock) + sum(entries.filter(entry => entry.occurredAt <= at)) : null;
-    return {...line,latestObservation:observation,physicalStock:observation.volume,dipReading:observation.dipCm,readAt:at,bookStockAtReading:bookThen,variance:bookThen === null ? null : observation.volume-bookThen};
+    return {...line,operationalStock:operationalStocks.get(tank.id)??null,latestObservation:observation,physicalStock:observation.volume,dipReading:observation.dipCm,readAt:at,bookStockAtReading:bookThen,variance:bookThen === null ? null : observation.volume-bookThen};
   }) ?? []));
   const untanked = stations.flatMap(station => products.filter(product => !product.tankLinked).map(product => reconciliation({ station, product, entries: ledgerByStationProduct.get(`${station.id}:${product.id}`) ?? [] })));
   return { asOf, stations, products, tanks, untanked, ledger, receipts };

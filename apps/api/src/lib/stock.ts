@@ -1,5 +1,8 @@
 import { InventoryMovementType, Prisma } from '@prisma/client';
 import { readTankStockTimelines, type HistoricalStockReader } from './historical-stock.js';
+import { readLatestTankObservations } from './tank-observations.js';
+import { readOperationalStocks } from './operational-stock.js';
+import { indiaDate } from './india-time.js';
 import { AppError } from './errors.js';
 
 type StockReader = Pick<Prisma.TransactionClient, 'tank'> & HistoricalStockReader;
@@ -137,7 +140,7 @@ export async function tankBookStocksAt(
 // Receipts use [previous close, opening). Closing sales and testing are already
 // reflected in the previous dip, so other movements still begin after the close.
 export async function tankOpeningBalances(
-  db: HistoricalStockReader,
+  db: HistoricalStockReader & Pick<Prisma.TransactionClient,'tankReading'|'shiftTankReading'>,
   organizationId: string,
   tanks: TankStockSource[],
   at: Date,
@@ -164,7 +167,7 @@ export async function tankOpeningBalances(
   const history = await readTankStockTimelines(db,organizationId,tanks,new Date(at.getTime()-(includeMovementsAtAsOf?0:1)));
   const boundaryReceipts = previous?.closedAt && history.size ? await tankMovementTotals(db,organizationId,withDip,{type:InventoryMovementType.RECEIPT,occurredAt:previous.closedAt}) : new Map<string,TankMovementTotals>();
   const priorHistory = previous?.closedAt ? await readTankStockTimelines(db,organizationId,withDip,previous.closedAt) : new Map();
-  return new Map(tanks.map(tank => {
+  const result = new Map(tanks.map(tank => {
     const historical = history.get(tank.id);
     const lastActual = dipIds.has(tank.id) ? dips.get(tank.id)! : null;
     let totals = (lastActual === null ? sinceSetup : sinceClose).get(tank.id) ?? emptyTankMovementTotals();
@@ -191,8 +194,27 @@ export async function tankOpeningBalances(
       netOther: totals.net.minus(totals.received).minus(totals.adjustments),
       expectedOpening,
       stockIssues,
+      checkpoint: null as {source:string;date:string;at:string|null;incomplete:boolean}|null,
     }];
   }));
+  const cutoff=new Date(at.getTime()-(includeMovementsAtAsOf?0:1));
+  const observations=await readLatestTankObservations(db,organizationId,tanks,cutoff);
+  const positions=await readOperationalStocks(db,organizationId,tanks,observations,cutoff);
+  for(const tank of tanks) {
+    const position=positions.get(tank.id),observation=observations.get(tank.id),balance=result.get(tank.id)!;
+    if(!position||!observation)continue;
+    // Never replace a known later closing supplied by the shift transaction with
+    // an older observation. The saved shift dip itself remains unchanged.
+    if(previous?.closedAt&&dips.get(tank.id)!=null&&(observation.date<indiaDate(previous.closedAt)||(observation.date===indiaDate(previous.closedAt)&&(!observation.observedAt||new Date(observation.observedAt)<previous.closedAt))))continue;
+    balance.lastActual=new Prisma.Decimal(position.opening);
+    balance.received=new Prisma.Decimal(position.receipts);
+    balance.adjustments=new Prisma.Decimal(position.adjustments);
+    balance.netOther=new Prisma.Decimal(position.sales).negated();
+    balance.expectedOpening=new Prisma.Decimal(position.quantity);
+    balance.stockIssues=position.issues;
+    balance.checkpoint={source:position.source,date:position.checkpointDate,at:position.checkpointAt,incomplete:position.incomplete};
+  }
+  return result;
 }
 
 /** Run within the same serializable transaction as the stock deduction. */

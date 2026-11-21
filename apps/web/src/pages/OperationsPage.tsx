@@ -1016,10 +1016,10 @@ function Readings({
               <span>
                 <strong>{label}</strong>
                 {balance && <>
-                  <small>{balance.lastActual == null ? "Using book stock before opening" : `Last actual closing ${litres(Number(balance.lastActual))} · ${captured(lastClosingAt!)}`}</small>
-                  <small>{balance.lastActual == null ? "Receipts before opening" : "Received between shifts"} {litres(Number(balance.received))} · Adjustments {litres(Number(balance.adjustments))}{Number(balance.netOther) !== 0 && ` · Other movements ${litres(Number(balance.netOther))}`}</small>
+                  <small>{balance.checkpoint ? `${balance.checkpoint.source} · ${balance.checkpoint.date}${balance.checkpoint.at ? ` · ${captured(balance.checkpoint.at)}` : " · morning"} · ${litres(Number(balance.lastActual))}` : balance.lastActual == null ? "Using book stock before opening" : `Last actual closing ${litres(Number(balance.lastActual))} · ${captured(lastClosingAt!)}`}</small>
+                  <small>{balance.checkpoint ? "Received since measurement" : balance.lastActual == null ? "Receipts before opening" : "Received between shifts"} {litres(Number(balance.received))} · Adjustments {litres(Number(balance.adjustments))}{Number(balance.netOther) !== 0 && ` · Other movements ${litres(Number(balance.netOther))}`}</small>
                 </>}
-                <small><b>Expected opening {litres(expected)}</b>{balance && ` · Book stock now ${litres(Number(balance.value))}`}</small>
+                <small><b>{balance?.checkpoint?.incomplete ? "Available before unrecorded sales" : "Expected opening"} {litres(expected)}</b>{balance && ` · Book stock now ${litres(Number(balance.value))}`}</small>
                 {balance?.stockIssues?.map(issue=><small className="form-error" key={issue}>{issue}</small>)}
                 {Math.abs(bookDifference) > 0.001 && <small>Book stock is {litres(Math.abs(bookDifference))} {bookDifference > 0 ? "higher" : "lower"}.</small>}
               </span>

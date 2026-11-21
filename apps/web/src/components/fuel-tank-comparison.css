@@ -16,3 +16,8 @@
 }
 .tank-stock-variance i{font-style:normal;opacity:.55}
 .tank-stock-variance strong{margin-left:auto;color:#a04b24;font-size:9px;white-space:nowrap}
+
+.fuel-orb-copy .tank-details-link { display: inline-flex; align-items: center; gap: 8px; margin-top: 16px; color: var(--green); font-family: inherit; font-size: 13px; line-height: 1.5; font-weight: 750; text-decoration: none; }
+.fuel-orb-copy .tank-details-link svg { width: 16px; height: 16px; }
+.fuel-orb-copy .tank-details-link:hover { text-decoration: underline; text-underline-offset: 4px; }
+.fuel-orb-copy .tank-details-link:focus-visible { outline: 3px solid #47957a; outline-offset: 4px; border-radius: 4px; }

@@ -63,9 +63,12 @@ A DSR has a **morning business date**, not an exact timestamp. The API retains
 Timestamped operational evidence is preferred when observations share a date.
 This is a tie policy, not proof of the precise sequence of a date-only DSR.
 
-Tank gauges show **calculated book stock**. Last measured stock remains separate,
-with its source and actual measurement date. Neither editing an older DSR nor
-upload time makes an observation current.
+Tank gauges show the **estimate from the latest measured checkpoint**, plus
+subsequent known receipts, less recorded sales and testing losses, plus approved
+adjustments. A DSR without the following morning's readings is labelled
+**Available before unrecorded sales**, never a confirmed current or closing dip.
+The cumulative book balance is retained separately in stock details. Neither
+editing an older DSR nor upload time makes an observation current.
 
 ## Confirmed DSR stock coverage
 
@@ -83,9 +86,13 @@ never create a negative balancing receipt or sale. Missing days remain explicit.
 Multi-tank aggregate receipts/testing require allocation; the service does not
 invent allocations. Date-only receipts cannot be put at a guessed intraday time.
 
-One shared read model supplies dashboard, inventory, reports, stock checks and
-opening expectations. Shift bridges include the change in this timeline between
-readings; contributions without exact shift timing are flagged for review.
+The cumulative book model supplies accounting reports and book-stock checks.
+The separate `operational-stock` read model supplies tank gauges in dashboard and
+inventory, and expected next-shift openings, for every active configured tank.
+It uses `readLatestTankObservations`, including confirmed calibrated DSR dips,
+exact physical checks and saved shift readings. These two balances intentionally
+can differ: measuring stock does not post an accounting adjustment.
+Contributions without exact shift timing are flagged for review.
 Saved shift openings and closings are never rewritten. Unsaved closing meters
 and testing affect the local provisional closing preview only, until submitted.
 
@@ -94,3 +101,25 @@ payments, cash or journals are created. Historical corrections change derived
 stock on the next read. DSR quantities do not supply purchase costs, so reports
 flag historical stock valuation as incomplete rather than inventing costs.
 Chart-derived quantities retain precision and are not capped to nominal capacity.
+
+## Latest-checkpoint example and rollout
+
+For an HSD morning dip of 54 cm (4,398.67 L) on 20 November and a confirmed
+4,000 L delivery that day, availability is 8,398.67 L before unrecorded sales.
+Earlier days' accumulated reconciliation differences are not carried into that
+estimate. Matching invoice and DSR receipt quantities are counted once. A
+multi-tank aggregate DSR receipt requires allocation; it is not added to every
+tank. An untimed current-day receipt is withheld until its timing is known.
+
+Exact-time checks include only later effective ledger movements. At a shift
+closing boundary, receipts belong to the following interval; sales at closing
+are already reflected in the closing measurement. A sale spanning a check is
+flagged because its consumption cannot be split at an unknown time.
+
+This change is additive and read-only: no migration, historical repair, ledger
+rewrite, payment change or journal is required. Existing cumulative stock/value
+and transaction validation remain available. Unsaved meter changes are not
+telemetry and cannot be presented as verified consumption. Before release,
+compare tank estimates and their source dates in an internal account; missing
+consumption must stay visible and no automated delivery should be enabled by
+this rollout. Reverting the read-model/UI change preserves all recorded data.
