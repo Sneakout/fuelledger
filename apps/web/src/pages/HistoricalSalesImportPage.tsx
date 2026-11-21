@@ -226,6 +226,13 @@ export function HistoricalSalesImportPage() {
       return [{date: next!.date, previousDate: row.date, nozzleId: reading.nozzleId, message: `${nozzle ? `${nozzle.dispenserCode}/${nozzle.code}` : 'Nozzle'} reads ${following.meterReading.toLocaleString('en-IN', {maximumFractionDigits:3})} L on ${next!.date}, below ${reading.meterReading.toLocaleString('en-IN', {maximumFractionDigits:3})} L on ${row.date}. Check both morning readings.`}];
     });
   }), [rows, uncertainCells, selected]);
+  useEffect(() => {
+    if (!continuingRegister || !meterProblems.length) return;
+    const affected = meterProblems.flatMap(problem => [problem.previousDate, problem.date]);
+    // Keep both mornings expanded after correction, so the input does not
+    // disappear as soon as the user fixes the comparison.
+    setEditableSavedDates(current => affected.every(date => current.includes(date)) ? current : [...new Set([...current, ...affected])]);
+  }, [continuingRegister, meterProblems]);
   const displayedIssues: HistoricalImportIssue[] = [...issues.filter(issue => !(issue.field === 'nozzleReadings' && meterProblems.some(problem => problem.date === issue.date))), ...meterProblems.map(problem => ({date:problem.date,level:'ERROR' as const,field:'nozzleReadings',message:problem.message}))];
   useEffect(() => { setIssues([]); setError(''); setValidationStatus(''); }, [rows]);
   const reviewMessagesFor = (row: HistoricalSalesRowInput) => {
@@ -361,7 +368,14 @@ export function HistoricalSalesImportPage() {
   function revealValidationIssues(nextIssues: HistoricalImportIssue[]) {
     if (!nextIssues.length) return false;
     setIssues(nextIssues);
-    if (continuingRegister) setEditableSavedDates(current => [...new Set([...current, ...nextIssues.filter(issue => issue.level === 'ERROR').map(issue => issue.date)])]);
+    if (continuingRegister) {
+      const affected = nextIssues.filter(issue => issue.level === 'ERROR').flatMap(issue => {
+        const index = rows.findIndex(row => row.date === issue.date);
+        const neighbour = issue.field === 'nozzleReadings' || issue.field === 'cumulativeSales' ? rows[index - 1] : issue.field === 'tankReadings' || issue.field === 'stockGainLoss' ? rows[index + 1] : undefined;
+        return [issue.date, ...(neighbour ? [neighbour.date] : [])];
+      });
+      setEditableSavedDates(current => [...new Set([...current, ...affected])]);
+    }
     const errors = nextIssues.filter(issue => issue.level === 'ERROR');
     const count = errors.length || nextIssues.length;
     setError(`${count} field${count === 1 ? ' needs' : 's need'} review. The affected values are highlighted below.`);

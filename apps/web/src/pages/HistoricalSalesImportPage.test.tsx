@@ -475,7 +475,7 @@ describe('HistoricalSalesImportPage', () => {
     fireEvent.click(screen.getByRole('button',{name:'Check data'}));
     await waitFor(() => expect(validateHistoricalSalesCorrection).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByRole('button',{name:'Check data'})).toBeEnabled());
-    fireEvent.click(screen.getByRole('button',{name:'Edit 2026-11-13'}));
+    await screen.findByLabelText('D-1/HSD-1 meter 2026-11-13');
     const meter = screen.getByLabelText('D-1/HSD-1 meter 2026-11-13');
     expect(meter).toHaveValue(1500); expect(meter).toHaveAttribute('aria-invalid','true');
     fireEvent.change(meter,{target:{value:'1300'}});
@@ -497,6 +497,27 @@ describe('HistoricalSalesImportPage', () => {
     fireEvent.click(screen.getByRole('button',{name:'Review & save days'}));
     fireEvent.click(await screen.findByRole('button',{name:'Confirm changes'}));
     await waitFor(() => expect(correctHistoricalSalesImport).toHaveBeenCalledWith(record.id,expect.objectContaining({mode:'CORRECT',reason:'Corrected 13th meter against DSR',expectedUpdatedAt:record.updatedAt})));
+    historicalSalesImports.mockResolvedValue({imports:[]});
+  });
+
+  it('expands both saved mornings for a backward comparison and keeps them editable after fixing it', async () => {
+    const makeRow = (day: number, meter: number) => ({date:`2026-11-${day}`,tankReadings:[{tankId:'tank-1',openingStock:9000-day*100}],receiptQuantity:0,nozzleReadings:[{nozzleId:'nozzle-1',meterReading:meter}],testingQuantity:0,salesQuantity:0,sellingPrice:94});
+    const record = {id:'previous-morning',stationId:'station-1',productId:'product-1',month:'2026-11',monthStart:'2026-10-31T18:30:00Z',sourceFileName:'saved.pdf',cutoverApplied:false,createdAt:'2026-11-15T10:00:00Z',updatedAt:'2026-11-15T10:00:00Z',product:{code:'HSD',name:'Diesel'},importedBy:{name:'Owner'},corrections:[],rows:[makeRow(12,13328),makeRow(13,12627)]};
+    historicalSalesImports.mockResolvedValue({imports:[{...record,_count:{corrections:0}}]}); historicalSalesImport.mockResolvedValue({record});
+    render(<MemoryRouter initialEntries={['/?month=2026-11']}><HistoricalSalesImportPage/></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button',{name:/Add missing days/}));
+    const previous = await screen.findByLabelText('D-1/HSD-1 meter 2026-11-12');
+    const current = screen.getByLabelText('D-1/HSD-1 meter 2026-11-13');
+    expect(previous).toHaveValue(13328); expect(current).toHaveValue(12627);
+    expect(previous).toHaveAttribute('aria-invalid','true'); expect(current).toHaveAttribute('aria-invalid','true');
+    fireEvent.change(previous,{target:{value:'12328'}});
+    expect(screen.queryByText(/below 13,328 L/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('D-1/HSD-1 meter 2026-11-12')).toHaveValue(12328);
+    expect(screen.getByLabelText('D-1/HSD-1 meter 2026-11-13')).toHaveValue(12627);
+    expect(previous).not.toHaveAttribute('aria-invalid');
+    expect(screen.getByLabelText('Nozzle sales 2026-11-12')).toHaveValue(299);
+    expect(screen.getByLabelText('Reason for correction')).toBeInTheDocument();
+    expect(correctHistoricalSalesImport).not.toHaveBeenCalled();
     historicalSalesImports.mockResolvedValue({imports:[]});
   });
 
