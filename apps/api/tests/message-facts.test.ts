@@ -42,12 +42,14 @@ describe('verified notification facts', () => {
 
   it('preserves physical close and handover values while reconciliation is pending', async () => {
     db.shift.findFirst.mockResolvedValue({
-      station, shiftNumber: 2, openedAt: new Date('2026-11-16T17:00:00Z'), closedAt: asOf, closingCash: d(150),
-      sales: [], reconciliation: null, nozzleAssignments: [{ nozzleId: 'n1', collectionAmount: d(75) }], nozzleReadings: [],
+      station, shiftNumber: 2, manager: {id:'m',name:'Manager',organizationId:'org'}, users:[{user:{id:'a',name:'Ashok',organizationId:'org'}},{user:{id:'foreign',name:'Foreign',organizationId:'other'}}], openedAt: new Date('2026-11-16T17:00:00Z'), closedAt: asOf, closingCash: d(150),
+      sales: [], reconciliation: null, nozzleAssignments: [{ nozzleId: 'n1', collectionAmount: d(75), user:{id:'a',name:'Ashok',organizationId:'org'}, nozzle:{code:'N1',dispenser:{code:'D1'},product:{code:'HSD'}} }], nozzleReadings: [],
       tankReadings: [{ id: 'reading', tankId: 'tank', closingDip: d(245), tank: { id: 'tank', code: 'T2', productId: 'hsd', product: lineProduct } }],
     });
     const result = await readShiftMessageFacts(scope, 'shift', asOf);
     expect(result).toMatchObject({ completeness: 'INCOMPLETE', collections: null, physicalClosingCash: d(150), staffHandovers: [{ collectionAmount: d(75) }] });
+    expect(result?.managerName).toBe('Manager');
+    expect(result?.assignedStaff).toEqual([{name:'Ashok',nozzles:['D1/N1 · HSD']}]);
     expect(result?.tanks[0]?.physicalClosing?.toNumber()).toBe(245);
     expect(result?.tanks[0]?.bookClosing?.toNumber()).toBe(250);
   });

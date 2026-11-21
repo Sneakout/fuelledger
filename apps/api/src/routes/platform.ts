@@ -2,7 +2,7 @@ import { previewAccountDeletion, deleteAccount } from '../modules/platform/accou
 import { demoFollowUpState, prepareDemoFollowUp, sendDemoFollowUp } from '../modules/notifications/demo-follow-up.js';
 import { readOwnerEmailState } from '../modules/notifications/email-owner-state.js';
 import { drainEmailQueue, emailDeliveryReady, queueEmailWelcome } from '../modules/notifications/email-queue.js';
-import { renderOwnerEmail } from '../modules/notifications/email-template.js';
+import { prepareOwnerEmail } from '../modules/notifications/email-content.js';
 import { env } from '../config/env.js';
 import { indiaDate } from '../lib/india-time.js';
 import { manualMessageContext, manualMessageInput, prepareManualOwnerMessage } from '../modules/notifications/manual-owner-messages.js';
@@ -91,8 +91,9 @@ platformRouter.get('/customers/:id/email-deliveries/:deliveryId/preview', async 
     prisma.user.findFirst({ where: { id: job.ownerId, organizationId: job.organizationId }, select: { name: true } }),
     job.stationId ? prisma.station.findFirst({ where: { id: job.stationId, organizationId: job.organizationId }, select: { name: true } }) : Promise.resolve(null),
   ]);
-  const guard = job.guard as { sourceId?: string };
-  res.json(renderOwnerEmail({ type: job.type, message: job.message, ownerName: owner?.name ?? 'Owner', stationName: station?.name ?? organization.name, date: indiaDate(job.createdAt), appUrl: env.APP_URL, sourceId: guard.sourceId }));
+  const mail = await prepareOwnerEmail(job, owner?.name ?? 'Owner', station?.name ?? organization.name);
+  if (!mail) throw new AppError(409, 'EMAIL_SOURCE_CHANGED', 'The records behind this email have changed. Prepare a fresh summary to review the latest figures.');
+  res.json(mail);
 });
 platformRouter.post('/customers/:id/email-deliveries/:deliveryId/process', async (req, res) => {
   requirePlatformAdmin(req.user!.email);

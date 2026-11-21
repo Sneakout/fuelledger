@@ -104,7 +104,9 @@ export async function readShiftMessageFacts(scope: Scope, shiftId: string, asOf 
       sales: { where: { organizationId: scope.organizationId, ...stationIdFilter(scope), occurredAt: { lte: asOf } }, select: { id: true, product, quantity: true, totalAmount: true } },
       reconciliation: { include: { collections: true } },
       tankReadings: { include: { tank: { include: { product } } } },
-      nozzleAssignments: { select: { nozzleId: true, collectionAmount: true } },
+      manager: { select: { id: true, name: true, organizationId: true } },
+      users: { include: { user: { select: { id: true, name: true, organizationId: true } } } },
+      nozzleAssignments: { select: { nozzleId: true, collectionAmount: true, user: { select: { id: true, name: true, organizationId: true } }, nozzle: { select: { code: true, product: { select: { code: true } }, dispenser: { select: { code: true } } } } } },
       nozzleReadings: { select: { nozzleId: true, testingQuantity: true, testingReturned: true } },
     },
   });
@@ -130,6 +132,19 @@ export async function readShiftMessageFacts(scope: Scope, shiftId: string, asOf 
     ...metadata({ ...scope, stationId: shift.station.id }, shift.openedAt, closedAt ?? asOf, asOf),
     completeness: closedAt && collections && tanks.every(tank => tank.physicalClosing !== null) ? 'COMPLETE' : 'INCOMPLETE',
     shiftId, shiftNumber: shift.shiftNumber, station: shift.station, closedAt, sales: productSales(shift.sales), collections, tanks,
+    openedAt: shift.openedAt,
+    managerName: shift.manager?.organizationId === scope.organizationId ? shift.manager.name : null,
+    assignedStaff: (() => {
+      const team = new Map<string, { name: string; nozzles: string[] }>();
+      for (const assignment of shift.users ?? []) if (assignment.user.organizationId === scope.organizationId) team.set(assignment.user.id, { name: assignment.user.name, nozzles: [] });
+      for (const assignment of shift.nozzleAssignments) {
+        if (assignment.user?.organizationId !== scope.organizationId) continue;
+        const member = team.get(assignment.user.id) ?? { name: assignment.user.name, nozzles: [] };
+        member.nozzles.push(`${assignment.nozzle.dispenser.code}/${assignment.nozzle.code} · ${assignment.nozzle.product.code}`);
+        team.set(assignment.user.id, member);
+      }
+      return [...team.values()].map(member => ({ ...member, nozzles: [...new Set(member.nozzles)].sort() })).sort((a,b) => a.name.localeCompare(b.name));
+    })(),
     staffHandovers: closedAt ? shift.nozzleAssignments : [],
     physicalClosingCash: closedAt ? shift.closingCash : null,
     testing: closedAt ? shift.nozzleReadings : [],

@@ -16,7 +16,7 @@ const mail = { id: 'email-a', destination: 'owner@example.com', subject: 'Test',
 it('renders all agreed categories with escaped content, plain text and brand styling', () => {
  for (const type of emailCategories) {
   const result = renderOwnerEmail({ type, message: 'Sales: 2,345.123 L\nAmount: ₹2,14,412.90\n<script>alert(1)</script>', ownerName: '<Owner>', stationName: 'A & B', date: '2026-11-20', appUrl: 'https://fuel.mindvector.tech', sourceId: 'shift&1' });
-  expect(result.html).toContain('#123d31'); expect(result.html).toContain('#d6f16b'); expect(result.html).toContain('2,345.123 L'); expect(result.html).toContain('₹2,14,412.90'); expect(result.html).toContain('&lt;script&gt;'); expect(result.html).not.toContain('<script>'); expect(result.text).toContain('Manage email preferences: https://fuel.mindvector.tech/notifications'); expect(result.html).toContain('Hello &lt;Owner&gt;');
+  expect(result.html).toContain('/brand/fuelnerve-mark.png'); expect(result.html).toContain('#123d31'); expect(result.html).toContain('#d6f16b'); expect(result.html).toContain('2,345.123 L'); expect(result.html).toContain('₹2,14,412.90'); expect(result.html).toContain('&lt;script&gt;'); expect(result.html).not.toContain('<script>'); expect(result.text).toContain('Manage email preferences: https://fuel.mindvector.tech/notifications'); expect(result.html).toContain('Hello &lt;Owner&gt;');
  }
 });
 it('queues independently of WhatsApp and uses stable identity for duplicate events', async () => {
@@ -64,7 +64,7 @@ it('rechecks consent, recipient, active station, plan and organization ownership
  mock.owner.mockResolvedValue(null); mock.findMany.mockResolvedValue([{ ...job(), organizationId: 'other-org' }]); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true }); expect(fetcher).not.toHaveBeenCalled();
 });
 it('suppresses credit reports after a payment changes the current snapshot', async () => {
- mock.credit.mockResolvedValue({ snapshot: 'paid-now' }); expect(await emailFactsStillCurrent({ ...job(), type: 'OVERDUE_CUSTOMER', guard: { snapshot: 'before-payment' } }, new Date())).toBe(false);
+ mock.credit.mockResolvedValue({ snapshot: 'paid-now', facts: [] }); expect(await emailFactsStillCurrent({ ...job(), type: 'OVERDUE_CUSTOMER', guard: { snapshot: 'before-payment' } }, new Date())).toBe(false);
 });
 it('validates tank figures against current station-scoped facts', async () => {
  mock.tank.mockResolvedValue({ completeness: 'COMPLETE', bookStock: new Prisma.Decimal(900) });
@@ -165,4 +165,47 @@ it('permits an explicitly requested welcome for a new organization while automat
  await drainEmailQueue({organizationId:'future-org',deliveryId:'email-a',manualWelcome:true});
  expect(fetcher).toHaveBeenCalledOnce();
  expect(mock.findMany.mock.calls[0][0].where).toMatchObject({organizationId:'future-org',id:'email-a'});
+});
+
+it('shows saved overnight shift timings, team and separate cashless collections only in shift email', () => {
+ const shift = { number: 7, openedAt: new Date('2026-11-20T16:30:00Z'), closedAt: new Date('2026-11-21T00:30:00Z'), managerName: 'Owner <A>', staff: [{ name: 'Ashok', nozzles: ['D1/N1 · HSD'] }], channels: [
+  {method:'CASH',expected:'100',actual:'90',adjustment:'0',difference:'-10'},
+  {method:'UPI',expected:'200',actual:'200',adjustment:'0',difference:'0'},
+  {method:'CREDIT',expected:'300',actual:'0',adjustment:'0',difference:'0'},
+ ], difference:'-10', correction:false };
+ const input = { message:'Sales: HSD: 20 L', ownerName:'Owner', stationName:'Station', date:'2026-11-21', appUrl:'https://fuel.mindvector.tech', shift };
+ const mail = renderOwnerEmail({...input,type:'SHIFT_CLOSED_SUMMARY'});
+ expect(mail.subject).toContain('₹10.00 shortage');
+ expect(mail.text).toContain('20 Nov 2026'); expect(mail.text).toContain('21 Nov 2026'); expect(mail.text).toContain('IST');
+ expect(mail.html).toContain('Owner &lt;A&gt;'); expect(mail.text).toContain('Ashok — D1/N1 · HSD');
+ expect(mail.text).toContain('Cash · notes and coins: ₹90.00'); expect(mail.text).toContain('UPI: ₹200.00');
+ expect(mail.text).toContain('Customer credit · money owed: ₹300.00');
+ for(const type of emailCategories.filter(t=>t!=='SHIFT_CLOSED_SUMMARY')) {
+  const other=renderOwnerEmail({...input,type}); expect(other.html).not.toContain('Ashok'); expect(other.text).not.toContain('Opened:');
+ }
+});
+
+it('labels corrected shift emails and compares only recorded prior amounts', () => {
+ const mail=renderOwnerEmail({type:'SHIFT_CLOSED_SUMMARY',message:'Sales: HSD: 30 L',ownerName:'Owner',stationName:'Station',date:'2026-11-21',appUrl:'https://fuel.mindvector.tech',shift:{number:7,openedAt:new Date(),closedAt:new Date(),managerName:null,staff:[],channels:[],difference:'0',correction:true,previousMessage:'Sales: HSD: 20 L'}});
+ expect(mail.subject).toContain('Updated: shift #7'); expect(mail.html).toContain('Previously: Sales: HSD: 20 L'); expect(mail.html).toContain('Now: Sales: HSD: 30 L');
+});
+
+it('blocks an empty customer report even when its snapshot matches', async () => {
+ mock.credit.mockResolvedValue({snapshot:'empty',facts:[]});
+ expect(await emailFactsStillCurrent({...job(),type:'OVERDUE_CUSTOMER',guard:{snapshot:'empty'}},new Date())).toBe(false);
+});
+
+it('enriches preview and sending from scoped saved shift facts and refuses a stale reconciliation', async () => {
+ const {prepareOwnerEmail}=await import('../src/modules/notifications/email-content.js');
+ const {shiftMessage}=await import('../src/modules/notifications/agent-messages.js');
+ const d=(n:number)=>new Prisma.Decimal(n);
+ const facts={shiftId:'shift-a',shiftNumber:7,station:{name:'Station'},completeness:'COMPLETE',openedAt:new Date('2026-11-20T16:30:00Z'),closedAt:new Date('2026-11-21T00:30:00Z'),managerName:'Manager',assignedStaff:[{name:'Ashok',nozzles:['D1/N1 · HSD']}],sales:[],tanks:[],collections:{reconciliationId:'r7',channels:[{paymentMethod:'CASH',expectedAmount:d(100),actualAmount:d(100),adjustmentAmount:d(0),varianceAmount:d(0)}],difference:d(0),expected:d(100),adjustedExpected:d(100),actual:d(100)}};
+ mock.shift.mockResolvedValue(facts); mock.findFirst.mockResolvedValue(null);
+ const delivery={...job(),type:'SHIFT_CLOSED_SUMMARY',stationId:'station-a',eventKey:'shift-summary:shift-a:r7',guard:{sourceId:'shift-a',version:'r7'},message:shiftMessage(facts as never)!} as OwnerEmailDelivery;
+ const result=await prepareOwnerEmail(delivery,'Owner','Station');
+ expect(result?.html).toContain('Ashok'); expect(result?.subject).toContain('Collections match');
+ expect(mock.shift.mock.calls[0][0]).toEqual({organizationId:'org-a',stationId:'station-a'});
+ expect(mock.findFirst.mock.calls.at(-1)?.[0].where).toMatchObject({ownerId:'owner-a',destination:'owner@example.com',stationId:'station-a'});
+ expect(await prepareOwnerEmail({...delivery,guard:{sourceId:'shift-a',version:'old'}},'Owner','Station')).toBeNull();
+ expect(await prepareOwnerEmail({...delivery,message:'stale figures'},'Owner','Station')).toBeNull();
 });

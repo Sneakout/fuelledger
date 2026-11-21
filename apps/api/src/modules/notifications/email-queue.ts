@@ -1,10 +1,11 @@
+import { prepareOwnerEmail } from './email-content.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { hasActiveIntelligence } from '@fuelledger/shared';
 import { Prisma, type OwnerEmailDelivery, type OwnerNotificationType, type OwnerNotificationSettings } from '@prisma/client';
 import { env } from '../../config/env.js';
 import { prisma } from '../../lib/prisma.js';
 import { indiaDate } from '../../lib/india-time.js';
-import { emailDesign, renderOwnerEmail } from './email-template.js';
+import { emailDesign } from './email-template.js';
 import { coreDailyMessage, stockAlertMessage, receiptMessage, shiftMessage, isRecentReceipt } from './agent-messages.js';
 import { readDailyOperatingFacts, readReceiptMessageFacts, readShiftMessageFacts, readTankAlertFacts } from './message-facts.js';
 import { creditDeliverySnapshot } from './delivery-queue.js';
@@ -69,7 +70,10 @@ export async function emailFactsStillCurrent(job: OwnerEmailDelivery, now: Date)
   const guard = job.guard as Guard;
   if (job.type === 'OWNER_WELCOME') return true;
   if (['DAILY_SUMMARY', 'OVERDUE_CUSTOMER'].includes(job.type) && (guard.date ?? indiaDate(job.createdAt)) !== indiaDate(now)) return false;
-  if (job.type === 'OVERDUE_CUSTOMER') return Boolean(guard.snapshot && (await creditDeliverySnapshot(job.organizationId, now)).snapshot === guard.snapshot);
+  if (job.type === 'OVERDUE_CUSTOMER') {
+    const credit = await creditDeliverySnapshot(job.organizationId, now);
+    return Boolean(credit.facts.some(customer => customer.outstanding > 0) && guard.snapshot && credit.snapshot === guard.snapshot);
+  }
   if (job.type === 'DAILY_SUMMARY') return coreDailyMessage(await readDailyOperatingFacts({ organizationId: job.organizationId }, guard.date ?? indiaDate(job.createdAt), now), guard.date ?? indiaDate(job.createdAt), env.APP_URL) === job.message;
   if (!job.stationId || !guard.sourceId) return false;
   const scope = { organizationId: job.organizationId, stationId: job.stationId };
@@ -151,7 +155,8 @@ export async function drainEmailQueue(options: { organizationId?: string; delive
         : !(await emailFactsStillCurrent(job, fresh)) ? 'source_changed' : null;
       if (reason) { await finish({ status: 'SUPPRESSED', suppressionReason: reason }); continue; }
       if (!emailDeliveryReady(job.organizationId)) { await finish({ status: 'PENDING' }); continue; }
-      const mail = renderOwnerEmail({ type: job.type, message: job.message, ownerName: owner!.name, stationName: station?.name ?? organization!.name, date: indiaDate(job.createdAt), appUrl: env.APP_URL, sourceId: (job.guard as Guard).sourceId });
+      const mail = await prepareOwnerEmail(job, owner!.name, station?.name ?? organization!.name, fresh);
+      if (!mail) { await finish({ status: 'SUPPRESSED', suppressionReason: 'source_changed' }); continue; }
       await prisma.ownerEmailDelivery.updateMany({ where: { id: job.id, claimToken: token, status: 'PROCESSING' }, data: { attempts: { increment: 1 } } });
       const result = await sendSmtp2go({ ...mail, destination: job.destination, id: job.id });
       if (result.status === 'ACCEPTED') { await finish({ status: 'ACCEPTED', providerMessageId: result.providerMessageId, acceptedAt: new Date(), errorMessage: null }); accepted++; }
