@@ -564,6 +564,8 @@ export const api = {
   demoLeads: () => request<DemoLeadsBootstrap>("/platform/demo-leads"),
   previewDemoFollowUp: (id: string) => request<DemoFollowUpPreview>(`/platform/demo-leads/${encodeURIComponent(id)}/follow-up/preview`, { method: 'POST' }),
   sendDemoFollowUp: (id: string, input: { id: string; previewHash: string; permissionConfirmed: true }) => request<DemoFollowUpState>(`/platform/demo-leads/${encodeURIComponent(id)}/follow-up/send`, { method: 'POST', body: JSON.stringify(input) }),
+  previewAccountDeletion: (id: string) => request<AccountDeletionPreview>(`/platform/customers/${encodeURIComponent(id)}/deletion-preview`, { method:'POST' }),
+  deleteCustomerAccount: (id: string, input: {token:string;name:string;reason:string}) => request<{deleted:boolean}>(`/platform/customers/${encodeURIComponent(id)}`, { method:'DELETE', body:JSON.stringify(input) }),
   platformCustomers: () =>
     request<PlatformCustomersBootstrap>("/platform/customers"),
   updateCustomerSubscription: (
@@ -2041,3 +2043,5 @@ export type AccessBootstrap = {
 };
 
 export type OwnerEmailDelivery = { id: string; type: string; destination: string; status: string; attempts: number; createdAt: string; suppressionReason: string | null; errorMessage: string | null; providerMessageId: string | null };
+
+export interface AccountDeletionPreview { name:string; users:string[]; stations:string[]; counts:Record<string,number>; token:string }

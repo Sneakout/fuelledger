@@ -4,7 +4,7 @@ export const demoFollowUpVersion = 'benefits-v1';
 /** Email-safe graphics use tables and live text, so the message works with images blocked. */
 export function renderDemoFollowUp(input: { appUrl: string; unsubscribeUrl: string }) {
   const origin = new URL(input.appUrl).origin;
-  const subject = 'Your fuel station. Every litre, every collection, connected. | FuelNerve';
+  const subject = 'FuelNerve | Fuel Business Software with AI Agents';
   const benefits = [
     ['01', 'Follow every litre', 'Bring morning dips, deliveries, nozzle sales and returned testing into one stock story. See differences that need a closer look.'],
     ['02', 'Close shifts with clarity', 'Connect assigned attendants and meter readings to sales. Reconcile cash, UPI, card and customer credit separately.'],

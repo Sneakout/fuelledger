@@ -1,3 +1,4 @@
+import { previewAccountDeletion, deleteAccount } from '../modules/platform/account-deletion.js';
 import { demoFollowUpState, prepareDemoFollowUp, sendDemoFollowUp } from '../modules/notifications/demo-follow-up.js';
 import { readOwnerEmailState } from '../modules/notifications/email-owner-state.js';
 import { drainEmailQueue, emailDeliveryReady, queueEmailWelcome } from '../modules/notifications/email-queue.js';
@@ -40,6 +41,15 @@ const requirePlatformAdmin = (email: string) => {
   if (!isPlatformAdminEmail(email))
     throw new AppError(403, "PLATFORM_ADMIN_REQUIRED", "This area is restricted to the FuelNerve team.");
 };
+platformRouter.post('/customers/:id/deletion-preview', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  res.json(await previewAccountDeletion(prisma, req.params.id, req.user!.id));
+});
+platformRouter.delete('/customers/:id', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const input = z.object({ token:z.string().min(1), name:z.string().min(1), reason:z.string().trim().min(10).max(1000) }).parse(req.body);
+  res.json(await deleteAccount(prisma, req.params.id, req.user!.id, input));
+});
 platformRouter.get('/customers/:id/email-deliveries', async (req, res) => {
   requirePlatformAdmin(req.user!.email);
   const organizationId = req.params.id;

@@ -155,7 +155,9 @@ async function deliverPush(alert: { id: string; organizationId: string; type: Ow
   const devices = await prisma.ownerPushDevice.findMany({ where: { organizationId: alert.organizationId, active: true } });
   await Promise.all(devices.map(async device => {
     const delivery = await prisma.ownerPushDelivery.upsert({ where: { alertId_deviceId: { alertId: alert.id, deviceId: device.id } }, create: { organizationId: alert.organizationId, alertId: alert.id, deviceId: device.id }, update: {} });
-    if (delivery.status === 'SENT') return;
+    // Claim before calling APNs so account deletion can see an in-flight send.
+    const claimed = await prisma.ownerPushDelivery.updateMany({ where: { id: delivery.id, status: { in: ['PENDING', 'FAILED'] } }, data: { status: 'PROCESSING' } });
+    if (!claimed.count) return;
     try {
       const providerMessageId = await sendApns(device.token, { title: alert.title, body: alert.message.replace(/https?:\/\/\S+/g, '').trim().slice(0, 180), path: alert.evidencePath, alertId: alert.id, type: alert.type, approvalId: alert.evidenceSourceType === 'APPROVAL_REQUEST' ? alert.evidenceSourceId : null }, device.environment);
       await prisma.ownerPushDelivery.update({ where: { id: delivery.id }, data: { status: 'SENT', providerMessageId, sentAt: new Date(), errorMessage: null } });
