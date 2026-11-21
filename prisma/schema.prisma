@@ -1619,6 +1619,7 @@ model OwnerEmailDelivery {
 }
 
 model OwnerEmailPreference {
+  adminPaused Boolean @default(false) @map("admin_paused")
   ownerId String @id @map("owner_id")
   organizationId String @map("organization_id")
   enabled Boolean @default(false)

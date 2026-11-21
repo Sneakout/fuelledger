@@ -2,11 +2,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { NotificationsPage } from './NotificationsPage';
-const mock = vi.hoisted(() => ({ settings:vi.fn(), save:vi.fn() }));
+const mock = vi.hoisted(() => ({ settings:vi.fn(), status:vi.fn(), save:vi.fn() }));
 vi.mock('../components/AuthProvider',()=>({useAuth:()=>({user:{role:'OWNER',demoExpiresAt:null}})}));
-vi.mock('../lib/api',()=>({ApiRequestError:class extends Error {},api:{notificationSettings:mock.settings,updateNotificationSettings:mock.save}}));
+vi.mock('../lib/api',()=>({ApiRequestError:class extends Error {},api:{notificationSettings:mock.settings,ownerEmailStatus:mock.status,updateNotificationSettings:mock.save}}));
 const settings={whatsappNumber:'918086306454',whatsappOptedIn:true,dailySummaryEnabled:true,dailySummaryHour:20};
-beforeEach(()=>{vi.resetAllMocks();mock.settings.mockResolvedValue({settings,deliveries:[],deliveryAvailable:false,testAvailable:true,intelligenceActive:false});});
+beforeEach(()=>{vi.resetAllMocks();mock.status.mockResolvedValue({ emailStatus: { state: 'OFF', activatedAt: null, nextSummaryAt: null } });mock.settings.mockResolvedValue({settings,deliveries:[],deliveryAvailable:false,testAvailable:true,intelligenceActive:false});});
 afterEach(cleanup);
 const open=()=>render(<MemoryRouter><NotificationsPage/></MemoryRouter>);
 it('focuses on saved preferences without delivery diagnostics or test controls',async()=>{
@@ -21,7 +21,7 @@ it('focuses on saved preferences without delivery diagnostics or test controls',
 it('requires renewed consent and saving when a number changes',async()=>{
   open();await screen.findByText('Preferences saved');
   fireEvent.change(screen.getByRole('textbox',{name:'WhatsApp number'}),{target:{value:'919999999999'}});
-  expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+  expect(screen.getAllByText('Unsaved changes').length).toBeGreaterThan(0);
   const consent=screen.getByRole('checkbox',{name:/I agree to receive/});
   expect(consent).not.toBeChecked();fireEvent.click(consent);
   mock.save.mockResolvedValue({settings:{...settings,whatsappNumber:'919999999999'}});
@@ -62,4 +62,34 @@ it('lets Intelligence owners choose a daily email summary time', async () => {
  expect(await screen.findByText('A daily email with sales quantities, collections and tank stock.')).toBeInTheDocument();
  expect(screen.getByText('Daily summary time')).toBeInTheDocument();
  expect(screen.getByText('Credit report time')).toBeInTheDocument();
+});
+
+
+it('shows setup honestly and never exposes sending diagnostics to owners', async () => {
+ mock.settings.mockResolvedValue({ settings: { ...settings, emailEnabled: true }, emailStatus: { state: 'SETUP', activatedAt: null, nextSummaryAt: null }, emailAddress: 'owner@example.com', intelligenceActive: false });
+ open(); expect(await screen.findByText('Email updates are being set up')).toBeInTheDocument();
+ expect(screen.queryByText('Email updates are on')).not.toBeInTheDocument();
+ expect(screen.queryByText(/SMTP2GO|queue|retry rejected/i)).not.toBeInTheDocument();
+ expect(screen.getByRole('link', { name: 'How alerts work' })).toHaveAttribute('href', '/help/guide');
+});
+it('updates the status after saving and prevents repeated saves while saving', async () => {
+ mock.settings.mockResolvedValue({ settings: { ...settings, emailEnabled: true }, emailStatus: { state: 'ACTIVE', activatedAt: '2026-11-20T12:00:00Z', nextSummaryAt: '2026-11-21T14:30:00Z' }, intelligenceActive: false });
+ let finish!: (value: unknown) => void; mock.save.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+ open(); await screen.findByText('Email updates are on'); expect(screen.getByText(/21 Nov, 8:00 pm/)).toBeInTheDocument();
+ fireEvent.click(screen.getByRole('checkbox', { name: /Send me FuelNerve email updates/ }));
+ fireEvent.click(screen.getByRole('button', { name: 'Save preferences' }));
+ expect(screen.getByRole('button', { name: 'Saving…' })).toBeDisabled();
+ finish({ settings: { ...settings, emailEnabled: false }, emailStatus: { state: 'OFF', activatedAt: null, nextSummaryAt: null } });
+ expect(await screen.findByText('Email updates are off')).toBeInTheDocument(); expect(screen.queryByText('Next daily summary')).not.toBeInTheDocument();
+});
+
+it('refreshes activation on return without discarding unsaved owner choices', async () => {
+ mock.settings.mockResolvedValue({ settings: { ...settings, emailEnabled: true }, emailStatus: { state: 'SETUP', activatedAt: null, nextSummaryAt: null }, intelligenceActive: false });
+ mock.status.mockResolvedValue({ emailStatus: { state: 'ACTIVE', activatedAt: '2026-11-20T12:00:00Z', nextSummaryAt: null } });
+ open(); await screen.findByText('Email updates are being set up');
+ fireEvent.click(screen.getByRole('checkbox', { name: /Daily operating summary/ }));
+ fireEvent(window, new Event('focus'));
+ await waitFor(() => expect(mock.status).toHaveBeenCalledOnce());
+ expect(screen.getByRole('checkbox', { name: /Daily operating summary/ })).not.toBeChecked();
+ expect(screen.getByText('You have unsaved changes')).toBeInTheDocument();
 });

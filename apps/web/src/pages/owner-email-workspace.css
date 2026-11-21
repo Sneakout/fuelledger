@@ -50,3 +50,11 @@
   .owner-email-card .owner-email-actions button { flex: 1 1 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .owner-email-chevron { transition: none; } }
+.owner-email-onboarding { padding: 20px; margin: 18px 0; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(120deg, #f0f8f4, #fff); }
+.owner-email-onboarding h3 { margin: 0; font-size: 20px; line-height: 1.35; }
+.owner-email-workspace .owner-email-eyebrow { font-size: 11px; font-weight: 800; letter-spacing: .09em; color: var(--muted); margin: 0 0 6px; }
+.owner-email-destination { margin: 6px 0; font-size: 14px; overflow-wrap: anywhere; }
+.owner-email-preview { padding: 20px; border: 1px solid var(--line); border-radius: 16px; background: #f6faf8; animation: email-enter .2s ease-out; }
+.owner-email-preview .owner-email-actions { align-items: flex-start; flex-direction: column; }
+@keyframes email-enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .owner-email-preview { animation: none; } }

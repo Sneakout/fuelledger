@@ -9,7 +9,7 @@ import { coreDailyMessage, stockAlertMessage, receiptMessage, shiftMessage, isRe
 import { readDailyOperatingFacts, readReceiptMessageFacts, readShiftMessageFacts, readTankAlertFacts } from './message-facts.js';
 import { creditDeliverySnapshot } from './delivery-queue.js';
 
-type Guard = { sourceId?: string | undefined; status?: string | undefined; quantity?: number | undefined; snapshot?: string | undefined; version?: string | undefined; date?: string; ownerName?: string; stationName?: string };
+type Guard = { sourceId?: string | undefined; status?: string | undefined; quantity?: number | undefined; snapshot?: string | undefined; version?: string | undefined; date?: string; ownerName?: string; stationName?: string; eventAt?: string };
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const validOwnerEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value) && !/\.(local|invalid|test)$/i.test(value);
 export function emailCategoryEnabled(settings: OwnerNotificationSettings, type: OwnerNotificationType) {
@@ -23,26 +23,43 @@ export function allowsOwnerEmail(type: OwnerNotificationType, recordType: string
   return intelligenceActive && ['LOW_STOCK', 'SHIFT_CLOSED_SUMMARY', 'PURCHASE_RECEIPT_SUMMARY', 'OVERDUE_CUSTOMER'].includes(type);
 }
 export const emailDeliveryReady = (organizationId: string) => Boolean(env.EMAIL_DELIVERY_ENABLED && env.SMTP2GO_API_KEY && env.EMAIL_ROLLOUT_ORGANIZATION_IDS.split(',').map(id => id.trim()).includes(organizationId));
-const owners = (organizationId: string, db: Prisma.TransactionClient) => db.user.findMany({ where: { organizationId, role: 'OWNER', active: true, loginEnabled: true, ownerEmailPreference: { is: { organizationId, enabled: true } } }, select: { id: true, email: true, name: true } });
-export async function queueOwnerEmail(input: { organizationId: string; stationId?: string | undefined; type: OwnerNotificationType; eventKey: string; recordType: string; message: string; guard: Guard }, db: Prisma.TransactionClient = prisma) {
+const owners = (organizationId: string, db: Prisma.TransactionClient) => db.user.findMany({ where: { organizationId, role: 'OWNER', active: true, loginEnabled: true, ownerEmailPreference: { is: { organizationId, enabled: true, adminPaused: false } } }, select: { id: true, email: true, name: true } });
+/** Activation is recipient-specific; an old address or another owner cannot unlock email. */
+export async function acceptedWelcome(organizationId: string, ownerId: string, destination: string, db: Prisma.TransactionClient = prisma) {
+  return db.ownerEmailDelivery.findFirst({ where: { organizationId, ownerId, destination, type: 'OWNER_WELCOME', status: 'ACCEPTED', acceptedAt: { not: null } }, select: { id: true, acceptedAt: true }, orderBy: { acceptedAt: 'desc' } });
+}
+export async function queueOwnerEmail(input: { organizationId: string; stationId?: string | undefined; type: OwnerNotificationType; ownerId?: string | undefined; eventKey: string; recordType: string; message: string; guard: Guard }, db: Prisma.TransactionClient = prisma) {
   if (!emailDesign[input.type]) return;
   const settings = await db.ownerNotificationSettings.findUnique({ where: { organizationId: input.organizationId } });
   if (!settings || !emailCategoryEnabled(settings, input.type)) return;
   for (const owner of await owners(input.organizationId, db)) {
-    if (!validOwnerEmail(owner.email)) continue;
+    if ((input.ownerId && input.ownerId !== owner.id) || !validOwnerEmail(owner.email)) continue;
     const destination = owner.email.trim().toLowerCase();
+    if (input.type !== 'OWNER_WELCOME') {
+      const welcome = await acceptedWelcome(input.organizationId, owner.id, destination, db);
+      if (!welcome?.acceptedAt) continue;
+      if (['SHIFT_CLOSED_SUMMARY', 'PURCHASE_RECEIPT_SUMMARY'].includes(input.type) && input.guard.eventAt && new Date(input.guard.eventAt) < welcome.acceptedAt) continue;
+      if (['DAILY_SUMMARY', 'OVERDUE_CUSTOMER'].includes(input.type)) {
+        const hour = input.type === 'DAILY_SUMMARY' ? settings.dailySummaryHour : settings.creditReportHour;
+        const scheduledAt = new Date(`${input.guard.date ?? indiaDate()}T${String(hour).padStart(2, '0')}:00:00+05:30`);
+        if (scheduledAt < welcome.acceptedAt) continue;
+      }
+    }
     const dedupeKey = `email:${digest([input.organizationId, input.stationId ?? null, input.type, input.eventKey, owner.id, destination])}`;
     await db.ownerEmailDelivery.createMany({ skipDuplicates: true, data: {
       organizationId: input.organizationId, stationId: input.stationId ?? null, ownerId: owner.id, destination,
       type: input.type, eventKey: input.eventKey, dedupeKey, recordType: input.recordType, message: input.message,
       guard: { ...input.guard, ownerName: owner.name } as Prisma.InputJsonValue,
     } });
+    // Explicit admin preparation may restore a never-attempted, suppressed welcome.
+    // Accepted, failed or uncertain provider attempts retain their existing recovery rules.
+    if (input.type === 'OWNER_WELCOME') await db.ownerEmailDelivery.updateMany({ where: { organizationId: input.organizationId, ownerId: owner.id, destination, dedupeKey, status: 'SUPPRESSED', attempts: 0 }, data: { status: 'PENDING', suppressionReason: null, errorMessage: null, nextAttemptAt: new Date() } });
   }
 }
-export async function queueEmailWelcome(organizationId: string, db: Prisma.TransactionClient = prisma) {
+export async function queueEmailWelcome(organizationId: string, db: Prisma.TransactionClient = prisma, ownerId?: string) {
   const organization = await db.organization.findUnique({ where: { id: organizationId }, select: { name: true } });
   if (!organization) return;
-  await queueOwnerEmail({ organizationId, type: 'OWNER_WELCOME', eventKey: `owner-email-welcome:${organizationId}`, recordType: 'OWNER_WELCOME',
+  await queueOwnerEmail({ organizationId, ownerId, type: 'OWNER_WELCOME', eventKey: `owner-email-welcome:${organizationId}`, recordType: 'OWNER_WELCOME',
     message: `Your account for ${organization.name} is ready.\nReview your fuel station setup and get started with shifts, sales and tank stock.\nChoose the updates you receive in Settings → Email & WhatsApp alerts.`, guard: { stationName: organization.name } }, db);
 }
 
@@ -87,7 +104,7 @@ export async function sendSmtp2go(input: { destination: string; subject: string;
   } catch { return { status: 'UNKNOWN', error: 'Connection interrupted. Delivery may have been accepted; automatic retry is held.' }; }
 }
 
-export async function drainEmailQueue(options: { organizationId?: string; deliveryId?: string; limit?: number } = {}) {
+export async function drainEmailQueue(options: { organizationId?: string; deliveryId?: string; limit?: number; manualWelcome?: boolean } = {}) {
   const now = new Date();
   const scope = { ...(options.organizationId ? { organizationId: options.organizationId } : {}), ...(options.deliveryId ? { id: options.deliveryId } : {}) };
   // An expired lease may have crossed the provider boundary; never resend automatically.
@@ -95,10 +112,21 @@ export async function drainEmailQueue(options: { organizationId?: string; delive
   const enabledOrganizations = env.EMAIL_ROLLOUT_ORGANIZATION_IDS.split(',').map(id => id.trim()).filter(Boolean);
   if (!env.EMAIL_DELIVERY_ENABLED || !env.SMTP2GO_API_KEY || !enabledOrganizations.length || (options.organizationId && !enabledOrganizations.includes(options.organizationId))) return { checked: 0, accepted: 0 };
   // Paused accounts must not occupy the bounded batch and starve enabled accounts.
-  const jobs = await prisma.ownerEmailDelivery.findMany({ where: { ...scope, organizationId: options.organizationId ?? { in: enabledOrganizations }, status: 'PENDING', nextAttemptAt: { lte: now } }, orderBy: { createdAt: 'asc' }, take: Math.max(1, Math.min(options.limit ?? 4, 4)) });
+  const jobs = await prisma.ownerEmailDelivery.findMany({ where: { ...scope, organizationId: options.organizationId ?? { in: enabledOrganizations }, status: 'PENDING', ...(options.manualWelcome && options.deliveryId ? {} : { type: { not: 'OWNER_WELCOME' as const } }), nextAttemptAt: { lte: now } }, orderBy: { createdAt: 'asc' }, take: Math.max(1, Math.min(options.limit ?? 4, 4)) });
   let accepted = 0;
   for (const job of jobs) {
     if (!emailDeliveryReady(job.organizationId)) continue;
+    // Defense in depth: cron must never send a prepared welcome.
+    if (job.type === 'OWNER_WELCOME' && !(options.manualWelcome && options.deliveryId === job.id)) continue;
+    const welcome = job.type === 'OWNER_WELCOME' ? null : await acceptedWelcome(job.organizationId, job.ownerId, job.destination);
+    if (job.type !== 'OWNER_WELCOME' && !welcome?.acceptedAt) {
+      await prisma.ownerEmailDelivery.updateMany({ where: { id: job.id, status: 'PENDING' }, data: { nextAttemptAt: new Date(Date.now() + 300_000) } });
+      continue;
+    }
+    if (welcome?.acceptedAt && job.createdAt < welcome.acceptedAt) {
+      await prisma.ownerEmailDelivery.updateMany({ where: { id: job.id, status: 'PENDING' }, data: { status: 'SUPPRESSED', suppressionReason: 'before_email_activation' } });
+      continue;
+    }
     const token = randomUUID();
     const claimed = await prisma.ownerEmailDelivery.updateMany({ where: { id: job.id, status: 'PENDING' }, data: { status: 'PROCESSING', claimToken: token, leaseUntil: new Date(Date.now() + 120_000) } });
     if (!claimed.count) continue;
@@ -109,7 +137,7 @@ export async function drainEmailQueue(options: { organizationId?: string; delive
         prisma.organization.findUnique({ where: { id: job.organizationId } }),
         prisma.ownerNotificationSettings.findUnique({ where: { organizationId: job.organizationId } }),
         job.stationId ? prisma.station.findFirst({ where: { id: job.stationId, organizationId: job.organizationId, active: true }, select: { name: true } }) : Promise.resolve(null),
-        prisma.ownerEmailPreference.findFirst({ where: { ownerId: job.ownerId, organizationId: job.organizationId, enabled: true } }),
+        prisma.ownerEmailPreference.findFirst({ where: { ownerId: job.ownerId, organizationId: job.organizationId, enabled: true, adminPaused: false } }),
       ]);
       const fresh = new Date();
       const planActive = organization && (organization.lifetimeAccessPaidAt || (organization.subscriptionActivatedAt && organization.subscriptionActivatedAt <= fresh && (!organization.subscriptionExpiresAt || organization.subscriptionExpiresAt > fresh)));
@@ -118,7 +146,7 @@ export async function drainEmailQueue(options: { organizationId?: string; delive
         : !organization || (job.stationId && !station) ? 'fuel_station_unavailable'
         : job.type !== 'OWNER_WELCOME' && !planActive ? 'subscription_inactive'
         : job.type !== 'OWNER_WELCOME' && !allowsOwnerEmail(job.type, job.recordType, hasActiveIntelligence(organization)) ? 'category_not_in_plan'
-        : fresh.getTime() - job.createdAt.getTime() > 86_400_000 ? 'message_expired'
+        : job.type !== 'OWNER_WELCOME' && fresh.getTime() - job.createdAt.getTime() > 86_400_000 ? 'message_expired'
         : !(await emailFactsStillCurrent(job, fresh)) ? 'source_changed' : null;
       if (reason) { await finish({ status: 'SUPPRESSED', suppressionReason: reason }); continue; }
       if (!emailDeliveryReady(job.organizationId)) { await finish({ status: 'PENDING' }); continue; }

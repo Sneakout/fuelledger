@@ -7,7 +7,7 @@ vi.mock('../src/lib/prisma.js', async () => { const { PrismaClient } = await imp
 import { prisma } from '../src/lib/prisma.js';
 import { enqueueReview } from '../src/modules/nerve/review-events.js';
 import { prepareAgentEmails, scheduleOwnerEmails } from '../src/modules/notifications/email-scheduler.js';
-import { drainEmailQueue, queueEmailWelcome } from '../src/modules/notifications/email-queue.js';
+import { drainEmailQueue, queueEmailWelcome, queueOwnerEmail } from '../src/modules/notifications/email-queue.js';
 import { indiaParts } from '../src/lib/india-time.js';
 const suite = process.env.EMAIL_AUTOMATION_TEST_DATABASE_URL ? describe : describe.skip;
 suite('owner email automation on isolated PostgreSQL', () => {
@@ -34,6 +34,15 @@ suite('owner email automation on isolated PostgreSQL', () => {
   const scope = { organizationId: org.id, stationId: station.id };
   const owner = await prisma.user.create({ data: { organizationId: org.id, name: 'Fixture owner', email: `${org.id}@example.com`, passwordHash: 'test-only', role: 'OWNER', ownerEmailPreference: { create: { organizationId: org.id, enabled: true } } } });
   await prisma.ownerNotificationSettings.create({ data: { organizationId: org.id, dailySummaryHour: indiaParts(now).hour } });
+  // Preparing a welcome cannot send it through the cron worker or unlock alerts.
+  await queueEmailWelcome(org.id);
+  const welcome = await prisma.ownerEmailDelivery.findFirstOrThrow({ where: { organizationId: org.id, type: 'OWNER_WELCOME' } });
+  const welcomeSender = vi.fn(async () => Response.json({ data: { succeeded: 1, failed: 0, email_id: randomUUID() } })); vi.stubGlobal('fetch', welcomeSender);
+  await drainEmailQueue(); expect(welcomeSender).not.toHaveBeenCalled();
+  await drainEmailQueue({ organizationId: org.id, deliveryId: welcome.id, manualWelcome: true });
+  expect(welcomeSender).toHaveBeenCalledTimes(1);
+  // Simulate a welcome completed before today's report time for the scheduling fixture.
+  await prisma.ownerEmailDelivery.update({ where: { id: welcome.id }, data: { acceptedAt: new Date(now.getTime() - 86_400_000) } });
   const product = await prisma.product.create({ data: { organizationId: org.id, name: 'HSD', code: 'HSD', category: 'FUEL', unit: 'LITRE', tankLinked: true } });
   const config = await prisma.stationConfiguration.create({ data: { stationId: station.id, version: 1 } });
   const tank = await prisma.tank.create({ data: { configurationId: config.id, productId: product.id, code: 'T1', nominalCapacity: 5000, workingCapacity: 5000, openingStock: 500, tankType: 'UNDERGROUND', dipMethod: 'MANUAL' } });
@@ -50,6 +59,12 @@ suite('owner email automation on isolated PostgreSQL', () => {
   const sender = vi.fn(async () => Response.json({ data: { succeeded: 1, failed: 0, email_id: randomUUID() } })); vi.stubGlobal('fetch', sender);
   await Promise.all([drainEmailQueue(), drainEmailQueue()]); expect(sender).toHaveBeenCalledTimes(1);
   const low = await prisma.ownerEmailDelivery.findFirstOrThrow({ where: { ...scope, type: 'LOW_STOCK' } }); expect(low.status).toBe('ACCEPTED'); expect(low.message).toContain('500 L book stock');
+
+  await prisma.ownerEmailPreference.update({ where: { ownerId: owner.id }, data: { adminPaused: true } });
+  await queueOwnerEmail({ ...scope, type: 'LOW_STOCK', eventKey: 'during-support-pause', recordType: 'TANK', message: low.message, guard: {} });
+  expect(await prisma.ownerEmailDelivery.count({ where: { organizationId: org.id, eventKey: 'during-support-pause' } })).toBe(0);
+  await prisma.ownerEmailPreference.update({ where: { ownerId: owner.id }, data: { adminPaused: false } });
+  expect((await prisma.ownerEmailDelivery.findUniqueOrThrow({ where: { id: welcome.id } })).status).toBe('ACCEPTED');
 
   const supplier = await prisma.supplier.create({ data: { organizationId: org.id, name: 'Fixture supplier', code: 'SUP' } });
   const invoice = await prisma.purchaseInvoice.create({ data: { ...scope, supplierId: supplier.id, invoiceNumber: 'INV-1', invoiceDate: now, dueDate: new Date(now.getTime() + 7 * 86_400_000), subtotal: 180000, totalAmount: 180000, createdById: owner.id,
@@ -73,7 +88,7 @@ suite('owner email automation on isolated PostgreSQL', () => {
   await prisma.ownerEmailPreference.update({ where: { ownerId: owner.id }, data: { enabled: true } });
   await Promise.all([queueEmailWelcome(org.id), queueEmailWelcome(org.id)]);
   expect(await prisma.ownerEmailDelivery.count({ where: { organizationId: org.id, type: 'OWNER_WELCOME' } })).toBe(1);
-  await Promise.all([drainEmailQueue(), drainEmailQueue()]); expect(sender).toHaveBeenCalledTimes(2);
+  await Promise.all([drainEmailQueue(), drainEmailQueue()]); expect(sender).toHaveBeenCalledTimes(1);
   expect(await prisma.ownerEmailDelivery.count({ where: { organizationId: other.id } })).toBe(0);
  });
 });

@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { Prisma, type OwnerEmailDelivery } from '@prisma/client';
-const mock = vi.hoisted(() => ({ findMany: vi.fn(), createMany: vi.fn(), updateMany: vi.fn(), settings: vi.fn(), owners: vi.fn(), owner: vi.fn(), org: vi.fn(), station: vi.fn(), daily: vi.fn(), tank: vi.fn(), receipt: vi.fn(), shift: vi.fn(), credit: vi.fn(), preference: vi.fn() }));
+const mock = vi.hoisted(() => ({ findFirst: vi.fn(), findMany: vi.fn(), createMany: vi.fn(), updateMany: vi.fn(), settings: vi.fn(), owners: vi.fn(), owner: vi.fn(), org: vi.fn(), station: vi.fn(), daily: vi.fn(), tank: vi.fn(), receipt: vi.fn(), shift: vi.fn(), credit: vi.fn(), preference: vi.fn() }));
 vi.mock('../src/config/env.js', () => ({ env: { EMAIL_DELIVERY_ENABLED: true, SMTP2GO_API_KEY: 'test-only-secret-not-real', EMAIL_FROM: 'hello@mindvector.tech', EMAIL_ROLLOUT_ORGANIZATION_IDS: 'org-a', APP_URL: 'https://fuel.mindvector.tech' } }));
 vi.mock('../src/lib/prisma.js', () => ({ prisma: { ownerEmailDelivery: mock, ownerEmailPreference: { findFirst: mock.preference }, ownerNotificationSettings: { findUnique: mock.settings }, user: { findMany: mock.owners, findFirst: mock.owner }, organization: { findUnique: mock.org }, station: { findFirst: mock.station } } }));
 vi.mock('../src/modules/notifications/delivery-queue.js', () => ({ creditDeliverySnapshot: mock.credit }));
@@ -9,7 +9,7 @@ import { drainEmailQueue, emailFactsStillCurrent, queueOwnerEmail, sendSmtp2go }
 import { emailCategories, renderOwnerEmail } from '../src/modules/notifications/email-template.js';
 const job = () => ({ id: 'email-a', organizationId: 'org-a', stationId: null, ownerId: 'owner-a', destination: 'owner@example.com', type: 'OWNER_WELCOME', message: 'Your account is ready.', guard: {}, createdAt: new Date(), attempts: 0, recordType: 'OWNER_WELCOME' }) as OwnerEmailDelivery;
 const settings = { emailEnabled: true, dailySummaryEnabled: true, overdueCustomerEnabled: true, lowStockEnabled: true, shiftSummaryEnabled: true, receiptSummaryEnabled: true };
-beforeEach(() => { vi.resetAllMocks(); mock.findMany.mockResolvedValue([]); mock.updateMany.mockResolvedValue({ count: 1 }); mock.createMany.mockResolvedValue({ count: 1 }); mock.settings.mockResolvedValue(settings); mock.owners.mockResolvedValue([{ id: 'owner-a', email: 'owner@example.com', name: 'Owner' }]); mock.owner.mockResolvedValue({ email: 'owner@example.com', name: 'Owner' }); mock.preference.mockResolvedValue({ enabled: true }); mock.org.mockResolvedValue({ name: 'Test fuel station' }); });
+beforeEach(() => { vi.resetAllMocks(); mock.findFirst.mockResolvedValue({ id: 'accepted-welcome', acceptedAt: new Date('2026-01-01') }); mock.findMany.mockResolvedValue([]); mock.updateMany.mockResolvedValue({ count: 1 }); mock.createMany.mockResolvedValue({ count: 1 }); mock.settings.mockResolvedValue(settings); mock.owners.mockResolvedValue([{ id: 'owner-a', email: 'owner@example.com', name: 'Owner' }]); mock.owner.mockResolvedValue({ email: 'owner@example.com', name: 'Owner' }); mock.preference.mockResolvedValue({ enabled: true }); mock.org.mockResolvedValue({ name: 'Test fuel station' }); });
 afterEach(() => vi.unstubAllGlobals());
 const mail = { id: 'email-a', destination: 'owner@example.com', subject: 'Test', html: '<p>Test</p>', text: 'Test' };
 it('renders all agreed categories with escaped content, plain text and brand styling', () => {
@@ -45,22 +45,22 @@ it('holds timeouts, 5xx and ambiguous success rather than blindly retrying', asy
 });
 it('claims atomically and scopes manual processing and interrupted lease recovery', async () => {
  const fetcher = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ data: { succeeded: 1, failed: 0, email_id: 'p' } }) }); vi.stubGlobal('fetch', fetcher); mock.findMany.mockResolvedValue([job()]);
- await drainEmailQueue({ organizationId: 'org-a', deliveryId: 'email-a' });
+ await drainEmailQueue({ organizationId: 'org-a', deliveryId: 'email-a', manualWelcome: true });
  expect(mock.updateMany.mock.calls[0][0]).toMatchObject({ where: { organizationId: 'org-a', id: 'email-a', status: 'PROCESSING' }, data: { status: 'UNKNOWN' } });
  expect(mock.updateMany.mock.calls[1][0]).toMatchObject({ where: { id: 'email-a', status: 'PENDING' }, data: { status: 'PROCESSING' } });
  expect(fetcher).toHaveBeenCalledTimes(1); expect(mock.updateMany.mock.calls.at(-1)?.[0].data.status).toBe('ACCEPTED');
- mock.updateMany.mockResolvedValue({ count: 0 }); await drainEmailQueue(); expect(fetcher).toHaveBeenCalledTimes(1);
+ mock.updateMany.mockResolvedValue({ count: 0 }); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true }); expect(fetcher).toHaveBeenCalledTimes(1);
 });
 it('rechecks consent, recipient, active station, plan and organization allowlist before sending', async () => {
  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher); mock.findMany.mockResolvedValue([job()]);
- mock.preference.mockResolvedValue(null); await drainEmailQueue();
+ mock.preference.mockResolvedValue(null); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true });
  expect(mock.updateMany.mock.calls.at(-1)?.[0].data).toMatchObject({ status: 'SUPPRESSED', suppressionReason: 'email_or_category_disabled' });
- mock.preference.mockResolvedValue({ enabled: true }); mock.settings.mockResolvedValue(settings); mock.owner.mockResolvedValue({ email: 'new@example.com', name: 'Owner' }); await drainEmailQueue();
+ mock.preference.mockResolvedValue({ enabled: true }); mock.settings.mockResolvedValue(settings); mock.owner.mockResolvedValue({ email: 'new@example.com', name: 'Owner' }); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true });
  expect(mock.updateMany.mock.calls.at(-1)?.[0].data.suppressionReason).toBe('recipient_changed_or_ineligible');
- mock.owner.mockResolvedValue({ email: 'owner@example.com', name: 'Owner' }); mock.findMany.mockResolvedValue([{ ...job(), type: 'LOW_STOCK', stationId: 'foreign' }]); mock.station.mockResolvedValue(null); await drainEmailQueue();
+ mock.owner.mockResolvedValue({ email: 'owner@example.com', name: 'Owner' }); mock.findMany.mockResolvedValue([{ ...job(), type: 'LOW_STOCK', stationId: 'foreign' }]); mock.station.mockResolvedValue(null); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true });
  expect(mock.updateMany.mock.calls.at(-1)?.[0].data.suppressionReason).toBe('fuel_station_unavailable');
- mock.findMany.mockResolvedValue([{ ...job(), type: 'LOW_STOCK' }]); await drainEmailQueue(); expect(mock.updateMany.mock.calls.at(-1)?.[0].data.suppressionReason).toBe('subscription_inactive');
- mock.findMany.mockResolvedValue([{ ...job(), organizationId: 'other-org' }]); await drainEmailQueue(); expect(fetcher).not.toHaveBeenCalled();
+ mock.findMany.mockResolvedValue([{ ...job(), type: 'LOW_STOCK' }]); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true }); expect(mock.updateMany.mock.calls.at(-1)?.[0].data.suppressionReason).toBe('subscription_inactive');
+ mock.findMany.mockResolvedValue([{ ...job(), organizationId: 'other-org' }]); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true }); expect(fetcher).not.toHaveBeenCalled();
 });
 it('suppresses credit reports after a payment changes the current snapshot', async () => {
  mock.credit.mockResolvedValue({ snapshot: 'paid-now' }); expect(await emailFactsStillCurrent({ ...job(), type: 'OVERDUE_CUSTOMER', guard: { snapshot: 'before-payment' } }, new Date())).toBe(false);
@@ -71,20 +71,20 @@ it('validates tank figures against current station-scoped facts', async () => {
  expect(mock.tank.mock.calls[0][0]).toEqual({ organizationId: 'org-a', stationId: 'station-a' });
 });
 it('filters the worker batch by enabled organizations so paused accounts cannot starve it', async () => {
- await drainEmailQueue();
+ await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true });
  expect(mock.findMany.mock.calls[0][0].where.organizationId).toEqual({ in: ['org-a'] });
  mock.findMany.mockClear(); await drainEmailQueue({ organizationId: 'not-enrolled' }); expect(mock.findMany).not.toHaveBeenCalled();
 });
 it('requeues only explicit rate-limit rejections with a future retry time', async () => {
- mock.findMany.mockResolvedValue([job()]); vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 429 })); await drainEmailQueue();
+ mock.findMany.mockResolvedValue([job()]); vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 429 })); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true });
  const update = mock.updateMany.mock.calls.at(-1)?.[0].data;
  expect(update.status).toBe('PENDING'); expect(update.nextAttemptAt.getTime()).toBeGreaterThan(Date.now());
- mock.findMany.mockResolvedValue([{ ...job(), attempts: 3 }]); await drainEmailQueue(); expect(mock.updateMany.mock.calls.at(-1)?.[0].data.status).toBe('FAILED');
+ mock.findMany.mockResolvedValue([{ ...job(), attempts: 3 }]); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true }); expect(mock.updateMany.mock.calls.at(-1)?.[0].data.status).toBe('FAILED');
 });
 it('suppresses queued messages when the subscription expires or intelligence is downgraded', async () => {
  mock.findMany.mockResolvedValue([{ ...job(), type: 'LOW_STOCK' }]); mock.org.mockResolvedValue({ subscriptionActivatedAt: new Date('2026-01-01'), subscriptionExpiresAt: new Date('2026-01-02') });
- vi.stubGlobal('fetch', vi.fn()); await drainEmailQueue(); expect(mock.updateMany.mock.calls.at(-1)?.[0].data.suppressionReason).toBe('subscription_inactive');
- mock.org.mockResolvedValue({ subscriptionActivatedAt: new Date('2026-01-01'), subscriptionExpiresAt: null, intelligenceEnabledAt: null }); await drainEmailQueue(); expect(mock.updateMany.mock.calls.at(-1)?.[0].data.suppressionReason).toBe('category_not_in_plan');
+ vi.stubGlobal('fetch', vi.fn()); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true }); expect(mock.updateMany.mock.calls.at(-1)?.[0].data.suppressionReason).toBe('subscription_inactive');
+ mock.org.mockResolvedValue({ subscriptionActivatedAt: new Date('2026-01-01'), subscriptionExpiresAt: null, intelligenceEnabledAt: null }); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true }); expect(mock.updateMany.mock.calls.at(-1)?.[0].data.suppressionReason).toBe('category_not_in_plan');
  expect(fetch).not.toHaveBeenCalled();
 });
 it('uses same-site evidence links and ignores external or malformed links', () => {
@@ -95,9 +95,9 @@ it('uses same-site evidence links and ignores external or malformed links', () =
 
 it('does not subscribe other owners and rechecks individual email consent', async () => {
  await queueOwnerEmail({ organizationId: 'org-a', type: 'OWNER_WELCOME', eventKey: 'welcome', recordType: 'OWNER_WELCOME', message: 'Welcome', guard: {} });
- expect(mock.owners.mock.calls[0][0].where.ownerEmailPreference).toEqual({ is: { organizationId: 'org-a', enabled: true } });
- mock.findMany.mockResolvedValue([job()]); mock.preference.mockResolvedValue(null); vi.stubGlobal('fetch', vi.fn()); await drainEmailQueue();
- expect(mock.preference.mock.calls[0][0].where).toEqual({ ownerId: 'owner-a', organizationId: 'org-a', enabled: true });
+ expect(mock.owners.mock.calls[0][0].where.ownerEmailPreference).toEqual({ is: { organizationId: 'org-a', enabled: true, adminPaused: false } });
+ mock.findMany.mockResolvedValue([job()]); mock.preference.mockResolvedValue(null); vi.stubGlobal('fetch', vi.fn()); await drainEmailQueue({ deliveryId: 'email-a', manualWelcome: true });
+ expect(mock.preference.mock.calls[0][0].where).toEqual({ ownerId: 'owner-a', organizationId: 'org-a', enabled: true, adminPaused: false });
  expect(mock.updateMany.mock.calls.at(-1)?.[0].data.suppressionReason).toBe('email_or_category_disabled'); expect(fetch).not.toHaveBeenCalled();
 });
 
@@ -113,4 +113,40 @@ it('renders informative sections, exact decimals, attention states and accessibl
  expect(result.html).toContain('20 November 2026'); expect(result.html).toContain('WHAT TO REVIEW'); expect(result.html).toContain('Customer dues and staff handovers remain separate');
  for (const value of ['2,345.123 L', '1,234.567 L', '₹5,20,000.00', '₹5,19,750.00', '₹250.00', '8,240 L measured · 8,250 L book']) expect(result.html).toContain(value);
  expect(result.html).toContain('#fff6e5'); expect(result.html).toContain('max-width:480px'); expect(result.html).toContain('role="presentation"');
+});
+
+
+it('never sends a prepared welcome from the automatic worker', async () => {
+ mock.findMany.mockResolvedValue([job()]); const sender = vi.fn(); vi.stubGlobal('fetch', sender);
+ await drainEmailQueue();
+ expect(sender).not.toHaveBeenCalled();
+ expect(mock.findMany.mock.calls[0][0].where.type).toEqual({ not: 'OWNER_WELCOME' });
+ expect(mock.updateMany).toHaveBeenCalledTimes(1); // only expired-lease recovery
+});
+it('does not queue business messages before welcome acceptance for the exact recipient', async () => {
+ mock.findFirst.mockResolvedValue(null);
+ await queueOwnerEmail({ organizationId: 'org-a', type: 'LOW_STOCK', eventKey: 'episode', recordType: 'TANK', message: 'Stock', guard: {} });
+ expect(mock.createMany).not.toHaveBeenCalled();
+ expect(mock.findFirst.mock.calls[0][0].where).toMatchObject({ organizationId: 'org-a', ownerId: 'owner-a', destination: 'owner@example.com', type: 'OWNER_WELCOME', status: 'ACCEPTED', acceptedAt: { not: null } });
+});
+it('holds previously queued alerts without sending or consuming an attempt until welcome acceptance', async () => {
+ mock.findFirst.mockResolvedValue(null); mock.findMany.mockResolvedValue([{ ...job(), type: 'LOW_STOCK' }]);
+ const sender = vi.fn(); vi.stubGlobal('fetch', sender); await drainEmailQueue();
+ expect(sender).not.toHaveBeenCalled();
+ expect(mock.updateMany.mock.calls.at(-1)?.[0].data).toEqual({ nextAttemptAt: expect.any(Date) });
+});
+
+it('does not replay shifts or receipts from before welcome activation', async () => {
+ for (const type of ['SHIFT_CLOSED_SUMMARY', 'PURCHASE_RECEIPT_SUMMARY'] as const) {
+  await queueOwnerEmail({ organizationId: 'org-a', type, eventKey: 'old-event', recordType: 'RECEIPT', message: 'Past record', guard: { eventAt: '2025-12-31T12:00:00Z' } });
+ }
+ expect(mock.createMany).not.toHaveBeenCalled();
+});
+it('starts scheduled summaries from the next scheduled time rather than sending a late onboarding report', async () => {
+ mock.findFirst.mockResolvedValue({ id: 'welcome', acceptedAt: new Date('2026-11-21T15:00:00Z') });
+ mock.settings.mockResolvedValue({ ...settings, dailySummaryHour: 20 });
+ await queueOwnerEmail({ organizationId: 'org-a', type: 'DAILY_SUMMARY', eventKey: 'today', recordType: 'CORE_DAILY_SUMMARY', message: 'Today', guard: { date: '2026-11-21' } });
+ expect(mock.createMany).not.toHaveBeenCalled();
+ await queueOwnerEmail({ organizationId: 'org-a', type: 'DAILY_SUMMARY', eventKey: 'tomorrow', recordType: 'CORE_DAILY_SUMMARY', message: 'Tomorrow', guard: { date: '2026-11-22' } });
+ expect(mock.createMany).toHaveBeenCalledOnce();
 });

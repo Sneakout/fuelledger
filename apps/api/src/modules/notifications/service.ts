@@ -1,5 +1,5 @@
 import { emailDesign } from './email-template.js';
-import { queueOwnerEmail, queueEmailWelcome } from './email-queue.js';
+import { queueOwnerEmail } from './email-queue.js';
 import { buildWelcomeMessage } from './whatsapp-template.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ownerNotificationPacketSchema, type OwnerNotificationPacket, type OwnerNotificationSettingsInput } from '@fuelledger/shared';
@@ -98,7 +98,6 @@ export async function updateSettings(organizationId: string, input: OwnerNotific
       await tx.ownerEmailPreference.upsert({ where: { ownerId }, create: { organizationId, ownerId, enabled: input.emailEnabled }, update: { enabled: input.emailEnabled } });
     }
     const saved = await tx.ownerNotificationSettings.upsert({ where: { organizationId }, create: { organizationId, ...data }, update: data });
-    if (input.emailEnabled === true) await queueEmailWelcome(organizationId, tx);
     if (!saved.whatsappOptedIn || !saved.whatsappNumber) return saved;
 
     const welcome = await tx.organization.updateMany({
@@ -183,7 +182,7 @@ export async function sendOwnerNotification(input: AlertInput): Promise<Delivery
   const packet = ownerNotificationPacketSchema.parse({ schemaVersion: 1, ...input.packet, responsibleAgent: intelligenceActive ? responsibleAgent(input.type, input.packet.recordType) : null });
   const message = input.message(packet);
   if (emailOnly.getStore()) {
-    if (emailDesign[input.type]) await queueOwnerEmail({ organizationId: input.organizationId, stationId: input.stationId, type: input.type, eventKey: input.dedupeKey, recordType: packet.recordType, message, guard: { status: packet.status, sourceId: input.evidenceSourceId, quantity: packet.quantity?.value, snapshot: input.snapshot, version: input.version, date: input.type === 'DAILY_SUMMARY' ? input.dedupeKey.split(':').at(-1)! : indiaDate(new Date(packet.eventDate)) } });
+    if (emailDesign[input.type]) await queueOwnerEmail({ organizationId: input.organizationId, stationId: input.stationId, type: input.type, eventKey: input.dedupeKey, recordType: packet.recordType, message, guard: { eventAt: packet.eventDate, status: packet.status, sourceId: input.evidenceSourceId, quantity: packet.quantity?.value, snapshot: input.snapshot, version: input.version, date: input.type === 'DAILY_SUMMARY' ? input.dedupeKey.split(':').at(-1)! : indiaDate(new Date(packet.eventDate)) } });
     return { status: 'QUEUED' };
   }
   if (categoryEnabled) {
@@ -194,7 +193,7 @@ export async function sendOwnerNotification(input: AlertInput): Promise<Delivery
     if (input.type !== 'SYSTEM_TEST' && !whatsappPreview.getStore()) await deliverPush(alert);
   }
   if (!whatsappPreview.getStore() && emailDesign[input.type]) {
-    await queueOwnerEmail({ organizationId: input.organizationId, stationId: input.stationId, type: input.type, eventKey: input.dedupeKey, recordType: packet.recordType, message, guard: { status: packet.status, sourceId: input.evidenceSourceId, quantity: packet.quantity?.value, snapshot: input.snapshot, version: input.version, date: input.type === 'DAILY_SUMMARY' ? input.dedupeKey.split(':').at(-1)! : indiaDate(new Date(packet.eventDate)) } });
+    await queueOwnerEmail({ organizationId: input.organizationId, stationId: input.stationId, type: input.type, eventKey: input.dedupeKey, recordType: packet.recordType, message, guard: { eventAt: packet.eventDate, status: packet.status, sourceId: input.evidenceSourceId, quantity: packet.quantity?.value, snapshot: input.snapshot, version: input.version, date: input.type === 'DAILY_SUMMARY' ? input.dedupeKey.split(':').at(-1)! : indiaDate(new Date(packet.eventDate)) } });
   }
   if (!whatsappAllowed) {
     return { status: 'SKIPPED', reason: 'whatsapp_category_not_in_plan' };

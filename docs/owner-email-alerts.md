@@ -4,7 +4,7 @@ Sender: **FuelNerve <hello@mindvector.tech>**. Replies go to hello@mindvector.te
 
 ## Messages and preferences
 
-Owners enable email independently of WhatsApp in **Settings → Email & WhatsApp alerts**. The destination is the active owner's sign-in email; users cannot enter another person's destination. Enabling email prepares one welcome message per owner and address. It never sends passwords.
+Owners enable email independently of WhatsApp in **Settings → Email & WhatsApp alerts**. The destination is the active owner's sign-in email; users cannot enter another person's destination. Enabling email only saves consent. An administrator prepares, previews and explicitly sends the welcome from Growth Desk. The automatic worker never sends welcome messages. Business emails are queued and sent only after an accepted welcome exists for that exact organization, owner and destination address; a changed address requires a new welcome. Failed or uncertain welcomes do not activate automation. It never sends passwords.
 
 Core receives the daily operating summary (litres, collections and stock). Active Intelligence subscribers receive low stock, reconciled shift summaries, receipt summaries and customer credit reports. The existing agent events, calculations, categories and schedules supply the same verified facts as WhatsApp. Customer payment reminders remain WhatsApp-only: customer email consent and destinations have not been collected.
 
@@ -17,7 +17,7 @@ Each email includes forest-green/lime FuelNerve branding, a plain-text alternati
 3. Create an SMTP2GO API key with email-sending permission. Save it privately as server-only `SMTP2GO_API_KEY` in the deployment environment. Do not paste it into chat, source code or browser settings.
 4. Set `EMAIL_FROM=hello@mindvector.tech`, initially `EMAIL_DELIVERY_ENABLED=false`, and `EMAIL_ROLLOUT_ORGANIZATION_IDS=<internal test organization ID>`. All are server-only variables. Redeploy after configuration changes.
 5. Configure the email-only GitHub Actions scheduler described below. It calls three bounded email endpoints with `EMAIL_CRON_SECRET`, without starting WhatsApp delivery. Four emails maximum per delivery request, with a 15-second timeout per send.
-6. In the internal owner account, enable email. In Growth Desk, open that owner → **Owner email updates** → refresh and preview the welcome email. Check the real name, address and content.
+6. In the internal owner account, enable email. In Growth Desk, open that owner → **Owner email updates** → select **Prepare welcome email**, then preview the welcome email. Check the real name, address and content.
 7. Set `EMAIL_DELIVERY_ENABLED=true`, redeploy, then use **Send this email** for the internal welcome. Confirm arrival in the actual inbox and check SMTP2GO activity. Only then expand the allowlist to opted-in owners.
 
 The UI does not expose provider diagnostics to owners. Admins can inspect the selected owner's latest ten emails in Growth Desk. `ACCEPTED` means SMTP2GO accepted the request, not proof of inbox delivery. Delivery/bounce tracking currently remains in SMTP2GO; no unverified webhook claims are stored in FuelNerve.
@@ -59,3 +59,12 @@ All three require `Authorization: Bearer <EMAIL_CRON_SECRET>`. This is a separat
 ### Template review
 
 Run `corepack pnpm exec tsx scripts/preview-owner-emails.ts` to produce six synthetic HTML previews in `/tmp/fuelnerve-email-previews`. Review desktop and mobile widths. Templates use email-compatible presentation tables, inline styles, forest-green and lime branding, exact verified values, readable dates, category-specific review guidance, safe record links, and a plain-text alternative. Shortages, excesses, partial receipts and unpaid amounts receive an attention treatment. They distinguish measured and book stock, collections and credit, and invoice totals and payments. The template never calculates balances or silently rounds source figures.
+
+### Owner experience and support controls
+
+- Owners save consent and plan-appropriate categories without preparing a welcome. Their email card shows **off**, **being set up**, **on** or **paused** based on current consent, the exact-recipient welcome, subscription and email rollout. No provider diagnostics are exposed to the owner.
+- **On** shows the next future daily-summary time in IST. Times are approximate because the scheduler is best effort. Source figures still distinguish collections, credit, book stock and measured stock.
+- Growth Desk shows the full owner and destination, then **Preview welcome → Send welcome & start email updates**. Successful acceptance closes the preview and refreshes the permanent status. Uncertain outcomes never offer a blind resend.
+- Support can pause/resume each owner's email updates without deleting consent or the accepted welcome. Resuming does not bypass subscription or rollout checks. New recipients require their own welcome.
+- Activation skips old shift and receipt events and starts scheduled reports at the next scheduled time. Existing pre-activation jobs are suppressed, preserving history rather than replaying a backlog.
+- Apply migration `20261121023000_owner_email_pause` before deploying the support pause controls. It only adds an administrative pause flag; it does not change existing consent or operational records.

@@ -1,3 +1,4 @@
+import { readOwnerEmailState } from '../modules/notifications/email-owner-state.js';
 import { drainEmailQueue, emailDeliveryReady, queueEmailWelcome } from '../modules/notifications/email-queue.js';
 import { renderOwnerEmail } from '../modules/notifications/email-template.js';
 import { env } from '../config/env.js';
@@ -44,11 +45,25 @@ platformRouter.get('/customers/:id/email-deliveries', async (req, res) => {
   const organization = await prisma.organization.findUnique({ where: { id: organizationId }, select: { name: true } });
   if (!organization) throw new AppError(404, 'ORGANIZATION_NOT_FOUND', 'Owner account not found.');
   const deliveries = await prisma.ownerEmailDelivery.findMany({ where: { organizationId }, orderBy: { createdAt: 'desc' }, take: 10 });
-  res.json({ ready: emailDeliveryReady(organizationId), deliveries: deliveries.map(job => ({ id: job.id, type: job.type, destination: job.destination, status: job.status, attempts: job.attempts, createdAt: job.createdAt, suppressionReason: job.suppressionReason, errorMessage: job.errorMessage, providerMessageId: job.providerMessageId })) });
+  const owners = await prisma.user.findMany({ where: { organizationId, role: 'OWNER', active: true, loginEnabled: true }, select: { id: true } });
+  const recipients = await Promise.all(owners.map(async owner => ({ ownerId: owner.id, ...await readOwnerEmailState(organizationId, owner.id) })));
+  const missingWelcomeIds = recipients.map(owner => owner.welcomeId).filter((id): id is string => Boolean(id && !deliveries.some(job => job.id === id)));
+  if (missingWelcomeIds.length) deliveries.push(...await prisma.ownerEmailDelivery.findMany({ where: { organizationId, id: { in: missingWelcomeIds } } }));
+  res.json({ recipients, ready: emailDeliveryReady(organizationId), deliveries: deliveries.map(job => ({ id: job.id, type: job.type, destination: job.destination, status: job.status, attempts: job.attempts, createdAt: job.createdAt, suppressionReason: job.suppressionReason, errorMessage: job.errorMessage, providerMessageId: job.providerMessageId })) });
+});
+platformRouter.put('/customers/:id/email-owner/:ownerId/pause', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  if (typeof req.body?.paused !== 'boolean') throw new AppError(400, 'EMAIL_PAUSE_INVALID', 'Choose whether email updates should be paused.');
+  const owner = await prisma.user.findFirst({ where: { id: req.params.ownerId, organizationId: req.params.id, role: 'OWNER' }, select: { id: true } });
+  if (!owner) throw new AppError(404, 'OWNER_NOT_FOUND', 'Owner account not found.');
+  await prisma.ownerEmailPreference.upsert({ where: { ownerId: owner.id }, create: { ownerId: owner.id, organizationId: req.params.id, enabled: false, adminPaused: req.body.paused }, update: { adminPaused: req.body.paused } });
+  res.json({ paused: req.body.paused });
 });
 platformRouter.post('/customers/:id/email-welcome', async (req, res) => {
   requirePlatformAdmin(req.user!.email);
-  await queueEmailWelcome(req.params.id);
+  const ownerId = typeof req.body?.ownerId === 'string' ? req.body.ownerId : undefined;
+  if (ownerId && !await prisma.user.findFirst({ where: { id: ownerId, organizationId: req.params.id, role: 'OWNER', active: true, loginEnabled: true }, select: { id: true } })) throw new AppError(404, 'OWNER_NOT_FOUND', 'Owner account not found.');
+  await queueEmailWelcome(req.params.id, prisma, ownerId);
   res.json({ prepared: true });
 });
 platformRouter.post('/customers/:id/email-deliveries/:deliveryId/retry', async (req, res) => {
@@ -70,7 +85,7 @@ platformRouter.get('/customers/:id/email-deliveries/:deliveryId/preview', async 
 });
 platformRouter.post('/customers/:id/email-deliveries/:deliveryId/process', async (req, res) => {
   requirePlatformAdmin(req.user!.email);
-  res.json(await drainEmailQueue({ organizationId: req.params.id, deliveryId: req.params.deliveryId, limit: 1 }));
+  res.json(await drainEmailQueue({ organizationId: req.params.id, deliveryId: req.params.deliveryId, limit: 1, manualWelcome: true }));
 });
 
 platformRouter.get("/demo-leads", async (req, res) => {

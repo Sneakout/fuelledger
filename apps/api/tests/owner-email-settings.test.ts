@@ -7,10 +7,10 @@ vi.mock('../src/modules/notifications/email-queue.js', () => ({ queueOwnerEmail:
 import { updateSettings } from '../src/modules/notifications/service.js';
 const input = () => ownerNotificationSettingsSchema.parse({ whatsappNumber: '', whatsappOptedIn: false, emailEnabled: true, densityMissingEnabled: true, lowStockEnabled: true, shiftVarianceEnabled: true, unclosedShiftEnabled: true, dailySummaryEnabled: true, overdueCustomerEnabled: true, lowStockPercent: 20, varianceThreshold: 500, stockVarianceTolerance: 50, dailySummaryHour: 20 });
 beforeEach(() => { vi.resetAllMocks(); mock.settings.mockResolvedValue({ whatsappNumber: null, whatsappOptedIn: false, varianceThreshold: 500, stockVarianceTolerance: 50 }); });
-it('stores opt-in for the authenticated owner and queues welcome in the same transaction', async () => {
+it('stores opt-in without automatically preparing a welcome', async () => {
  const result = await updateSettings('org-a', input(), 'Owner', 'owner-a');
  expect(mock.preference).toHaveBeenCalledWith({ where: { ownerId: 'owner-a' }, create: { organizationId: 'org-a', ownerId: 'owner-a', enabled: true }, update: { enabled: true } });
- expect(mock.welcome).toHaveBeenCalledWith('org-a', tx); expect(result.emailEnabled).toBe(true);
+ expect(mock.welcome).not.toHaveBeenCalled(); expect(result.emailEnabled).toBe(true);
 });
 it('opting out affects that owner only and does not queue another welcome', async () => {
  const result = await updateSettings('org-a', { ...input(), emailEnabled: false }, 'Owner', 'owner-b');

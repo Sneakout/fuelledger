@@ -18,7 +18,7 @@ export function coreDailyMessage(facts: Awaited<ReturnType<typeof readDailyOpera
   return [
     `FuelNerve · Daily operating summary · ${date}`,
     `Sales: ${sales || 'No live sales recorded'}`,
-    `Collections (reconciled shifts): ${collected ? money(collected) : 'No reconciled shifts'}${facts.collections.incomplete ? ' · Some shifts are pending' : ''}`,
+    `Collections (reconciled shifts + counter sales): ${collected ? money(collected) : 'No verified collections recorded'}${facts.collections.incomplete ? ' · Some shifts are pending' : ''}`,
     `Tank book stock:\n${stock.join('\n') || 'No active tanks'}`,
     `Review: ${appUrl}/reports`,
   ].join('\n\n');

@@ -1,3 +1,4 @@
+import { readOwnerEmailState } from '../modules/notifications/email-owner-state.js';
 import { prepareAgentEmails, scheduleOwnerEmails } from '../modules/notifications/email-scheduler.js';
 import { drainEmailQueue } from '../modules/notifications/email-queue.js';
 import { Router } from 'express';
@@ -100,6 +101,12 @@ notificationsRouter.delete('/devices', async (req, res) => {
   await unregisterPushDevice(req.user!.organization.id, req.user!.id, parsed.data.token.toLowerCase());
   res.status(204).send();
 });
+notificationsRouter.get('/email-status', async (req, res) => {
+  requireOwner(req.user!);
+  const email = await readOwnerEmailState(req.user!.organization.id, req.user!.id);
+  res.json({ emailStatus: { state: email.state, activatedAt: email.activatedAt, nextSummaryAt: email.nextSummaryAt } });
+});
+
 notificationsRouter.get('/', async (req, res) => {
   const user = req.user!;
   requireOwner(user);
@@ -110,7 +117,8 @@ notificationsRouter.get('/', async (req, res) => {
   ]);
   const deliveryAvailable = settings.providerReady && policy.stage !== 'SHADOW' && !policy.paused
     && policy.organizationIds.includes(user.organization.id) && policy.enabledCategories.length > 0;
-  res.json({ settings: { ...settings, emailEnabled: Boolean(emailPreference) }, deliveries, emailAddress: user.email, intelligenceActive: hasActiveIntelligence(organization),
+  const email = await readOwnerEmailState(user.organization.id, user.id);
+  res.json({ emailStatus: { state: email.state, activatedAt: email.activatedAt, nextSummaryAt: email.nextSummaryAt }, settings: { ...settings, emailEnabled: Boolean(emailPreference) }, deliveries, emailAddress: user.email, intelligenceActive: hasActiveIntelligence(organization),
     deliveryAvailable, testAvailable: deliveryAvailable && policy.enabledCategories.includes('SYSTEM_TEST') });
 });
 
@@ -126,7 +134,9 @@ notificationsRouter.put('/', async (req, res) => {
   if (parsed.data.whatsappNumber !== (current.whatsappNumber ?? '') && parsed.data.whatsappOptedIn && req.body.confirmNewNumber !== true) {
     throw new AppError(400, 'OWNER_CONSENT_REQUIRED', 'Confirm consent for the new WhatsApp number.');
   }
-  res.json({ settings: await updateSettings(user.organization.id, parsed.data, user.name, user.id) });
+  const settings = await updateSettings(user.organization.id, parsed.data, user.name, user.id);
+  const email = await readOwnerEmailState(user.organization.id, user.id);
+  res.json({ settings, emailStatus: { state: email.state, activatedAt: email.activatedAt, nextSummaryAt: email.nextSummaryAt } });
 });
 
 notificationsRouter.post('/test', async (req, res) => {

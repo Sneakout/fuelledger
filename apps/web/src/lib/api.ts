@@ -536,6 +536,7 @@ export const api = {
   approveCustomerReminder: (id: string, stationId: string, snapshot: string) => request<{ id: string; status: NotificationDelivery["status"] }>(`/customers/${id}/reminders/approve`, {
     method: "POST", body: JSON.stringify({ stationId, snapshot }),
   }),
+  ownerEmailStatus: () => request<{ emailStatus: OwnerEmailStatus }>("/notifications/email-status"),
   notificationSettings: () => request<NotificationBootstrap>("/notifications"),
   dailyBriefWorkspace: (stationId: string) => request<DailyBriefWorkspaceResponse>(`/intelligence/daily-brief-workspace?stationId=${encodeURIComponent(stationId)}`),
   setDailyBriefPreference: (input: { stationId: string; findingKey: string; action: "ACKNOWLEDGE" | "REMIND_LATER" }) =>
@@ -551,7 +552,7 @@ export const api = {
   investigationFollowUp: (investigationId: string, input: { stationId: string; prompt: InvestigationFollowUpPrompt }) =>
     request<InvestigationFollowUpResponse>(`/intelligence/investigations/${encodeURIComponent(investigationId)}/follow-ups`, { method: "POST", body: JSON.stringify(input) }),
   updateNotificationSettings: (input: OwnerNotificationSettingsInput & { confirmNewNumber?: boolean }) =>
-    request<{ settings: NotificationSettings }>("/notifications", {
+    request<{ settings: NotificationSettings; emailStatus?: OwnerEmailStatus }>("/notifications", {
       method: "PUT",
       body: JSON.stringify(input),
     }),
@@ -621,8 +622,9 @@ export const api = {
   platformServiceTickets: () => request<{ tickets: PlatformServiceTicket[] }>("/platform/service-tickets"),
   updatePlatformServiceTicket: (id: string, input: { status: ServiceTicketStatus; adminNote?: string }) =>
     request<{ ticket: Pick<PlatformServiceTicket, "id" | "status" | "adminNote" | "resolvedAt" | "updatedAt"> }>(`/platform/service-tickets/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
-  ownerEmailDeliveries: (id: string) => request<{ ready: boolean; deliveries: OwnerEmailDelivery[] }>(`/platform/customers/${id}/email-deliveries`),
-  prepareOwnerEmailWelcome: (id: string) => request<{ prepared: boolean }>(`/platform/customers/${id}/email-welcome`, { method: 'POST' }),
+  pauseOwnerEmails: (id: string, ownerId: string, paused: boolean) => request(`/platform/customers/${id}/email-owner/${ownerId}/pause`, { method: 'PUT', body: JSON.stringify({ paused }) }),
+  ownerEmailDeliveries: (id: string) => request<{ ready: boolean; recipients?: OwnerEmailRecipient[]; deliveries: OwnerEmailDelivery[] }>(`/platform/customers/${id}/email-deliveries`),
+  prepareOwnerEmailWelcome: (id: string, ownerId?: string) => request<{ prepared: boolean }>(`/platform/customers/${id}/email-welcome`, { method: 'POST', body: JSON.stringify({ ownerId }) }),
   previewOwnerEmail: (id: string, deliveryId: string) => request<{ subject: string; html: string; text: string }>(`/platform/customers/${id}/email-deliveries/${deliveryId}/preview`),
   retryOwnerEmail: (id: string, deliveryId: string) => request<{ queued: boolean }>(`/platform/customers/${id}/email-deliveries/${deliveryId}/retry`, { method: 'POST' }),
   processOwnerEmail: (id: string, deliveryId: string) => request<{ accepted: number }>(`/platform/customers/${id}/email-deliveries/${deliveryId}/process`, { method: 'POST' }),
@@ -738,7 +740,10 @@ export type CustomerReminderDraft = {
   snapshot: string;
   preview: string;
 };
+export type OwnerEmailStatus = { state: 'OFF' | 'SETUP' | 'ACTIVE' | 'PAUSED'; activatedAt: string | null; nextSummaryAt: string | null };
+export type OwnerEmailRecipient = OwnerEmailStatus & { ownerId: string; ownerName: string; destination: string; consent: boolean; adminPaused: boolean; welcomeStatus: string | null; welcomeId: string | null; blocker: string | null };
 export type NotificationBootstrap = {
+  emailStatus?: OwnerEmailStatus;
   emailAddress?: string;
   settings: NotificationSettings;
   deliveries: NotificationDelivery[];
