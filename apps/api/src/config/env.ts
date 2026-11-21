@@ -20,7 +20,6 @@ const envSchema = z.object({
   EMAIL_CRON_SECRET: z.preprocess(value => value === "" ? undefined : value, z.string().min(32).optional()),
   EMAIL_FROM: z.string().email().default("hello@mindvector.tech"),
   EMAIL_DELIVERY_ENABLED: z.enum(["true", "false"]).default("false").transform(value => value === "true"),
-  EMAIL_ROLLOUT_ORGANIZATION_IDS: z.string().default(""),
   WHATSAPP_ACCESS_TOKEN: z.string().min(20).optional(),
   WHATSAPP_PHONE_NUMBER_ID: z.string().min(5).optional(),
   WHATSAPP_BUSINESS_ACCOUNT_ID: z.string().regex(/^\d+$/).optional(),

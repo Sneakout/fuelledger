@@ -1,5 +1,4 @@
 import { hasActiveIntelligence } from '@fuelledger/shared';
-import { env } from '../../config/env.js';
 import { prisma } from '../../lib/prisma.js';
 import { indiaDate, indiaParts } from '../../lib/india-time.js';
 import { logger } from '../../lib/logger.js';
@@ -7,20 +6,29 @@ import { drainAgentMessages } from './agent-dispatch.js';
 import { emailDeliveryReady } from './email-queue.js';
 import { notifyDailySummary, notifyOverdueCustomers, prepareEmailNotifications } from './service.js';
 
-export function enabledEmailOrganizations() {
-  return [...new Set(env.EMAIL_ROLLOUT_ORGANIZATION_IDS.split(',').map(id => id.trim()).filter(id => id && emailDeliveryReady(id)))];
+export async function enabledEmailOrganizations() {
+  if (!emailDeliveryReady()) return [];
+  const organizations = await prisma.organization.findMany({
+    where: {
+      ownerEmailPreferences: { some: { enabled: true, adminPaused: false, owner: { active: true, loginEnabled: true, role: 'OWNER' } } },
+      ownerEmailDeliveries: { some: { type: 'OWNER_WELCOME', status: 'ACCEPTED', acceptedAt: { not: null } } },
+    },
+    select: { id: true, ownerEmailPreferences: { where: { enabled: true, adminPaused: false, owner: { active: true, loginEnabled: true, role: 'OWNER' } }, select: { ownerId: true, owner: { select: { email: true } } } },
+      ownerEmailDeliveries: { where: { type: 'OWNER_WELCOME', status: 'ACCEPTED', acceptedAt: { not: null } }, select: { ownerId: true, destination: true } } },
+  });
+  return organizations.filter(organization => organization.ownerEmailPreferences.some(preference => organization.ownerEmailDeliveries.some(welcome => welcome.ownerId === preference.ownerId && welcome.destination === preference.owner.email.trim().toLowerCase()))).map(organization => organization.id);
 }
 
 /** Queue only today's due reports. Stable event identities make repeated ticks safe.
  * Catch up within the day when the scheduler is late; never replay past daily reports.
  */
 export async function scheduleOwnerEmails(now = new Date()) {
-  const ids = enabledEmailOrganizations();
+  const ids = await enabledEmailOrganizations();
   const date = indiaDate(now);
   const result = { date, checkedOrganizations: 0, prepared: 0, failed: 0 };
   if (!ids.length) return result;
   const organizations = await prisma.organization.findMany({
-    where: { id: { in: ids }, ownerEmailPreferences: { some: { enabled: true, owner: { active: true, loginEnabled: true, role: 'OWNER' } } } },
+    where: { id: { in: ids }, ownerEmailPreferences: { some: { enabled: true, adminPaused: false, owner: { active: true, loginEnabled: true, role: 'OWNER' } } } },
     select: { id: true, subscriptionActivatedAt: true, subscriptionExpiresAt: true, lifetimeAccessPaidAt: true,
       intelligenceEnabledAt: true, intelligenceExpiresAt: true, notificationSettings: { select: { dailySummaryEnabled: true, dailySummaryHour: true, overdueCustomerEnabled: true, creditReportHour: true } } },
   });
@@ -52,6 +60,7 @@ export async function scheduleOwnerEmails(now = new Date()) {
 }
 
 export async function prepareAgentEmails() {
-  const organizationIds = enabledEmailOrganizations();
+  const organizationIds = await enabledEmailOrganizations();
+  if (!organizationIds.length) return { handled: 0, deferred: 0 };
   return prepareEmailNotifications(() => drainAgentMessages({ channel: 'EMAIL', organizationIds }));
 }

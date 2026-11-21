@@ -22,7 +22,9 @@ export function allowsOwnerEmail(type: OwnerNotificationType, recordType: string
   if (type === 'DAILY_SUMMARY') return recordType === 'CORE_DAILY_SUMMARY';
   return intelligenceActive && ['LOW_STOCK', 'SHIFT_CLOSED_SUMMARY', 'PURCHASE_RECEIPT_SUMMARY', 'OVERDUE_CUSTOMER'].includes(type);
 }
-export const emailDeliveryReady = (organizationId: string) => Boolean(env.EMAIL_DELIVERY_ENABLED && env.SMTP2GO_API_KEY && env.EMAIL_ROLLOUT_ORGANIZATION_IDS.split(',').map(id => id.trim()).includes(organizationId));
+// Sending is available to every organization. Consent and an accepted welcome
+// for the exact owner/address remain mandatory at queueing and delivery time.
+export const emailDeliveryReady = (_organizationId?: string) => Boolean(env.EMAIL_DELIVERY_ENABLED && env.SMTP2GO_API_KEY);
 const owners = (organizationId: string, db: Prisma.TransactionClient) => db.user.findMany({ where: { organizationId, role: 'OWNER', active: true, loginEnabled: true, ownerEmailPreference: { is: { organizationId, enabled: true, adminPaused: false } } }, select: { id: true, email: true, name: true } });
 /** Activation is recipient-specific; an old address or another owner cannot unlock email. */
 export async function acceptedWelcome(organizationId: string, ownerId: string, destination: string, db: Prisma.TransactionClient = prisma) {
@@ -109,10 +111,9 @@ export async function drainEmailQueue(options: { organizationId?: string; delive
   const scope = { ...(options.organizationId ? { organizationId: options.organizationId } : {}), ...(options.deliveryId ? { id: options.deliveryId } : {}) };
   // An expired lease may have crossed the provider boundary; never resend automatically.
   await prisma.ownerEmailDelivery.updateMany({ where: { ...scope, status: 'PROCESSING', leaseUntil: { lt: now } }, data: { status: 'UNKNOWN', claimToken: null, leaseUntil: null, errorMessage: 'Worker interrupted. Check SMTP2GO before resending.' } });
-  const enabledOrganizations = env.EMAIL_ROLLOUT_ORGANIZATION_IDS.split(',').map(id => id.trim()).filter(Boolean);
-  if (!env.EMAIL_DELIVERY_ENABLED || !env.SMTP2GO_API_KEY || !enabledOrganizations.length || (options.organizationId && !enabledOrganizations.includes(options.organizationId))) return { checked: 0, accepted: 0 };
-  // Paused accounts must not occupy the bounded batch and starve enabled accounts.
-  const jobs = await prisma.ownerEmailDelivery.findMany({ where: { ...scope, organizationId: options.organizationId ?? { in: enabledOrganizations }, status: 'PENDING', ...(options.manualWelcome && options.deliveryId ? {} : { type: { not: 'OWNER_WELCOME' as const } }), nextAttemptAt: { lte: now } }, orderBy: { createdAt: 'asc' }, take: Math.max(1, Math.min(options.limit ?? 4, 4)) });
+  if (!emailDeliveryReady()) return { checked: 0, accepted: 0 };
+  // Keep batches bounded; each job rechecks recipient consent and support pause before sending.
+  const jobs = await prisma.ownerEmailDelivery.findMany({ where: { ...scope, status: 'PENDING', ...(options.manualWelcome && options.deliveryId ? {} : { type: { not: 'OWNER_WELCOME' as const } }), nextAttemptAt: { lte: now } }, orderBy: { createdAt: 'asc' }, take: Math.max(1, Math.min(options.limit ?? 4, 4)) });
   let accepted = 0;
   for (const job of jobs) {
     if (!emailDeliveryReady(job.organizationId)) continue;

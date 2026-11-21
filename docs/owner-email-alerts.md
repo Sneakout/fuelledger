@@ -15,10 +15,10 @@ Each email includes forest-green/lime FuelNerve branding, a plain-text alternati
 1. Apply the additive `20261120090000_owner_email_alerts` migration and deploy API/web together. Existing owners remain opted out. No stock, sales or accounting records change.
 2. In SMTP2GO, authorise `mindvector.tech` as a sender domain, install the DNS records shown by SMTP2GO and verify them. Preserve the existing Cloudflare mail-routing records. Do not invent or duplicate SPF records; use the provider's exact DNS instructions.
 3. Create an SMTP2GO API key with email-sending permission. Save it privately as server-only `SMTP2GO_API_KEY` in the deployment environment. Do not paste it into chat, source code or browser settings.
-4. Set `EMAIL_FROM=hello@mindvector.tech`, initially `EMAIL_DELIVERY_ENABLED=false`, and `EMAIL_ROLLOUT_ORGANIZATION_IDS=<internal test organization ID>`. All are server-only variables. Redeploy after configuration changes.
+4. Set `EMAIL_FROM=hello@mindvector.tech`, initially `EMAIL_DELIVERY_ENABLED=false`, with SMTP2GO configured. All are server-only variables. Redeploy after configuration changes.
 5. Configure the email-only GitHub Actions scheduler described below. It calls three bounded email endpoints with `EMAIL_CRON_SECRET`, without starting WhatsApp delivery. Four emails maximum per delivery request, with a 15-second timeout per send.
 6. In the internal owner account, enable email. In Growth Desk, open that owner → **Owner email updates** → select **Prepare welcome email**, then preview the welcome email. Check the real name, address and content.
-7. Set `EMAIL_DELIVERY_ENABLED=true`, redeploy, then use **Send this email** for the internal welcome. Confirm arrival in the actual inbox and check SMTP2GO activity. Only then expand the allowlist to opted-in owners.
+7. Set `EMAIL_DELIVERY_ENABLED=true`, redeploy, then use **Send this email** for the internal welcome. Confirm arrival in the actual inbox and check SMTP2GO activity. After verifying the internal welcome, manually welcome each opted-in owner to activate that recipient.
 
 The UI does not expose provider diagnostics to owners. Admins can inspect the selected owner's latest ten emails in Growth Desk. `ACCEPTED` means SMTP2GO accepted the request, not proof of inbox delivery. Delivery/bounce tracking currently remains in SMTP2GO; no unverified webhook claims are stored in FuelNerve.
 
@@ -29,14 +29,14 @@ The UI does not expose provider diagnostics to owners. Admins can inspect the se
 - Consent, current recipient, active fuel station, current plan and source facts are rechecked before sending. Stale/changed records are suppressed with a reason. Messages expire after 24 hours.
 - HTTP 429 rejections retry at bounded delays, up to four attempts. Explicit 4xx rejections are `FAILED`; after fixing configuration an administrator can select **Retry rejected email**. The existing job is reused and all eligibility checks run again.
 - Timeouts, 5xx, malformed success responses and expired processing leases are `UNKNOWN`. They never retry automatically because an email may have been accepted. Check SMTP2GO using the `X-FuelNerve-Delivery` reference, recipient and time. Keep uncertain messages held; do not create a replacement simply to retry.
-- Pause all application email with `EMAIL_DELIVERY_ENABLED=false` and redeploy, or remove an organization from the allowlist. Jobs and evidence remain intact. Owner opt-out and category changes suppress pending work immediately on the next processing pass.
+- Pause all application email with `EMAIL_DELIVERY_ENABLED=false` and redeploy, or pause the individual owner from Growth Desk. Jobs and evidence remain intact. Owner opt-out and category changes suppress pending work immediately on the next processing pass.
 - SMTP2GO delivery webhooks, automatic bounce suppression and a global paginated email operations inbox are future extensions; check provider activity during this limited pilot.
 
 Official provider reference: https://developers.smtp2go.com/docs/send-an-email
 
-## Automatic email pilot (20 November 2026)
+## Automatic owner email updates
 
-The email worker is independent of WhatsApp. Do **not** schedule the general `/cron/daily`, `/cron/agent-messages` or WhatsApp delivery endpoints for the email pilot. Use these email-only endpoints, in order:
+The email worker is independent of WhatsApp. Do **not** schedule the general `/cron/daily`, `/cron/agent-messages` or WhatsApp delivery endpoints for owner email updates. Use these email-only endpoints, in order:
 
 1. `GET /api/notifications/cron/email-schedule` prepares today's daily operating report for both paid plans, plus the credit report for active Intelligence subscribers. It checks India business time, owner settings and individual email consent. A delayed run catches up after the selected hour within the same day; it does not replay yesterday's summary. Stable organization/category/date identities prevent duplicate reports.
 2. `GET /api/notifications/cron/email-agent-messages` prepares stock, reconciled-shift and receipt messages through the existing agent fact builders. Its progress is stored separately from WhatsApp's progress. The additive migration marks pre-rollout agent jobs handled **for email only**; old receipts and historical records are not replayed as live events. New events older than 24 hours are skipped. No WhatsApp jobs or push notifications are created by this endpoint.
@@ -50,7 +50,7 @@ All three require `Authorization: Bearer <EMAIL_CRON_SECRET>`. This is a separat
 
 - Save `EMAIL_CRON_SECRET` privately in **Vercel Production** and as a **GitHub Actions repository secret** of the same name. GitHub receives only this limited worker credential; no SMTP2GO or database keys are needed there.
 - Apply `20261120190000_email_agent_dispatch` and deploy the API before enabling the workflow. Existing stock, sales, payments and WhatsApp dispatch progress are unchanged.
-- Keep `EMAIL_ROLLOUT_ORGANIZATION_IDS` limited to the admin test organization and `EMAIL_DELIVERY_ENABLED=true` while testing. Individual consent and category settings are always rechecked.
+- All current and future organizations are eligible without a per-account environment setting. `EMAIL_DELIVERY_ENABLED=true` and configured SMTP2GO enable sending globally; exact-recipient welcome acceptance, individual consent, support pause and category checks still control each owner.
 - Set the repository Actions variable `OWNER_EMAIL_AUTOMATION_ENABLED=true` only after deployment checks. It defaults to off when absent.
 - Run **Actions → Owner email alerts → Run workflow** once. Confirm all three stages succeed. Logs contain counts only; they do not contain recipients or email bodies. Verify actual SMTP2GO delivery, then observe a scheduled run. A failed stage makes the run fail visibly while allowing the other stages to finish. There is no immediate blind network retry.
 - The workflow has no checkout or third-party action, no repository token permissions, a seven-minute timeout, and a concurrency group that prevents overlapping runs from cancelling an in-flight send.
@@ -62,9 +62,28 @@ Run `corepack pnpm exec tsx scripts/preview-owner-emails.ts` to produce six synt
 
 ### Owner experience and support controls
 
-- Owners save consent and plan-appropriate categories without preparing a welcome. Their email card shows **off**, **being set up**, **on** or **paused** based on current consent, the exact-recipient welcome, subscription and email rollout. No provider diagnostics are exposed to the owner.
+- Owners save consent and plan-appropriate categories without preparing a welcome. Their email card shows **off**, **being set up**, **on** or **paused** based on current consent, the exact-recipient welcome, subscription and global sending readiness. No provider diagnostics are exposed to the owner.
 - **On** shows the next future daily-summary time in IST. Times are approximate because the scheduler is best effort. Source figures still distinguish collections, credit, book stock and measured stock.
 - Growth Desk shows the full owner and destination, then **Preview welcome → Send welcome & start email updates**. Successful acceptance closes the preview and refreshes the permanent status. Uncertain outcomes never offer a blind resend.
 - Support can pause/resume each owner's email updates without deleting consent or the accepted welcome. Resuming does not bypass subscription or rollout checks. New recipients require their own welcome.
 - Activation skips old shift and receipt events and starts scheduled reports at the next scheduled time. Existing pre-activation jobs are suppressed, preserving history rather than replaying a backlog.
 - Apply migration `20261121023000_owner_email_pause` before deploying the support pause controls. It only adds an administrative pause flag; it does not change existing consent or operational records.
+
+### All-account eligibility (21 November 2026)
+
+The former `EMAIL_ROLLOUT_ORGANIZATION_IDS` pilot list is no longer used. An old
+value remaining in Vercel has no effect; it may be removed. No migration or
+per-customer configuration is required. Deploy API and web together.
+
+1. The owner saves consent and preferences.
+2. An administrator previews and sends the welcome from Growth Desk.
+3. Only provider acceptance for that exact organization, owner and destination
+   unlocks automated reports. Preparing a welcome does not activate anything.
+4. Scheduled discovery includes newly eligible owners automatically. Changed
+   email addresses require a new welcome. Withdrawn consent and support pause
+   stop sending; subscriptions and source facts are rechecked before delivery.
+
+The automatic worker never sends welcome emails and does not replay old shifts
+or receipts at activation. Global `EMAIL_DELIVERY_ENABLED=false` remains the
+emergency sending switch. WhatsApp rollout is unchanged. This release does not
+send a welcome to anyone automatically.
