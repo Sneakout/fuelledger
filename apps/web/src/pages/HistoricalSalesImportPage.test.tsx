@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HistoricalSalesImportPage } from './HistoricalSalesImportPage';
+import { readManualHistoricalDraft } from '../lib/manual-historical-draft';
 import { latestHistoricalDraft, saveHistoricalDraft } from '../lib/historical-draft-store';
 
 const { MockApiRequestError, correctHistoricalSalesImport, createHistoricalSalesImport, extractHistoricalSales, historicalSalesImport, historicalSalesImports, validateHistoricalSales, validateHistoricalSalesCorrection } = vi.hoisted(() => ({
@@ -32,6 +33,7 @@ vi.mock('../lib/api', () => ({
 
 describe('HistoricalSalesImportPage', () => {
   beforeEach(async () => {
+    localStorage.clear();
     await new Promise<void>((resolve, reject) => {
       const operation = indexedDB.deleteDatabase('fuelnerve-historical-drafts-v1');
       operation.onsuccess = () => resolve();
@@ -387,6 +389,76 @@ describe('HistoricalSalesImportPage', () => {
     expect(await screen.findByRole('dialog',{name:'Review register changes'})).toHaveTextContent(`Updating ${replace ? 1 : 0} existing day`);
     expect(correctHistoricalSalesImport).not.toHaveBeenCalled();
     historicalSalesImports.mockResolvedValue({imports:[]});
+  });
+
+  it('autosaves manual readings without a source and restores them after leaving the page', async () => {
+    historicalSalesImports.mockResolvedValue({imports:[]});
+    let view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button',{name:/Enter manually/}));
+    const stock = await screen.findByLabelText(/HSD-1 stock/);
+    const date = stock.getAttribute('aria-label')!.slice(-10);
+    fireEvent.change(stock,{target:{value:'8123.456'}});
+    fireEvent.change(screen.getByLabelText(`D-1/HSD-1 meter ${date}`),{target:{value:'15123.789'}});
+    expect(readManualHistoricalDraft('station-1','product-1',date.slice(0,7))?.rows[0]?.tankReadings[0]?.openingStock).toBe(8123.456);
+    view.unmount();
+    view = render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    expect(await screen.findByLabelText(`D-1/HSD-1 meter ${date}`)).toHaveValue(15123.789);
+    expect(screen.getByLabelText(`HSD-1 stock ${date}`)).toHaveValue(8123.456);
+    expect(createHistoricalSalesImport).not.toHaveBeenCalled();
+    expect(correctHistoricalSalesImport).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole('option',{name:/MS ·/}).parentElement!,{target:{value:'product-2'}});
+    await waitFor(() => expect(screen.queryByLabelText(`HSD-1 stock ${date}`)).not.toBeInTheDocument());
+    fireEvent.change(screen.getByRole('option',{name:/HSD ·/}).parentElement!,{target:{value:'product-1'}});
+    expect(await screen.findByLabelText(`HSD-1 stock ${date}`)).toHaveValue(8123.456);
+  });
+  it('restores unsubmitted continuation and correction reason, retains version and clears only after successful save', async () => {
+    const row = {date:'2026-11-01',tankReadings:[{tankId:'tank-1',openingStock:8000}],receiptQuantity:0,nozzleReadings:[{nozzleId:'nozzle-1',meterReading:1000}],testingQuantity:0,salesQuantity:0,sellingPrice:94};
+    const record = {id:'manual-saved',stationId:'station-1',productId:'product-1',month:'2026-11',monthStart:'2026-10-31T18:30:00Z',sourceFileName:'saved.pdf',cutoverApplied:false,createdAt:'2026-11-15T10:00:00Z',updatedAt:'2026-11-15T10:00:00Z',product:{code:'HSD',name:'Diesel'},importedBy:{name:'Owner'},corrections:[],rows:[row]};
+    historicalSalesImports.mockResolvedValue({imports:[{...record,_count:{corrections:0}}]}); historicalSalesImport.mockResolvedValue({record});
+    let view = render(<MemoryRouter initialEntries={['/?month=2026-11']}><HistoricalSalesImportPage/></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button',{name:/Add missing days/}));
+    fireEvent.change(await screen.findByLabelText('HSD-1 stock 2026-11-02'),{target:{value:'7900'}});
+    fireEvent.change(screen.getByLabelText('D-1/HSD-1 meter 2026-11-02'),{target:{value:'1100'}});
+    fireEvent.click(screen.getByRole('button',{name:'Edit 2026-11-01'}));
+    fireEvent.change(screen.getByLabelText('RSP 2026-11-01'),{target:{value:'95'}});
+    fireEvent.change(screen.getByPlaceholderText('What was corrected, and why?'),{target:{value:'Corrected RSP from DSR'}});
+    view.unmount();
+    view = render(<MemoryRouter initialEntries={['/?month=2026-11']}><HistoricalSalesImportPage/></MemoryRouter>);
+    expect(await screen.findByLabelText('D-1/HSD-1 meter 2026-11-02')).toHaveValue(1100);
+    expect(screen.getByPlaceholderText('What was corrected, and why?')).toHaveValue('Corrected RSP from DSR');
+    correctHistoricalSalesImport.mockRejectedValueOnce(new MockApiRequestError('Temporarily unavailable','OFFLINE'));
+    fireEvent.click(screen.getByRole('button',{name:'Review & save days'}));
+    fireEvent.click(await screen.findByRole('button',{name:'Confirm changes'}));
+    await screen.findByText('Temporarily unavailable');
+    expect(readManualHistoricalDraft('station-1','product-1','2026-11')?.baseRegister?.updatedAt).toBe(record.updatedAt);
+    correctHistoricalSalesImport.mockResolvedValueOnce({record:{...record,corrections:[],rows:[row]},issues:[]});
+    fireEvent.click(screen.getByRole('button',{name:'Review & save days'}));
+    if (screen.queryByRole('button',{name:'Confirm changes'})) fireEvent.click(screen.getByRole('button',{name:'Confirm changes'}));
+    await waitFor(() => expect(readManualHistoricalDraft('station-1','product-1','2026-11')).toBeNull());
+    expect(correctHistoricalSalesImport).toHaveBeenCalledWith(record.id,expect.objectContaining({expectedUpdatedAt:record.updatedAt,reason:'Corrected RSP from DSR',mode:'CORRECT'}));
+    historicalSalesImports.mockResolvedValue({imports:[]});
+  });
+
+  it('discards only the local manual draft and warns clearly if browser saving fails', async () => {
+    historicalSalesImports.mockResolvedValue({imports:[]});
+    render(<MemoryRouter><HistoricalSalesImportPage/></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button',{name:/Enter manually/}));
+    const stock = await screen.findByLabelText(/HSD-1 stock/);
+    const date = stock.getAttribute('aria-label')!.slice(-10);
+    const failSave = vi.spyOn(Storage.prototype,'setItem').mockImplementation(() => {throw new Error('Quota exceeded');});
+    fireEvent.change(stock,{target:{value:'8765'}});
+    expect(await screen.findByText(/Browser autosave is unavailable/)).toBeInTheDocument();
+    expect(stock).toHaveValue(8765);
+    failSave.mockRestore();
+    fireEvent.change(stock,{target:{value:'8766'}});
+    expect(readManualHistoricalDraft('station-1','product-1',date.slice(0,7))).not.toBeNull();
+    const confirm = vi.spyOn(window,'confirm').mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button',{name:'Discard draft'}));
+    await waitFor(() => expect(screen.queryByLabelText(/HSD-1 stock/)).not.toBeInTheDocument());
+    expect(readManualHistoricalDraft('station-1','product-1',date.slice(0,7))).toBeNull();
+    expect(createHistoricalSalesImport).not.toHaveBeenCalled();
+    expect(correctHistoricalSalesImport).not.toHaveBeenCalled();
+    confirm.mockRestore();
   });
 
 });

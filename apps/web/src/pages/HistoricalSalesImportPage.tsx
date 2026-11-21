@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, FileUp, LoaderCircle, Pencil, P
 import { Link, useLocation } from 'react-router-dom';
 import { hasFollowingMorning, historicalSalesChanges, calculateHistoricalNozzleSales, calculateHistoricalSalesValue, calculateHistoricalStockGainLoss, calculateHistoricalTotalStock, compareDipWithOcrVolume, type HistoricalSalesImportInput, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { api, ApiRequestError, historicalSalesSourceUrl, type HistoricalImportIssue, type HistoricalSalesImportDetail, type HistoricalSalesImportSummary, type HistoricalSalesSetup } from '../lib/api';
+import { readManualHistoricalDraft, saveManualHistoricalDraft, deleteManualHistoricalDraft, manualHistoricalDraftKey } from '../lib/manual-historical-draft';
 import { useStation } from '../components/StationProvider';
 import { deleteHistoricalDraft, deleteHistoricalDraftsForImport, draftFile, historicalDraftById, historicalDraftId, historicalDraftScope, latestHistoricalDraft, saveHistoricalDraft, type HistoricalOcrDraft } from '../lib/historical-draft-store';
 
@@ -164,6 +165,8 @@ export function HistoricalSalesImportPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const draftAutosaveTimer = useRef<number | null>(null);
   const skipNextDraftAutosave = useRef(false);
+  const manualScope = useRef('');
+  const skipManualSave = useRef(false);
   const submissionConfirmationRef = useRef<HTMLDivElement>(null);
   const { stations, selectedStationId, selectStation } = useStation();
   const today = new Date();
@@ -241,10 +244,39 @@ export function HistoricalSalesImportPage() {
     const submittedMonths = imports.filter(item => item.product.code === selected.product.code).map(item => item.month);
     void Promise.all(submittedMonths.map(importedMonth => deleteHistoricalDraftsForImport(stationId, productId, importedMonth)))
       .then(() => latestHistoricalDraft(stationId, productId, linkedMonth))
-      .then(draft => { if (active && restoredDraftScope.current === scope && draft) restoreDraft(draft, 'Saved OCR draft restored from this browser.'); })
+      .then(draft => { if (active && restoredDraftScope.current === scope && draft && !readManualHistoricalDraft(stationId, productId, month)) restoreDraft(draft, 'Saved OCR draft restored from this browser.'); })
       .catch(() => undefined);
     return () => { active = false; };
   }, [selected, stationId, productId, imports, importsLoaded, linkedMonth]);
+  useEffect(() => {
+    if (!selected || !importsLoaded || !stationId || !productId) return;
+    const scope = manualHistoricalDraftKey(stationId, productId, month);
+    if (manualScope.current === scope) return;
+    manualScope.current = scope;
+    skipManualSave.current = true;
+    try {
+      const draft = readManualHistoricalDraft(stationId, productId, month);
+      if (!draft) { setEditingImport(null); setContinuingRegister(false); setEditableSavedDates([]); setCorrectionReason(''); return; }
+      // Keep the original version: the server will reject a stale correction
+      // instead of silently rebasing unfinished user edits over newer records.
+      setEditingImport(draft.baseRegister); setContinuingRegister(draft.continuingRegister);
+      setEditableSavedDates(draft.editableSavedDates); setCorrectionReason(draft.correctionReason);
+      setRows(calculateDraftRows(draft.rows, draft.uncertainCells).rows); setUncertainCells(draft.uncertainCells);
+      setFile(null); setIssues([]); setSubmittedImport(null); setApplyCutover(false);
+      setPeriodNeedsConfirmation(false); setPeriodConfirmed(true);
+      setDraftStatus('Unsubmitted entries restored from this browser. Review your readings before saving.');
+    } catch { setDraftStatus('Browser autosave is unavailable. Keep this page open until you finish.'); }
+  }, [selected, importsLoaded, stationId, productId, month]);
+  useEffect(() => {
+    if (skipManualSave.current) { skipManualSave.current = false; return; }
+    if (!selected || !importsLoaded || file || busy || !rows.length || submittedImport ||
+      manualScope.current !== manualHistoricalDraftKey(stationId, productId, month)) return;
+    if (editingImport && !registerChanges.added.length && !registerChanges.updated.length && !registerChanges.removed.length) return;
+    try {
+      saveManualHistoricalDraft({stationId, productId, month, rows, uncertainCells, continuingRegister, editableSavedDates, correctionReason, baseRegister: editingImport, updatedAt: new Date().toISOString()});
+      setDraftStatus(`Draft saved in this browser at ${new Date().toLocaleTimeString('en-IN', {hour:'2-digit',minute:'2-digit'})}. Nothing has been submitted.`);
+    } catch { setDraftStatus('Browser autosave is unavailable. Keep this page open until you finish.'); }
+  }, [rows, uncertainCells, continuingRegister, editableSavedDates, correctionReason, editingImport, stationId, productId, month, file, busy, importsLoaded, selected, submittedImport]);
   useEffect(() => {
     if (!rows.length) return;
     const calculated = calculateDraftRows(rows, uncertainCells);
@@ -295,6 +327,7 @@ export function HistoricalSalesImportPage() {
   }, [issues, rows]);
   const changeRow = (index: number, change: (row: HistoricalSalesRowInput) => void) => setRows(previous => calculateDraftRows(previous.map((row, rowIndex) => { if (rowIndex !== index) return row; const next = structuredClone(row); change(next); return next; }), uncertainCells).rows);
   function removeMorning(index: number) {
+    if (rows.length === 1) clearManualDraft();
     const date = rows[index]!.date;
     const remainingUncertain = uncertainCells.filter(cell => !cell.startsWith(`${date}:`));
     setUncertainCells(remainingUncertain);
@@ -392,7 +425,9 @@ export function HistoricalSalesImportPage() {
     setFile(draftFile(draft)); setSourceFingerprint(draft.sourceFingerprint); setDraftId(draft.id); setRows(calculated.rows); setExtractionWarnings(draft.extractionWarnings); setLayoutIssues(draft.layoutIssues); setUncertainCells(calculated.uncertainCells); setPeriodNeedsConfirmation(draft.periodNeedsConfirmation); setPeriodConfirmed(draft.periodConfirmed); setPeriodSource(draft.periodSource); setReaderStatus(draft.readerStatus); setApplyCutover(draft.applyCutover); setDraftStatus(message); setError('');
   }
   async function refreshDraftCalculations() {
-    if (!selected || !file || !draftId || !sourceFingerprint) return;
+    if (!selected) return;
+    if (!file) { setRows(calculateDraftRows(rows, uncertainCells).rows); setDraftStatus('Calculations refreshed. Your entries are saved in this browser; nothing has been submitted.'); return; }
+    if (!draftId || !sourceFingerprint) return;
     if (draftAutosaveTimer.current !== null) { window.clearTimeout(draftAutosaveTimer.current); draftAutosaveTimer.current = null; }
     setDraftStatus('Refreshing all calculated values…');
     const nextRows = structuredClone(rows);
@@ -456,7 +491,9 @@ export function HistoricalSalesImportPage() {
     setRows(calculateDraftRows(nextRows, nextUncertainCells).rows);
   }
   async function discardDraft() {
-    if (!window.confirm('Discard this saved OCR draft and all manual corrections from this browser?')) return;
+    if (!window.confirm('Discard these unsubmitted entries from this browser? Saved registers will not be changed.')) return;
+    clearManualDraft();
+    if (editingImport) { cancelCorrection(); return; }
     const id = draftId; setDraftId(''); setSourceFingerprint(''); setFile(null); setExtractionWarnings([]); setLayoutIssues([]); setUncertainCells([]); setPeriodNeedsConfirmation(false); setPeriodConfirmed(false); setReaderStatus(''); setDraftStatus('Draft removed from this browser.'); setRows([]);
     if (id) await deleteHistoricalDraft(id).catch(() => undefined);
   }
@@ -523,6 +560,7 @@ export function HistoricalSalesImportPage() {
     setBusy(true); setError('');
     try {
       const { record } = await api.historicalSalesImport(id);
+      manualScope.current = manualHistoricalDraftKey(record.stationId, record.productId, record.month);
       documentPeriodSync.current = true;
       restoredDraftScope.current = historicalDraftScope(record.stationId, record.productId);
       setEditingImport(record); setSubmittedImport(null); setCorrectionReason(''); setStationId(record.stationId); setProductId(record.productId); setMonth(record.month);
@@ -532,7 +570,11 @@ export function HistoricalSalesImportPage() {
     } catch (caught) { setError(caught instanceof ApiRequestError ? caught.message : 'Unable to open this submitted register.'); }
     finally { setBusy(false); }
   }
+  function clearManualDraft() {
+    try { deleteManualHistoricalDraft(stationId, productId, month); } catch { /* An unavailable browser store must not prevent a server save. */ }
+  }
   function cancelCorrection() {
+    clearManualDraft();
     setContinuingRegister(false); setEditableSavedDates([]); setConfirmRegisterSave(false);
     setEditingImport(null); setCorrectionReason(''); setRows([]); setIssues([]); setUncertainCells([]); setError(''); setDraftStatus('');
   }
@@ -561,7 +603,7 @@ export function HistoricalSalesImportPage() {
       if (result.effectiveMonth !== month) { documentPeriodSync.current = true; setMonth(result.effectiveMonth); }
       const extractedRows = selected ? applyKnownSellingPrices(result.rows, selected.product) : result.rows;
       const calculated = calculateDraftRows(extractedRows, result.uncertainCells);
-      if (calculated.rows.length) setRows(calculated.rows);
+      if (calculated.rows.length) { clearManualDraft(); setRows(calculated.rows); }
       setExtractionWarnings(result.warnings);
       setLayoutIssues(result.layoutIssues);
       setUncertainCells(calculated.uncertainCells);
@@ -574,7 +616,7 @@ export function HistoricalSalesImportPage() {
     } finally { setBusy(false); }
   }
   async function validate() { setBusy(true); setError(''); try { const result = editingImport ? await api.validateHistoricalSalesCorrection(editingImport.id, correctionPayload()) : await api.validateHistoricalSales(await payload()); setIssues(result.issues); if (result.issues.length) revealValidationIssues(result.issues); } catch (caught) { if (!revealRequestIssues(caught)) setError(caught instanceof Error ? caught.message : 'Unable to validate this register.'); } finally { setBusy(false); } }
-  async function save() { if (layoutIssues.length) { setError('Correct the fuel-station equipment layout or selected period and read the DSR again before confirming.'); return; } if (periodNeedsConfirmation && !periodConfirmed) { setError('Confirm the DSR month and year before importing.'); return; } if (uncertainCells.length) { setError(continuingRegister ? `Enter the ${uncertainCells.length} highlighted readings before saving.` : `Review the ${uncertainCells.length} highlighted unreadable value${uncertainCells.length === 1 ? '' : 's'} before confirming.`); return; } if (pendingCalibrationReviews.length) { setError('Verify every highlighted dip/volume difference before importing.'); return; } if (continuingRegister && !confirmRegisterSave) { setConfirmRegisterSave(true); requestAnimationFrame(() => document.getElementById('confirm-register-title')?.scrollIntoView?.({ block: 'center' })); return; } setBusy(true); setError(''); try { if (!editingImport && await checkExistingDays(rows)) return; if (editingImport) { const result = await api.correctHistoricalSalesImport(editingImport.id, correctionPayload()); setEditingImport(result.record); setRows(result.record.rows); setIssues(result.issues); setCorrectionReason(''); setImports(previous => previous.map(item => item.id === result.record.id ? { ...item, updatedAt: result.record.updatedAt, _count: { corrections: result.record.corrections.length } } : item)); if (continuingRegister) { await deleteHistoricalDraftsForImport(stationId, productId, result.record.month).catch(() => undefined); setSubmittedImport(result.record); setEditingImport(null); setContinuingRegister(false); setRows([]); setUncertainCells([]); setConfirmRegisterSave(false); setDraftStatus(''); } else setDraftStatus('Corrections saved. All calculated fields were refreshed; live tank and nozzle balances were not changed.'); } else { const result = await api.createHistoricalSalesImport(await payload()); setImports(previous => [result.record, ...previous.filter(item => item.id !== result.record.id)]); await deleteHistoricalDraftsForImport(stationId, productId, result.record.month).catch(() => undefined); if (fileInputRef.current) fileInputRef.current.value = ''; setSubmittedImport(result.record); setRows([]); setIssues([]); setExtractionWarnings([]); setLayoutIssues([]); setUncertainCells([]); setPeriodNeedsConfirmation(false); setPeriodConfirmed(false); setReaderStatus(''); setDraftId(''); setSourceFingerprint(''); setDraftStatus(''); setFile(null); setApplyCutover(false); } } catch (caught) { if (!revealRequestIssues(caught)) setError(caught instanceof ApiRequestError ? caught.message : caught instanceof Error ? caught.message : editingImport ? 'Unable to save these corrections.' : 'Unable to import this register.'); } finally { setBusy(false); } }
+  async function save() { if (layoutIssues.length) { setError('Correct the fuel-station equipment layout or selected period and read the DSR again before confirming.'); return; } if (periodNeedsConfirmation && !periodConfirmed) { setError('Confirm the DSR month and year before importing.'); return; } if (uncertainCells.length) { setError(continuingRegister ? `Enter the ${uncertainCells.length} highlighted readings before saving.` : `Review the ${uncertainCells.length} highlighted unreadable value${uncertainCells.length === 1 ? '' : 's'} before confirming.`); return; } if (pendingCalibrationReviews.length) { setError('Verify every highlighted dip/volume difference before importing.'); return; } if (continuingRegister && !confirmRegisterSave) { setConfirmRegisterSave(true); requestAnimationFrame(() => document.getElementById('confirm-register-title')?.scrollIntoView?.({ block: 'center' })); return; } setBusy(true); setError(''); try { if (!editingImport && await checkExistingDays(rows)) return; if (editingImport) { const result = await api.correctHistoricalSalesImport(editingImport.id, correctionPayload()); clearManualDraft(); setEditingImport(result.record); setRows(result.record.rows); setIssues(result.issues); setCorrectionReason(''); setImports(previous => previous.map(item => item.id === result.record.id ? { ...item, updatedAt: result.record.updatedAt, _count: { corrections: result.record.corrections.length } } : item)); if (continuingRegister) { await deleteHistoricalDraftsForImport(stationId, productId, result.record.month).catch(() => undefined); setSubmittedImport(result.record); setEditingImport(null); setContinuingRegister(false); setRows([]); setUncertainCells([]); setConfirmRegisterSave(false); setDraftStatus(''); } else setDraftStatus('Corrections saved. All calculated fields were refreshed; live tank and nozzle balances were not changed.'); } else { const result = await api.createHistoricalSalesImport(await payload()); clearManualDraft(); setImports(previous => [result.record, ...previous.filter(item => item.id !== result.record.id)]); await deleteHistoricalDraftsForImport(stationId, productId, result.record.month).catch(() => undefined); if (fileInputRef.current) fileInputRef.current.value = ''; setSubmittedImport(result.record); setRows([]); setIssues([]); setExtractionWarnings([]); setLayoutIssues([]); setUncertainCells([]); setPeriodNeedsConfirmation(false); setPeriodConfirmed(false); setReaderStatus(''); setDraftId(''); setSourceFingerprint(''); setDraftStatus(''); setFile(null); setApplyCutover(false); } } catch (caught) { if (!revealRequestIssues(caught)) setError(caught instanceof ApiRequestError ? caught.message : caught instanceof Error ? caught.message : editingImport ? 'Unable to save these corrections.' : 'Unable to import this register.'); } finally { setBusy(false); } }
   return <main className="page historical-import-page">
     {existingDayPrompt && <section className="historical-existing-notice" role="dialog" aria-modal="false" aria-labelledby="existing-dsr-title">
       <span className="eyebrow">Saved DSR found</span><h2 id="existing-dsr-title">Review matching dates</h2>
@@ -596,7 +638,7 @@ export function HistoricalSalesImportPage() {
     {uncertainCells.length > 0 && <div className="historical-reader-warnings"><AlertTriangle/><span><b>{uncertainCells.length} {continuingRegister ? `reading${uncertainCells.length === 1 ? '' : 's'} to enter` : `unreadable value${uncertainCells.length === 1 ? '' : 's'} need review`}</b><small>FuelNerve has not assumed these readings are zero. Enter each highlighted value before confirming.</small></span></div>}
     {pendingCalibrationReviews.length > 0 && <div className="historical-reader-warnings calibration-review"><AlertTriangle/><span><b>{pendingCalibrationReviews.length} dip/volume difference{pendingCalibrationReviews.length === 1 ? '' : 's'} need verification</b><small>The official 20 KL UG calibration value is being used. Compare each highlighted item with the physical DSR and confirm it in the grid.</small></span></div>}
     {periodNeedsConfirmation && <div className="historical-period-confirm"><div className="historical-period-choice"><span>Actual DSR month and year</span><div className="historical-period-fields"><label><span>Month</span><select aria-label="Actual DSR month" value={month.slice(5, 7)} onChange={event => changePeriod(`${month.slice(0, 4)}-${event.target.value}`, true)}>{dsrMonths.map((name, index) => <option key={name} value={String(index + 1).padStart(2, '0')}>{name}</option>)}</select></label><label><span>Year</span><select aria-label="Actual DSR year" value={month.slice(0, 4)} onChange={event => changePeriod(`${event.target.value}-${month.slice(5, 7)}`, true)}>{dsrYears.map(year => <option key={year} value={year}>{year}</option>)}</select></label></div><small>Use the period written on the physical document. Changing it keeps the OCR values and moves every draft row to the chosen month.</small></div><label className="historical-period-ack"><input type="checkbox" checked={periodConfirmed} onChange={event => setPeriodConfirmed(event.target.checked)}/><span><b>Confirm DSR period: {month}</b><small>{periodSource === 'DOCUMENT' ? 'Nerve Intelligence suggested this month and year from the physical DSR. Correct it above if OCR was inaccurate, then confirm.' : 'This period was selected manually. Check it against the physical DSR before confirming.'}</small></span></label></div>}
-    {file && rows.length > 0 && !busy && <div className="historical-draft-toolbar"><span><b>Browser draft</b><small>{draftStatus || 'Your OCR draft will save automatically in this browser. Nothing is submitted until you confirm the import.'}</small></span><div><button className="secondary small" type="button" onClick={() => void refreshDraftCalculations()}><RefreshCw/> Refresh calculations &amp; save draft</button><button className="secondary small" type="button" onClick={() => void attachRegister(file, { forceOcr: true })}><Sparkles/> Read source again</button><button className="secondary small danger" type="button" onClick={() => void discardDraft()}><Trash2/> Discard draft</button></div></div>}
+    {rows.length > 0 && !busy && (!editingImport || registerChanges.added.length > 0 || replacingSaved) && <div className="historical-draft-toolbar"><span><b>Browser draft</b><small>{draftStatus || 'Your entries save automatically in this browser. Nothing is submitted until you confirm the import.'}</small></span><div><button className="secondary small" type="button" onClick={() => void refreshDraftCalculations()}><RefreshCw/> Refresh calculations &amp; save draft</button>{file && <button className="secondary small" type="button" onClick={() => void attachRegister(file, { forceOcr: true })}><Sparkles/> Read source again</button>}<button className="secondary small danger" type="button" onClick={() => void discardDraft()}><Trash2/> Discard draft</button></div></div>}
     <div className="historical-safety"><CheckCircle2/><span><b>Historical only.</b> These rows power sales graphs and intelligence. They do not create cash, tax, customer or supplier entries.</span></div>
     {error && <div className="form-error">{error}</div>}
     {selected && rows.length === 0 && !busy && !submittedImport && <section className="historical-grid-empty"><FileUp/><div><span className="eyebrow">No draft yet</span><h2>Attach a DSR to begin</h2><p>Nerve Intelligence will create the review grid from the source. Nothing is copied from current tank or nozzle balances.</p></div><span className="historical-empty-actions"><button className="historical-attach-action" type="button" onClick={() => fileInputRef.current?.click()}><FileUp/> Attach DSR</button><button className="secondary" type="button" onClick={() => void enterManualData()}><Plus/> {imports.some(record => record.month === month && record.product.code === selected?.product.code) ? 'Add missing days' : 'Enter manually'}</button></span></section>}
