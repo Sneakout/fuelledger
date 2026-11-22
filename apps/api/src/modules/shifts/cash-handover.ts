@@ -23,6 +23,11 @@ export function cashHandoverSnapshot(
   const actual = amount(input.openingCash, 'actual opening cash');
   const added = amount(handover?.added ?? 0, 'cash added');
   const removed = amount(handover?.removed ?? 0, 'cash removed');
+  const hasBreakdown = handover?.bankDeposited !== undefined || handover?.otherWithdrawals !== undefined;
+  const bankDeposited = hasBreakdown ? amount(handover?.bankDeposited ?? 0, 'cash deposited in bank') : null;
+  const otherWithdrawals = hasBreakdown ? amount(handover?.otherWithdrawals ?? 0, 'other cash withdrawals') : null;
+  if (hasBreakdown && !bankDeposited!.add(otherWithdrawals!).equals(removed))
+    throw new AppError(400, 'CASH_HANDOVER_INVALID', 'Total cash removed must match bank deposits plus other withdrawals.');
   const expected = prior === null ? null : prior.add(added).minus(removed);
   if (expected?.isNegative()) throw new AppError(400, 'CASH_HANDOVER_INVALID', 'Cash removed cannot exceed previous closing cash plus cash added.');
   const difference = expected === null ? null : actual.minus(expected);
@@ -34,6 +39,7 @@ export function cashHandoverSnapshot(
     previousShiftId: previous?.id ?? null,
     previousClosingCash: prior?.toFixed(2) ?? null,
     added: added.toFixed(2), removed: removed.toFixed(2),
+    bankDeposited: bankDeposited?.toFixed(2) ?? null, otherWithdrawals: otherWithdrawals?.toFixed(2) ?? null,
     expectedOpening: expected?.toFixed(2) ?? null,
     actualOpening: actual.toFixed(2), difference: difference?.toFixed(2) ?? null,
     reason, enteredById, recordedAt: recordedAt.toISOString(),

@@ -1,3 +1,4 @@
+import { historicalTankReceipts } from './historical-receipts.js';
 import { Prisma } from '@prisma/client';
 import { AppError } from '../../lib/errors.js';
 import { shiftAtInstant, shiftContains } from '../../lib/shift-interval.js';
@@ -40,10 +41,12 @@ const pageSize = 20;
 export async function tankReceiptHistory(organizationId: string, stationId: string, before?: string) {
   return prisma.$transaction(async tx => {
     const scope = { organizationId, stationId, tankId: { not: null }, type: 'RECEIPT' as const };
-    const cursor = before ? await tx.inventoryLedger.findFirst({
+    const historical = await historicalTankReceipts(tx, organizationId, stationId);
+    const dsrCursor = historical.find(row => row.id === before);
+    const cursor = dsrCursor ?? (before ? await tx.inventoryLedger.findFirst({
       where: { ...scope, id: before },
       select: { id: true, occurredAt: true },
-    }) : null;
+    }) : null);
     if (before && !cursor) throw new AppError(404, 'RECEIPT_CURSOR_INVALID', 'Refresh the receipt history to continue.');
 
     const batch = await tx.inventoryLedger.findMany({
@@ -63,10 +66,15 @@ export async function tankReceiptHistory(organizationId: string, stationId: stri
         receiptLine: { select: { receipt: { select: receiptDetails } } },
       },
     });
-    const rows = batch.slice(0, pageSize);
+    const rows = batch;
+    const merge = <T extends { id: string; occurredAt: Date }>(posted: T[]) => {
+      const combined = [...posted, ...historical.filter(row => !cursor || row.occurredAt < cursor.occurredAt || (row.occurredAt.getTime() === cursor.occurredAt.getTime() && row.id < cursor.id))]
+        .sort((a,b) => b.occurredAt.getTime()-a.occurredAt.getTime() || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+      return { receipts: combined.slice(0,pageSize), nextCursor: combined.length > pageSize ? combined[pageSize-1]!.id : null };
+    };
     const newest = rows[0]?.occurredAt;
     const oldest = rows.at(-1)?.occurredAt;
-    if (!oldest || !newest) return { receipts: [], nextCursor: null };
+    if (!oldest || !newest) return merge([]);
 
     const station = { stationId, station: { organizationId } };
     const shiftFields = {
@@ -104,9 +112,7 @@ export async function tankReceiptHistory(organizationId: string, stationId: stri
     ]);
 
     const previousShifts = new Map(earlierAssignments);
-    return {
-      nextCursor: batch.length > pageSize ? rows.at(-1)!.id : null,
-      receipts: rows.map(movement => {
+    return merge(rows.map(movement => {
         const at = movement.occurredAt;
         const containing = intervals.filter(shift => shiftContains(shift, at));
         const during = containing[0];
@@ -132,7 +138,6 @@ export async function tankReceiptHistory(organizationId: string, stationId: stri
           receiptScopeMismatch: !validReceipt,
           timingMismatch: Boolean(receipt && receipt.receivedAt.getTime() !== at.getTime()),
         };
-      }),
-    };
+      }));
   }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 }

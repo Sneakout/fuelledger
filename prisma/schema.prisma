@@ -1635,7 +1635,7 @@ model OwnerEmailPreference {
 model DemoFollowUpEmail {
   id String @id @default(cuid())
   destination String @unique
-  demoSessionId String @map("demo_session_id")
+  demoSessionId String? @map("demo_session_id")
   templateVersion String @map("template_version")
   subject String
   html String

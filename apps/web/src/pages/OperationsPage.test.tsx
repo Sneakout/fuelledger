@@ -27,8 +27,9 @@ it('carries cash forward, explains withdrawals and preserves the actual count on
   render(<MemoryRouter><OperationsPage /></MemoryRouter>);
   const counted = await screen.findByRole('spinbutton', { name: 'Physical cash at start (₹)' });
   expect(counted).toHaveValue(1000.25);
-  fireEvent.click(screen.getByText('Cash added, removed or handed over (if applicable)'));
-  fireEvent.change(screen.getByRole('spinbutton', { name: 'Cash removed between shifts (₹)' }), { target: { value: '800' } });
+  fireEvent.click(screen.getByText('Cash added, bank deposits or other withdrawals (if applicable)'));
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'Cash handed to owner / other withdrawals (₹)' }), { target: { value: '600' } });
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'Cash deposited in bank between shifts (₹)' }), { target: { value: '200' } });
   fireEvent.change(counted, { target: { value: '200.25' } });
   fireEvent.click(screen.getByRole('button', { name: /^Open shift$/ }));
   expect(await screen.findByText('Add a cash handover reason before opening this shift.')).toBeInTheDocument();
@@ -37,11 +38,12 @@ it('carries cash forward, explains withdrawals and preserves the actual count on
   fireEvent.click(screen.getByRole('button', { name: 'Refresh cash' }));
   expect(await screen.findByText(/Previous closing cash refreshed/)).toBeInTheDocument();
   expect(counted).toHaveValue(200.25);
-  expect(screen.getByRole('spinbutton', { name: 'Cash removed between shifts (₹)' })).toHaveValue(800);
+  expect(screen.getByRole('spinbutton', { name: 'Cash handed to owner / other withdrawals (₹)' })).toHaveValue(600);
+  expect(screen.getByRole('spinbutton', { name: 'Cash deposited in bank between shifts (₹)' })).toHaveValue(200);
   fireEvent.click(screen.getByRole('button', { name: /^Open shift$/ }));
   await screen.findByText('Opening cash handover');
   expect(openShift).toHaveBeenCalledWith(expect.objectContaining({ openingCash: 200.25, cashHandover: {
-    previousShiftId: 'prior', previousClosingCash: 1200.25, added: 0, removed: 800, reason: 'Cash handed to owner',
+    previousShiftId: 'prior', previousClosingCash: 1200.25, added: 0, removed: 800, bankDeposited: 200, otherWithdrawals: 600, reason: 'Cash handed to owner',
   } }));
 });
 
@@ -101,7 +103,7 @@ it('explains why a fresh opening estimate can differ from book stock and links t
   expect(ms).toHaveValue(1000);
 
   fireEvent.click(screen.getByRole('button', { name: 'Review tank receipt history' }));
-  expect(await screen.findByText('No posted tank receipts for this fuel station.')).toBeInTheDocument();
+  expect(await screen.findByText('No purchase or confirmed DSR tank receipts for this fuel station.')).toBeInTheDocument();
 });
 
 it('keeps the first shift focused on starting cash without historical comparisons', async () => {
@@ -113,7 +115,7 @@ it('keeps the first shift focused on starting cash without historical comparison
   expect(screen.getByRole('spinbutton', {name:'Physical cash at start (₹)'})).toHaveValue(0);
   expect(screen.queryByText('Starting count required')).not.toBeInTheDocument();
   expect(screen.queryByText('No previous count to compare')).not.toBeInTheDocument();
-  expect(screen.getByText('Cash added, removed or handed over (if applicable)').closest('details')).not.toHaveAttribute('open');
+  expect(screen.getByText('Cash added, bank deposits or other withdrawals (if applicable)').closest('details')).not.toHaveAttribute('open');
 });
 
 it('labels staff totals as mixed collections while keeping closing till cash separate', async () => {
@@ -128,4 +130,20 @@ it('labels staff totals as mixed collections while keeping closing till cash sep
   expect(screen.getByRole('spinbutton', { name: 'Physical cash counted at closing (₹)' })).toHaveValue(500);
   expect(screen.getByText(/Split and verify payment methods in reconciliation next/)).toBeInTheDocument();
   expect(screen.queryByText('Physical cash handed over (₹)')).not.toBeInTheDocument();
+});
+
+it('shows confirmed DSR receipts with their business day without inventing a shift or receipt time', async () => {
+ shiftBootstrap.mockResolvedValue(workspace(0));
+ tankReceiptHistory.mockResolvedValue({nextCursor:null,receipts:[{
+  id:'dsr:import:2026-11-20',source:'DSR',businessDate:'2026-11-20',sourceUrl:'/sales/history/import?stationId=station-1&productId=hsd&month=2026-11',
+  quantity:'600',dsrQuantity:'1000',postedQuantity:'400',occurredAt:'2026-11-19T18:30:00Z',reference:'Confirmed historical DSR',supplier:null,
+  tank:'T2',product:'HSD',unit:'LITRE',period:'DATE_ONLY',shiftNumber:null,shiftId:null,
+ }]});
+ render(<MemoryRouter><OperationsPage/></MemoryRouter>);
+ await screen.findByText('Tank receipt history'); fireEvent.click(screen.getByText('Tank receipt history'));
+ expect(await screen.findByText(/Confirmed historical DSR · 20 Nov 2026 · day only/)).toBeInTheDocument();
+ expect(screen.getByText('Receipt day recorded in DSR · exact time unavailable')).toBeInTheDocument();
+ expect(screen.getByText(/Already recorded through purchases 400 L/)).toBeInTheDocument();
+ expect(screen.getByRole('link',{name:'View DSR'})).toHaveAttribute('href','/sales/history/import?stationId=station-1&productId=hsd&month=2026-11');
+ expect(screen.queryByRole('button',{name:/View shift #/})).not.toBeInTheDocument();
 });

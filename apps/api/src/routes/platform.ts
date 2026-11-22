@@ -1,5 +1,5 @@
 import { previewAccountDeletion, deleteAccount } from '../modules/platform/account-deletion.js';
-import { demoFollowUpState, prepareDemoFollowUp, sendDemoFollowUp } from '../modules/notifications/demo-follow-up.js';
+import { demoFollowUpState, prepareDemoFollowUp, sendDemoFollowUp, prepareProspectEmail, sendProspectEmail, listMarketingEmails } from '../modules/notifications/demo-follow-up.js';
 import { readOwnerEmailState } from '../modules/notifications/email-owner-state.js';
 import { drainEmailQueue, emailDeliveryReady, queueEmailWelcome } from '../modules/notifications/email-queue.js';
 import { prepareOwnerEmail } from '../modules/notifications/email-content.js';
@@ -100,6 +100,20 @@ platformRouter.post('/customers/:id/email-deliveries/:deliveryId/process', async
   res.json(await drainEmailQueue({ organizationId: req.params.id, deliveryId: req.params.deliveryId, limit: 1, manualWelcome: true }));
 });
 
+platformRouter.get('/marketing-emails', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  res.json(await listMarketingEmails());
+});
+platformRouter.post('/marketing-emails/preview', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const input = z.object({ email: z.string().trim().max(254).email() }).parse(req.body);
+  res.json(await prepareProspectEmail(input.email, req.user!.id));
+});
+platformRouter.post('/marketing-emails/send', async (req, res) => {
+  requirePlatformAdmin(req.user!.email);
+  const input = z.object({ email: z.string().trim().max(254).email(), id: z.string().min(1), previewHash: z.string().length(64), permissionConfirmed: z.literal(true) }).parse(req.body);
+  res.json(await sendProspectEmail(input.email, input, req.user!.id));
+});
 platformRouter.post('/demo-leads/:id/follow-up/preview', async (req, res) => {
   requirePlatformAdmin(req.user!.email);
   res.json(await prepareDemoFollowUp(req.params.id, req.user!.id));

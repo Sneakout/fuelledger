@@ -674,6 +674,8 @@ export const openShiftSchema = z.object({
     previousClosingCash: z.number().finite().min(0).nullable(),
     added: z.number().finite().min(0).max(9999999999.99),
     removed: z.number().finite().min(0).max(9999999999.99),
+    bankDeposited: z.number().finite().min(0).max(9999999999.99).optional(),
+    otherWithdrawals: z.number().finite().min(0).max(9999999999.99).optional(),
     reason: z.string().trim().max(500).optional(),
   }).optional(),
   tankReadings: z.array(reading),

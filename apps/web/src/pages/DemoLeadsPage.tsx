@@ -1,3 +1,4 @@
+import { MarketingEmailTab } from './MarketingEmailTab';
 import { AccountDeletion } from './AccountDeletion';
 import { DemoFollowUpAction, DemoFollowUpPanel } from './DemoFollowUpPanel';
 import type { DemoLead, DemoFollowUpState } from '../lib/api';
@@ -81,7 +82,7 @@ export function DemoLeadsPage() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const [searches, setSearches] = useState<Record<string,string>>({});
-  const tabs = ['overview', 'whatsapp', 'accounts', 'support', 'enquiries'] as const;
+  const tabs = ['overview', 'whatsapp', 'accounts', 'support', 'enquiries', 'marketing'] as const;
   type DeskTab = typeof tabs[number];
   const section = tabs.includes(params.get('section') as DeskTab) ? params.get('section') as DeskTab : 'overview';
   const [whatsAppOpened, setWhatsAppOpened] = useState(section === 'whatsapp');
@@ -123,6 +124,7 @@ export function DemoLeadsPage() {
     { id:'accounts', label:'Accounts', icon:Building2, count:accounts.customers.length },
     { id:'support', label:'Support', icon:LifeBuoy, count:openTickets },
     { id:'enquiries', label:'Demo enquiries', icon:Users, count:unique },
+    { id:'marketing', label:'Marketing', icon:Sparkles, count:null },
   ] as const;
   const query = search.trim().toLowerCase();
   const matches = (...values: Array<string | null | undefined>) => values.some(value => value?.toLowerCase().includes(query));
@@ -133,9 +135,11 @@ export function DemoLeadsPage() {
     <section className="leads-hero"><div><span className="eyebrow">Growth desk</span><h1>Growth Desk</h1><p>Manage owner accounts, WhatsApp delivery, support and demo enquiries in one place.</p></div><Sparkles/></section>
     {error && <div className="form-error">{error}</div>}
     <nav className="growth-desk-nav" aria-label="Growth Desk sections">{navigation.map(({id,label,icon:Icon,count}) => <button key={id} type="button" aria-current={section===id ? 'page' : undefined} onClick={() => chooseSection(id)}><Icon size={17}/><span>{label}</span>{count !== null && <b>{count}</b>}</button>)}</nav>
+    {section === 'marketing' && <MarketingEmailTab/>}
     <div hidden={section !== 'overview'} className="growth-desk-section">
       <div className="desk-overview-heading"><span className="eyebrow">Your admin workspace</span><h2>What would you like to manage?</h2><p>Choose a section to work with its records and actions.</p></div>
       <div className="desk-overview-grid">{[
+        {id:'marketing' as const, title:'Personal introductions', icon:Sparkles, value:'1:1', metric:'preview first · send deliberately', detail:'Introduce a potential customer to FuelNerve, fuel business automation and AI agents.'},
         {id:'whatsapp' as const, title:'WhatsApp delivery', icon:MessageCircleMore, value:optedIn, metric:'owners with saved consent', detail:'Choose an owner, prepare a preview, test delivery and manage live alerts.'},
         {id:'accounts' as const, title:'Accounts & access', icon:Building2, value:accounts.customers.length, metric:`registered accounts · ${pendingAccounts} awaiting access approval`, detail:'Find an owner, review their plan and billing choice, then approve verified payments.'},
         {id:'support' as const, title:'Support tickets', icon:LifeBuoy, value:openTickets, metric:'unresolved tickets', detail:'Review customer issues, update progress and keep support notes together.'},

@@ -14,7 +14,7 @@ it('opens an overview with direct navigation to every section',async()=>{
   open();
   expect(await screen.findByRole('heading',{name:'What would you like to manage?'})).toBeInTheDocument();
   const nav=within(screen.getByRole('navigation',{name:'Growth Desk sections'}));
-  expect(nav.getAllByRole('button')).toHaveLength(5);
+  expect(nav.getAllByRole('button')).toHaveLength(6);
   expect(screen.queryByRole('heading',{name:'Owner WhatsApp'})).not.toBeInTheDocument();
   fireEvent.click(nav.getByRole('button',{name:/WhatsApp/}));
   expect(screen.getByRole('heading',{name:'Owner WhatsApp'})).toBeInTheDocument();

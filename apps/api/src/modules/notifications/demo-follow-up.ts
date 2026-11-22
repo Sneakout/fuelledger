@@ -1,5 +1,6 @@
+import { z } from 'zod';
 import { createHash, randomUUID } from 'node:crypto';
-import type { DemoFollowUpEmail } from '@prisma/client';
+import { Prisma, type DemoFollowUpEmail } from '@prisma/client';
 import { env } from '../../config/env.js';
 import { prisma } from '../../lib/prisma.js';
 import { AppError } from '../../lib/errors.js';
@@ -16,13 +17,25 @@ async function converted(destination: string) {
   return Boolean(await prisma.user.findFirst({ where: { email: { equals: destination, mode: 'insensitive' }, role: 'OWNER' }, select: { id: true } }));
 }
 export async function prepareDemoFollowUp(leadId: string, adminId: string) {
-  const destination = await leadEmail(leadId);
+  return prepareProspectEmail(await leadEmail(leadId), adminId, leadId);
+}
+export async function prepareProspectEmail(email: string, adminId: string, leadId: string | null = null) {
+  const destination = normalizedProspectEmail(email);
   if (await converted(destination)) throw new AppError(409, 'DEMO_CONVERTED', 'This visitor already has an owner account. Use Accounts for their customer emails.');
   const token = randomUUID();
-  const message = renderDemoFollowUp({ appUrl: env.APP_URL, unsubscribeUrl: `${new URL(env.APP_URL).origin}/api/demo-email/unsubscribe?token=${token}` });
+  const message = renderDemoFollowUp({ appUrl: env.APP_URL, unsubscribeUrl: `${new URL(env.APP_URL).origin}/api/demo-email/unsubscribe?token=${token}`, prospect: !leadId });
   const previewHash = createHash('sha256').update(JSON.stringify(message)).digest('hex');
   // Destination identity prevents repeated demo sessions or concurrent previews creating repeat jobs.
-  let job = await prisma.demoFollowUpEmail.upsert({ where: { destination }, update: {}, create: { destination, demoSessionId: leadId, preparedBy: adminId, templateVersion: demoFollowUpVersion, unsubscribeToken: token, previewHash, ...message } });
+  let job: DemoFollowUpEmail;
+  try {
+    job = await prisma.demoFollowUpEmail.upsert({ where: { destination }, update: {}, create: { destination, demoSessionId: leadId, preparedBy: adminId, templateVersion: demoFollowUpVersion, unsubscribeToken: token, previewHash, ...message } });
+  } catch (error) {
+    // Prisma can emulate an empty-update upsert. Concurrent previews must reuse the winner.
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
+    const existing = await prisma.demoFollowUpEmail.findUnique({ where: { destination } });
+    if (!existing) throw error;
+    job = existing;
+  }
   if (job.status === 'PROCESSING' && job.leaseUntil && job.leaseUntil < new Date()) {
     await prisma.demoFollowUpEmail.updateMany({ where: { id: job.id, status: 'PROCESSING', leaseUntil: { lt: new Date() } }, data: { status: 'UNKNOWN', errorMessage: 'The sending result is uncertain. Check SMTP2GO before any further contact.' } });
     job = await prisma.demoFollowUpEmail.findUniqueOrThrow({ where: { id: job.id } });
@@ -30,11 +43,14 @@ export async function prepareDemoFollowUp(leadId: string, adminId: string) {
   return { ...demoFollowUpState(job), ready: emailDeliveryReady(), previewHash: job.previewHash, subject: job.subject, html: job.html, text: job.text };
 }
 export async function sendDemoFollowUp(leadId: string, input: { id: string; previewHash: string; permissionConfirmed: true }, adminId: string) {
-  if (input.permissionConfirmed !== true) throw new AppError(400, 'DEMO_PERMISSION_REQUIRED', 'Confirm this visitor agreed to receive a demo follow-up.');
-  const destination = await leadEmail(leadId);
+  return sendProspectEmail(await leadEmail(leadId), input, adminId);
+}
+export async function sendProspectEmail(email: string, input: { id: string; previewHash: string; permissionConfirmed: true }, adminId: string) {
+  if (input.permissionConfirmed !== true) throw new AppError(400, 'DEMO_PERMISSION_REQUIRED', 'Confirm this person agreed to receive a FuelNerve introduction.');
+  const destination = normalizedProspectEmail(email);
   const job = await prisma.demoFollowUpEmail.findFirst({ where: { id: input.id, destination, previewHash: input.previewHash } });
   if (!job) throw new AppError(409, 'DEMO_PREVIEW_CHANGED', 'Open the email preview again before sending.');
-  if (job.optedOutAt) throw new AppError(409, 'DEMO_OPTED_OUT', 'This visitor opted out of demo follow-ups.');
+  if (job.optedOutAt) throw new AppError(409, 'DEMO_OPTED_OUT', 'This person opted out of FuelNerve marketing emails.');
   if (await converted(destination)) throw new AppError(409, 'DEMO_CONVERTED', 'This visitor now has an owner account. Use Accounts for their customer emails.');
   if (!emailDeliveryReady()) throw new AppError(409, 'EMAIL_UNAVAILABLE', 'Email sending is paused. Check email configuration in Growth Desk.');
   const claimToken = randomUUID();
@@ -58,4 +74,14 @@ export async function sendDemoFollowUp(leadId: string, input: { id: string; prev
     leaseUntil: result.status === 'RETRY' ? new Date(Date.now() + 60_000) : null,
   } });
   return demoFollowUpState(await prisma.demoFollowUpEmail.findUniqueOrThrow({ where: { id: job.id } }));
+}
+
+function normalizedProspectEmail(email: string) {
+  const destination = email.trim().toLowerCase();
+  if (destination.length > 254 || !z.string().email().safeParse(destination).success || !validOwnerEmail(destination)) throw new AppError(400, 'MARKETING_EMAIL_REQUIRED', 'Enter one valid email address.');
+  return destination;
+}
+export async function listMarketingEmails() {
+  const jobs = await prisma.demoFollowUpEmail.findMany({ where: { demoSessionId: null }, orderBy: { createdAt: 'desc' }, take: 20 });
+  return { emails: jobs.map(demoFollowUpState) };
 }

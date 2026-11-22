@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Beaker, CheckCircle2, Clock3, Fuel, LockKeyhole, Play, RefreshCw } from "lucide-react";
 import {
   ApiRequestError,
@@ -120,6 +120,7 @@ export function OperationsPage() {
     [openingCash, setOpeningCash] = useState(0),
     [cashAdded, setCashAdded] = useState(0),
     [cashRemoved, setCashRemoved] = useState(0),
+    [bankDeposited, setBankDeposited] = useState(0),
     [cashReason, setCashReason] = useState(""),
     [refreshingCash, setRefreshingCash] = useState(false),
     [cashRefreshStatus, setCashRefreshStatus] = useState(""),
@@ -178,6 +179,7 @@ export function OperationsPage() {
     setOpeningCash(Number(last?.closingCash ?? 0));
     setCashAdded(0);
     setCashRemoved(0);
+    setBankDeposited(0);
     setCashReason("");
     setCashRefreshStatus("");
     setOpenTanks(
@@ -218,9 +220,9 @@ export function OperationsPage() {
   const selected = data?.stations.find((s) => s.id === stationId);
   const config = selected?.configurations[0];
   const priorCash = selected?.lastClosing?.closingCash == null ? null : Number(selected.lastClosing.closingCash);
-  const expectedCash = priorCash === null ? null : (Math.round(priorCash * 100) + Math.round(cashAdded * 100) - Math.round(cashRemoved * 100)) / 100;
+  const expectedCash = priorCash === null ? null : (Math.round(priorCash * 100) + Math.round(cashAdded * 100) - Math.round(cashRemoved * 100) - Math.round(bankDeposited * 100)) / 100;
   const cashDifference = expectedCash === null ? null : (Math.round(openingCash * 100) - Math.round(expectedCash * 100)) / 100;
-  const cashReasonRequired = cashAdded > 0 || cashRemoved > 0 || (cashDifference !== null && Math.abs(cashDifference) >= 0.01) || (!!selected?.lastClosing && priorCash === null);
+  const cashReasonRequired = cashAdded > 0 || cashRemoved > 0 || bankDeposited > 0 || (cashDifference !== null && Math.abs(cashDifference) >= 0.01) || (!!selected?.lastClosing && priorCash === null);
   async function refreshCash() {
     setRefreshingCash(true);
     setCashRefreshStatus("");
@@ -346,7 +348,8 @@ export function OperationsPage() {
           previousShiftId: selected?.lastClosing?.shiftId ?? null,
           previousClosingCash: priorCash,
           added: cashAdded,
-          removed: cashRemoved,
+          removed: (Math.round(cashRemoved * 100) + Math.round(bankDeposited * 100)) / 100,
+          bankDeposited, otherWithdrawals: cashRemoved,
           reason: cashReason,
         },
         tankReadings: openTanks,
@@ -691,16 +694,17 @@ export function OperationsPage() {
             </div>
             <p>Required · Notes and coins available before sales begin, including change for customers. Enter ₹0 if none. Excludes UPI, card and credit.</p>
             <details className="opening-cash-details" open={cashReasonRequired || undefined}>
-              <summary>Cash added, removed or handed over (if applicable)</summary>
+              <summary>Cash added, bank deposits or other withdrawals (if applicable)</summary>
               <p>Leave these at ₹0 unless cash was added or taken away before this shift.</p>
             <div className="form-grid">
               <Field label="Cash added between shifts (₹)" value={cashAdded} onChange={setCashAdded} />
-              <Field label="Cash removed between shifts (₹)" value={cashRemoved} onChange={setCashRemoved} />
+              <Field label="Cash deposited in bank between shifts (₹)" value={bankDeposited} onChange={setBankDeposited} />
+              <Field label="Cash handed to owner / other withdrawals (₹)" value={cashRemoved} onChange={setCashRemoved} />
             </div>
             <label className="field"><span>Cash handover reason{cashReasonRequired ? " *" : " (optional)"}</span>
               <textarea value={cashReason} onChange={event => setCashReason(event.target.value)} required={cashReasonRequired} maxLength={500} placeholder="For example, cash handed to the owner or float added; explain any counted difference." />
             </label>
-            <p>This explains the cash handover. Record related expenses, payments or bank transactions separately.</p>
+            <p>These amounts explain the physical cash left for this shift. A bank deposit reduces cash on hand; it is not an expense. This handover does not post an accounting transfer. Record the bank transfer in your accounts separately, without deducting it from this handover again.</p>
             </details>
             {cashRefreshStatus && <p role="status">{cashRefreshStatus}</p>}
           </section>
@@ -836,6 +840,7 @@ export function OperationsPage() {
   );
 }
 function receiptPeriod(receipt: ShiftReceipt) {
+  if (receipt.period === "DATE_ONLY") return "Receipt day recorded in DSR · exact time unavailable";
   if (receipt.period === "OVERLAP") return "Overlapping shifts · review timing";
   if (receipt.period === "DURING") return `Received during shift #${receipt.shiftNumber}`;
   if (receipt.shiftNumber !== null) {
@@ -883,23 +888,26 @@ function ReceiptHistory({ stationId, tolerance, detailsRef }: { stationId: strin
     if (event.currentTarget.open && receipts === null && !loading && !error) void load();
   }}>
     <summary>Tank receipt history</summary>
-    <p>See which deliveries arrived during a shift or between shifts, using their physical receipt times.</p>
+    <p>Purchase deliveries and confirmed historical DSR receipts, together. Shift placement is shown only when a physical receipt time is known.</p>
     <section className="operations-receipt-content" aria-busy={loading || loadingShift}>
       {error && <p role="alert">{error}</p>}
       <button className="secondary small" type="button" disabled={loading} onClick={() => void load()}>
         <RefreshCw size={15} /> {loading ? "Loading receipts…" : "Refresh receipts"}
       </button>
-      {receipts?.length === 0 && <p>No posted tank receipts for this fuel station.</p>}
+      {receipts?.length === 0 && <p>No purchase or confirmed DSR tank receipts for this fuel station.</p>}
       {receipts?.length ? <ul>{receipts.map(receipt => <li key={receipt.id}>
         <div>
-          <strong>{receipt.tank && receipt.product ? `${receipt.tank} · ${receipt.product}` : "Tank mapping needs review"} · {receipt.unit === "LITRE" ? litres(Number(receipt.quantity)) : Number(receipt.quantity).toLocaleString("en-IN")}</strong>
-          <small>{[receipt.reference, receipt.supplier, captured(receipt.occurredAt)].filter(Boolean).join(" · ")}</small>
+          <strong>{receipt.tank && receipt.product ? `${receipt.tank} · ${receipt.product}` : `${receipt.product ?? "Product"} · Tank allocation needs review`} · {receipt.overlapMismatch ? "Quantity needs review" : receipt.unit === "LITRE" ? litres(Number(receipt.quantity)) : Number(receipt.quantity).toLocaleString("en-IN")}</strong>
+          <small>{[receipt.reference, receipt.supplier, receipt.source === "DSR" && receipt.businessDate ? `${new Date(`${receipt.businessDate}T00:00:00+05:30`).toLocaleDateString("en-IN", { day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Kolkata" })} · day only` : captured(receipt.occurredAt)].filter(Boolean).join(" · ")}</small>
           <small>{receiptPeriod(receipt)}{receipt.correctedLate ? " · Receipt time corrected after readings were saved" : receipt.recordedLate ? " · Recorded after readings were saved" : ""}</small>
+          {receipt.source === "DSR" && Number(receipt.postedQuantity) > 0 && <small>DSR total {litres(Number(receipt.dsrQuantity))} · Already recorded through purchases {litres(Number(receipt.postedQuantity))}. {receipt.overlapMismatch ? "Purchase quantities exceed the DSR total; review both sources." : "Only the remaining DSR quantity is shown here to avoid counting deliveries twice."}</small>}
+          {receipt.allocationRequired && <small>The DSR records a product total without one verified receiving tank. Review the saved register; no tank has been assumed.</small>}
           {receipt.tankInShift === false && <small>That shift has no saved reading for this tank. The receipt is in book stock.</small>}
           {receipt.receiptScopeMismatch && <small>The linked receipt belongs to a different fuel station or account. Review this stock movement.</small>}
           {receipt.timingMismatch && <small>The purchase receipt time differs from the stock movement time. Review the source.</small>}
         </div>
         <div className="operations-receipt-actions">
+          {receipt.source === "DSR" && receipt.sourceUrl && <Link className="secondary small" to={receipt.sourceUrl}>View DSR</Link>}
           {receipt.shiftId && <button className="secondary small" type="button" disabled={loadingShift} onClick={() => void viewShift(receipt.shiftId!)}>
             View shift #{receipt.shiftNumber}
           </button>}

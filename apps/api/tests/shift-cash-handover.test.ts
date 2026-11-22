@@ -39,3 +39,12 @@ describe('physical cash handover', () => {
       expect(() => cashHandoverSnapshot(row, previous, 'owner', now)).toThrow();
   });
 });
+
+it('separates bank deposits and owner withdrawals without changing the aggregate twice', () => {
+  const row = input(200.15, 0.10, 800.20, 'Bank deposit and owner handover');
+  row.cashHandover!.bankDeposited = 700.10;
+  row.cashHandover!.otherWithdrawals = 100.10;
+  expect(cashHandoverSnapshot(row, previous, 'owner', now)).toMatchObject({ expectedOpening: '200.15', difference: '0.00', bankDeposited: '700.10', otherWithdrawals: '100.10', removed: '800.20' });
+  row.cashHandover!.removed = 700.10;
+  expect(() => cashHandoverSnapshot(row, previous, 'owner', now)).toThrow(/Total cash removed/);
+});

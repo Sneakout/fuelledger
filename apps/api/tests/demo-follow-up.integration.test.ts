@@ -6,7 +6,7 @@ const config = vi.hoisted(() => ({ EMAIL_DELIVERY_ENABLED: true, SMTP2GO_API_KEY
 vi.mock('../src/config/env.js', () => ({ env: config, apnsConfigured: false }));
 vi.mock('../src/lib/prisma.js', async () => { const { PrismaClient } = await import('@prisma/client'); return { prisma: new PrismaClient({ datasourceUrl: process.env.DEMO_FOLLOW_UP_TEST_DATABASE_URL ?? 'postgresql://unused' }) }; });
 import { prisma } from '../src/lib/prisma.js';
-import { prepareDemoFollowUp, sendDemoFollowUp } from '../src/modules/notifications/demo-follow-up.js';
+import { prepareDemoFollowUp, sendDemoFollowUp, prepareProspectEmail, sendProspectEmail, listMarketingEmails } from '../src/modules/notifications/demo-follow-up.js';
 import { demoEmailRouter } from '../src/routes/demo-email.js';
 const suite = process.env.DEMO_FOLLOW_UP_TEST_DATABASE_URL ? describe : describe.skip;
 suite('demo follow-up on isolated PostgreSQL', () => {
@@ -20,6 +20,28 @@ suite('demo follow-up on isolated PostgreSQL', () => {
     const sql = await readFile(new URL('../../../prisma/migrations/20261121143000_demo_follow_up_email/migration.sql', import.meta.url), 'utf8');
     for (const statement of sql.split(';').map(s => s.trim()).filter(Boolean)) await prisma.$executeRawUnsafe(statement);
     expect(await prisma.demoSession.count()).toBe(1);
+    const nullableMigration = await readFile(new URL('../../../prisma/migrations/20261122090000_manual_prospect_email/migration.sql', import.meta.url), 'utf8');
+    await prisma.$executeRawUnsafe(nullableMigration.trim());
+  });
+
+  it('prepares a manual prospect without inventing a demo session and deduplicates across both entry points', async () => {
+    const count = await prisma.demoSession.count();
+    const p = await prepareProspectEmail('  Manual@example.com  ', 'admin');
+    expect(await prisma.demoSession.count()).toBe(count);
+    expect(p.html).not.toContain('Thank you for exploring');
+    expect((await prisma.demoFollowUpEmail.findUniqueOrThrow({ where: { id: p.id } })).demoSessionId).toBeNull();
+    expect((await listMarketingEmails()).emails.some(e => e.id === p.id)).toBe(true);
+    const session = await lead('manual@example.com');
+    expect((await prepareDemoFollowUp(session.id, 'admin')).id).toBe(p.id);
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ data: { succeeded: 1, failed: 0, email_id: 'manual-ok' } }) }); vi.stubGlobal('fetch', fetcher);
+    const sent = await Promise.allSettled([sendProspectEmail('manual@example.com', sendInput(p), 'admin'), sendDemoFollowUp(session.id, sendInput(p), 'admin')]);
+    expect(sent.filter(r => r.status === 'fulfilled')).toHaveLength(1);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await expect(prepareProspectEmail('a@example.com,b@example.com', 'admin')).rejects.toThrow();
+    const opted = await prepareProspectEmail('stopmanual@example.com', 'admin');
+    await prisma.demoFollowUpEmail.update({ where: { id: opted.id }, data: { optedOutAt: new Date() } });
+    await expect(sendProspectEmail(opted.destination, sendInput(opted), 'admin')).rejects.toMatchObject({ code: 'DEMO_OPTED_OUT' });
+    await expect(sendProspectEmail('wrong@example.com', sendInput(opted), 'admin')).rejects.toMatchObject({ code: 'DEMO_PREVIEW_CHANGED' });
   });
   it('previews without sending and deduplicates normalized contacts and simultaneous sends', async () => {
     const a = await lead('Prospect@example.com'); const b = await lead('prospect@example.com');

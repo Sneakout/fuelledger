@@ -561,6 +561,9 @@ export const api = {
       "/notifications/test",
       { method: "POST" },
     ),
+  marketingEmails: () => request<{ emails: DemoFollowUpState[] }>('/platform/marketing-emails'),
+  previewMarketingEmail: (email: string) => request<DemoFollowUpPreview>('/platform/marketing-emails/preview', { method: 'POST', body: JSON.stringify({ email }) }),
+  sendMarketingEmail: (email: string, input: { id: string; previewHash: string; permissionConfirmed: true }) => request<DemoFollowUpState>('/platform/marketing-emails/send', { method: 'POST', body: JSON.stringify({ email, ...input }) }),
   demoLeads: () => request<DemoLeadsBootstrap>("/platform/demo-leads"),
   previewDemoFollowUp: (id: string) => request<DemoFollowUpPreview>(`/platform/demo-leads/${encodeURIComponent(id)}/follow-up/preview`, { method: 'POST' }),
   sendDemoFollowUp: (id: string, input: { id: string; previewHash: string; permissionConfirmed: true }) => request<DemoFollowUpState>(`/platform/demo-leads/${encodeURIComponent(id)}/follow-up/send`, { method: 'POST', body: JSON.stringify(input) }),
@@ -829,7 +832,7 @@ export type ClosingNozzleReading = Reading & {
   testingReturned: boolean;
 };
 export type ShiftOpenForm = {
-  cashHandover?: { previousShiftId: string | null; previousClosingCash: number | null; added: number; removed: number; reason?: string };
+  cashHandover?: { previousShiftId: string | null; previousClosingCash: number | null; added: number; removed: number; bankDeposited?: number; otherWithdrawals?: number; reason?: string };
   stationId: string;
   managerId: string;
   userIds: string[];
@@ -903,7 +906,14 @@ export type ShiftDelivery = {
   correctedLate: boolean;
 };
 export type ShiftReceipt = ShiftDelivery & {
-  period: "DURING" | "GAP" | "BEFORE_FIRST" | "OVERLAP";
+  period: "DURING" | "GAP" | "BEFORE_FIRST" | "OVERLAP" | "DATE_ONLY";
+  source?: "DSR";
+  businessDate?: string;
+  sourceUrl?: string;
+  dsrQuantity?: string;
+  postedQuantity?: string;
+  allocationRequired?: boolean;
+  overlapMismatch?: boolean;
   shiftId: string | null;
   shiftNumber: number | null;
   tankInShift: boolean | null;
@@ -915,7 +925,7 @@ export type ShiftReceipt = ShiftDelivery & {
   timingMismatch: boolean;
 };
 export type Shift = {
-  openingCashHandover?: { previousShiftId: string | null; previousClosingCash: string | null; added: string; removed: string; expectedOpening: string | null; actualOpening: string; difference: string | null; reason: string | null; enteredById: string | null; recordedAt: string } | null;
+  openingCashHandover?: { previousShiftId: string | null; previousClosingCash: string | null; added: string; removed: string; bankDeposited?: string | null; otherWithdrawals?: string | null; expectedOpening: string | null; actualOpening: string; difference: string | null; reason: string | null; enteredById: string | null; recordedAt: string } | null;
   id: string;
   shiftNumber: number;
   status: string;
