@@ -32,3 +32,11 @@ it('requires preview before a welcome send and transitions to active without dup
  expect(screen.queryByRole('button', { name: 'Send welcome & start email updates' })).not.toBeInTheDocument(); expect(mock.send).toHaveBeenCalledTimes(1);
  expect(screen.getByRole('button', { name: 'Pause email updates' })).toBeEnabled();
 });
+
+it('shows stalled automation even when the email connection is ready',async()=>{
+ mock.list.mockResolvedValue({ready:true,deliveries:[],recipients:[],workerHealth:{stages:[{stage:'schedule',status:'STALE',lastSucceededAt:'2026-11-22T15:38:00Z'},{stage:'delivery',status:'FAILED',lastSucceededAt:null}]}});
+ render(<OwnerEmailWorkspace organizationId="org-a"/>);fireEvent.click(screen.getByRole('button',{name:'Refresh emails'}));
+ expect(await screen.findByText('Automatic emails need attention.')).toBeInTheDocument();
+ expect(screen.getByText(/Daily reports · No successful check in 30 minutes/)).toBeInTheDocument();
+ expect(screen.getByText(/Sending queue · Last check failed/)).toBeInTheDocument();expect(mock.send).not.toHaveBeenCalled();
+});

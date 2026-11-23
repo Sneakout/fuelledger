@@ -9,6 +9,7 @@ const db = vi.hoisted(() => ({
   customer: { findMany: vi.fn() },
 }));
 vi.mock('../src/lib/prisma.js', () => ({ prisma: db }));
+vi.mock('../src/lib/historical-stock.js', () => ({ readTankStockTimelines: vi.fn().mockResolvedValue(new Map()) }));
 vi.mock('../src/lib/stock.js', () => ({ bookStockAt: vi.fn().mockResolvedValue({ toNumber: () => 250 }) }));
 
 import { readCustomerCreditFacts, readDailyOperatingFacts, readReceiptMessageFacts, readShiftMessageFacts } from '../src/modules/notifications/message-facts.js';
@@ -75,4 +76,15 @@ describe('verified notification facts', () => {
     const [result] = await readCustomerCreditFacts(scope, asOf, 'customer');
     expect(result).toMatchObject({ outstanding: 60.25, overdueAmount: 60.25, oldestDaysOverdue: 1, hasDisputedBalance: true });
   });
+});
+
+it('recovered daily reports bound sales and tank stock to the original India day end', async () => {
+ const {bookStockAt}=await import('../src/lib/stock.js');
+ db.sale.findMany.mockResolvedValue([]);db.shift.findMany.mockResolvedValue([]);
+ db.tank.findMany.mockResolvedValue([{id:'tank',code:'T1',productId:'hsd',openingStock:d(1000),product:lineProduct,configuration:{station}}]);
+ const end=new Date('2026-11-22T18:29:59.999Z');
+ const facts=await readDailyOperatingFacts(scope,'2026-11-22',new Date('2026-11-24T04:00:00Z'));
+ expect(facts.period.end).toEqual(end);
+ expect(db.sale.findMany.mock.calls.at(-1)![0].where.occurredAt.lte).toEqual(end);
+ expect(bookStockAt).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({tankId:'tank',organizationId:'org',stationId:'station'}),end);
 });

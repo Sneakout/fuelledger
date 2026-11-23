@@ -1,3 +1,4 @@
+import { readEmailWorkerHealth } from '../modules/notifications/email-worker-health.js';
 import { previewAccountDeletion, deleteAccount } from '../modules/platform/account-deletion.js';
 import { demoFollowUpState, prepareDemoFollowUp, sendDemoFollowUp, prepareProspectEmail, sendProspectEmail, listMarketingEmails } from '../modules/notifications/demo-follow-up.js';
 import { readOwnerEmailState } from '../modules/notifications/email-owner-state.js';
@@ -60,7 +61,7 @@ platformRouter.get('/customers/:id/email-deliveries', async (req, res) => {
   const recipients = await Promise.all(owners.map(async owner => ({ ownerId: owner.id, ...await readOwnerEmailState(organizationId, owner.id) })));
   const missingWelcomeIds = recipients.map(owner => owner.welcomeId).filter((id): id is string => Boolean(id && !deliveries.some(job => job.id === id)));
   if (missingWelcomeIds.length) deliveries.push(...await prisma.ownerEmailDelivery.findMany({ where: { organizationId, id: { in: missingWelcomeIds } } }));
-  res.json({ recipients, ready: emailDeliveryReady(organizationId), deliveries: deliveries.map(job => ({ id: job.id, type: job.type, destination: job.destination, status: job.status, attempts: job.attempts, createdAt: job.createdAt, suppressionReason: job.suppressionReason, errorMessage: job.errorMessage, providerMessageId: job.providerMessageId })) });
+  res.json({ workerHealth: await readEmailWorkerHealth(), recipients, ready: emailDeliveryReady(organizationId), deliveries: deliveries.map(job => ({ id: job.id, type: job.type, destination: job.destination, status: job.status, attempts: job.attempts, createdAt: job.createdAt, suppressionReason: job.suppressionReason, errorMessage: job.errorMessage, providerMessageId: job.providerMessageId })) });
 });
 platformRouter.put('/customers/:id/email-owner/:ownerId/pause', async (req, res) => {
   requirePlatformAdmin(req.user!.email);

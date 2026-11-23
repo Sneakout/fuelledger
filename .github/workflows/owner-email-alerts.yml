@@ -37,6 +37,7 @@ jobs:
               });
               if (!response.ok) throw new Error(`HTTP ${response.status}`);
               const result = await response.json();
+              if (stage === 'email-schedule') console.log(`Daily backup authorized: ${result.backupConfigured === true}`);
               // Print counts only: no message bodies, recipients, credentials or provider IDs.
               const counts = Object.fromEntries(Object.entries(result).filter(([key, value]) =>
                 ['checkedOrganizations', 'prepared', 'failed', 'handled', 'deferred', 'checked', 'accepted'].includes(key) && typeof value === 'number'));

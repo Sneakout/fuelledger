@@ -26,7 +26,7 @@ The UI does not expose provider diagnostics to owners. Admins can inspect the se
 
 - Unique database identity includes organization, station, event, category, owner and destination. Duplicate events do not create duplicate jobs.
 - Each worker claims a pending job atomically. Parallel workers cannot send the same claimed job.
-- Consent, current recipient, active fuel station, current plan and source facts are rechecked before sending. Stale/changed records are suppressed with a reason. Messages expire after 24 hours.
+- Consent, current recipient, active fuel station, current plan and source facts are rechecked before sending. Stale/changed records are suppressed with a reason. Live alerts expire after 24 hours. Daily summaries instead have a three-day business-date recovery window, with explicit delayed-report wording. Credit reports remain today-only and recheck current balances.
 - HTTP 429 rejections retry at bounded delays, up to four attempts. Explicit 4xx rejections are `FAILED`; after fixing configuration an administrator can select **Retry rejected email**. The existing job is reused and all eligibility checks run again.
 - Timeouts, 5xx, malformed success responses and expired processing leases are `UNKNOWN`. They never retry automatically because an email may have been accepted. Check SMTP2GO using the `X-FuelNerve-Delivery` reference, recipient and time. Keep uncertain messages held; do not create a replacement simply to retry.
 - Pause all application email with `EMAIL_DELIVERY_ENABLED=false` and redeploy, or pause the individual owner from Growth Desk. Jobs and evidence remain intact. Owner opt-out and category changes suppress pending work immediately on the next processing pass.
@@ -38,7 +38,7 @@ Official provider reference: https://developers.smtp2go.com/docs/send-an-email
 
 The email worker is independent of WhatsApp. Do **not** schedule the general `/cron/daily`, `/cron/agent-messages` or WhatsApp delivery endpoints for owner email updates. Use these email-only endpoints, in order:
 
-1. `GET /api/notifications/cron/email-schedule` prepares today's daily operating report for both paid plans, plus the credit report for active Intelligence subscribers. It checks India business time, owner settings and individual email consent. A delayed run catches up after the selected hour within the same day; it does not replay yesterday's summary. Stable organization/category/date identities prevent duplicate reports.
+1. `GET /api/notifications/cron/email-schedule` prepares due daily operating reports for today and the preceding three India business dates for both paid plans, plus the credit report for active Intelligence subscribers. It checks India business time, owner settings and individual email consent. A delayed run catches up after the selected hour and recovers missing daily summaries for up to three days. Older days and pre-welcome/pre-plan days are not replayed. Recovered emails clearly show their original date and use that day's ending stock, not today's stock. Stable organization/category/date identities prevent duplicate reports.
 2. `GET /api/notifications/cron/email-agent-messages` prepares stock, reconciled-shift and receipt messages through the existing agent fact builders. Its progress is stored separately from WhatsApp's progress. The additive migration marks pre-rollout agent jobs handled **for email only**; old receipts and historical records are not replayed as live events. New events older than 24 hours are skipped. No WhatsApp jobs or push notifications are created by this endpoint.
 3. `GET /api/notifications/cron/email-delivery` drains up to four eligible pending emails with the existing atomic claims, current-fact checks, suppression reasons and ambiguous-outcome holds.
 
@@ -87,3 +87,36 @@ The automatic worker never sends welcome emails and does not replay old shifts
 or receipts at activation. Global `EMAIL_DELIVERY_ENABLED=false` remains the
 emergency sending switch. WhatsApp rollout is unchanged. This release does not
 send a welcome to anyone automatically.
+
+## Independent backup and worker health (24 November 2026)
+
+GitHub's scheduled workflow is best effort. Observed scheduled runs were hours
+apart despite the five-minute expression; SMTP2GO was never called for the missed
+evening. Do not interpret a successful morning workflow as proof that the evening
+report ran.
+
+`vercel.json` adds a daily email-only fallback at `30 15 * * *` (21:00 IST).
+On Hobby, execution may occur within that hour. Configure a private `CRON_SECRET`
+in Production and redeploy; Vercel supplies it as a Bearer credential. The
+fallback prepares reports and drains four eligible jobs. GitHub continues to
+prepare specialist events and drain the queue frequently when available.
+Neither schedule guarantees minute-accurate delivery. For tighter timing or a
+large backlog, use a dedicated scheduler/worker or an upgraded hosting plan.
+
+Apply additive migration `20261124010000_email_worker_health` with deployment.
+Growth Desk → account → Owner email updates reports the last successful daily,
+agent and sending checks. A stage is stale after 30 minutes, or failed after an
+unsuccessful run. Heartbeats contain no recipients, bodies or credentials.
+A daily fallback updates daily/sending checks only; it does not claim specialist
+agent checks have run.
+
+Daily identity stays organization/category/business-date/owner/address. Accepted,
+failed, processing and uncertain messages are never replayed automatically.
+Never-attempted daily jobs may refresh their verified facts; only source-changed
+or expired suppression can recover, with current consent, welcome and plan checks
+applied again. Opt-out suppression is not silently undone. The credit report and
+customer reminders do not participate in historical daily-summary recovery.
+
+After deployment, manually run Owner email alerts once and inspect counts and
+Growth Desk health. Confirm provider activity for recovered dates; do not rerun
+accepted messages as a connection test. Outbound pause switches remain effective.

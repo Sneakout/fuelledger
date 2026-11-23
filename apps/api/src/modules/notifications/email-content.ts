@@ -33,5 +33,5 @@ export async function prepareOwnerEmail(job: OwnerEmailDelivery, ownerName: stri
     if (!credit.facts.some(customer => customer.outstanding > 0) || !guard.snapshot || credit.snapshot !== guard.snapshot) return null;
   }
   return renderOwnerEmail({ type: job.type, message: job.message, ownerName, stationName,
-    appUrl: env.APP_URL, sourceId: guard.sourceId, date: guard.date ?? indiaDate(job.createdAt), ...(shift ? { shift } : {}) });
+    appUrl: env.APP_URL, sourceId: guard.sourceId, date: guard.date ?? indiaDate(job.createdAt), delayed: job.type === 'DAILY_SUMMARY' && (guard.date ?? indiaDate(job.createdAt)) < indiaDate(now), ...(shift ? { shift } : {}) });
 }

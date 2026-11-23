@@ -5,7 +5,7 @@ import { api, type OwnerEmailDelivery, type OwnerEmailRecipient } from '../lib/a
 
 const names: Record<string, string> = { OWNER_WELCOME: 'Welcome', DAILY_SUMMARY: 'Daily summary', LOW_STOCK: 'Low stock', SHIFT_CLOSED_SUMMARY: 'Shift summary', PURCHASE_RECEIPT_SUMMARY: 'Receipt summary', OVERDUE_CUSTOMER: 'Credit report' };
 export function OwnerEmailWorkspace({ organizationId }: { organizationId: string }) {
-  const [data, setData] = useState<{ ready: boolean; recipients?: OwnerEmailRecipient[]; deliveries: OwnerEmailDelivery[] }>();
+  const [data, setData] = useState<{ ready: boolean; workerHealth?: { backupConfigured?: boolean; stages: Array<{ stage: string; status: string; lastSucceededAt: string | null }> }; recipients?: OwnerEmailRecipient[]; deliveries: OwnerEmailDelivery[] }>();
   const [preview, setPreview] = useState<{ subject: string; html: string; text: string; job?: OwnerEmailDelivery }>();
   const previewRef = useRef<HTMLElement>(null);
   useEffect(() => { if (preview) { previewRef.current?.scrollIntoView?.({ behavior: window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches ? 'auto' : 'smooth', block: 'start' }); previewRef.current?.focus({ preventScroll: true }); } }, [preview]);
@@ -26,6 +26,13 @@ export function OwnerEmailWorkspace({ organizationId }: { organizationId: string
     {notice && <p className="success-banner" role="status">{notice}</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
     {data && <p className="owner-email-readiness" data-ready={data.ready}>{data.ready ? 'Sending connection ready.' : 'Email sending is paused. Check the sending connection and global email switch before sending.'}</p>}
+    {data?.ready && data.workerHealth && <section className="owner-email-readiness" data-ready={data.workerHealth.stages.every(stage => stage.status === 'HEALTHY')} aria-label="Automatic email health">
+      <strong>{data.workerHealth.stages.every(stage => stage.status === 'HEALTHY') ? 'Automatic email checks are running.' : 'Automatic emails need attention.'}</strong>
+      <p>Scheduled checks should run every five minutes. A separate daily backup is scheduled around 9–10 pm IST. Missed daily summaries can recover for three days.</p>
+      {data.workerHealth.backupConfigured === false && <p>The daily backup is not authorized yet. Add CRON_SECRET to Vercel Production and redeploy.</p>}
+      {data.workerHealth.stages.map(stage => <p key={stage.stage}>{stage.stage === 'schedule' ? 'Daily reports' : stage.stage === 'agents' ? 'Agent events' : 'Sending queue'} · {stage.status === 'HEALTHY' ? 'Running' : stage.status === 'FAILED' ? 'Last check failed' : 'No successful check in 30 minutes'}{stage.lastSucceededAt && ` · Last successful check: ${new Date(stage.lastSucceededAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`}</p>)}
+      {!data.workerHealth.stages.every(stage => stage.status === 'HEALTHY') && <p>Check the Owner email alerts workflow in GitHub Actions and deployment logs. Refresh emails to check again. A ready sending connection alone does not confirm that automation is running.</p>}
+    </section>}
     {data?.recipients?.map(recipient => <section className="owner-email-onboarding" key={recipient.ownerId}>
       <div className="owner-email-card-heading"><div><p className="owner-email-eyebrow">OWNER EMAIL SETUP</p><h3>{recipient.ownerName}</h3><p className="owner-email-destination">{recipient.destination}</p></div><span className="owner-email-status" data-status={recipient.state === 'ACTIVE' ? 'ACCEPTED' : recipient.state}>{recipient.state === 'ACTIVE' ? 'Updates active' : recipient.adminPaused ? 'Updates paused' : recipient.welcomeStatus === 'ACCEPTED' ? 'Welcome sent · setup incomplete' : recipient.welcomeStatus === 'UNKNOWN' ? 'Checking send outcome' : recipient.welcomeStatus === 'FAILED' ? 'Needs attention' : recipient.welcomeStatus === 'PROCESSING' ? 'Sending welcome…' : 'Welcome not sent'}</span></div>
       {recipient.state === 'ACTIVE' ? <p><CheckCircle2 size={16} /> Your selected email updates are active. {recipient.activatedAt && `Welcome sent ${new Date(recipient.activatedAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })} IST.`}</p> : <p>{recipient.blocker}</p>}

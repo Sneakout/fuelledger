@@ -209,3 +209,25 @@ it('enriches preview and sending from scoped saved shift facts and refuses a sta
  expect(await prepareOwnerEmail({...delivery,guard:{sourceId:'shift-a',version:'old'}},'Owner','Station')).toBeNull();
  expect(await prepareOwnerEmail({...delivery,message:'stale figures'},'Owner','Station')).toBeNull();
 });
+
+it('bounds daily recovery by India business date and never recovers an old credit report', async () => {
+ const {dailyEmailDateEligible}=await import('../src/modules/notifications/email-report-period.js');
+ const now=new Date('2026-11-23T18:31:00Z'); // 24 Nov, 00:01 IST
+ for(const date of ['2026-11-21','2026-11-22','2026-11-23','2026-11-24']) expect(dailyEmailDateEligible(date,now)).toBe(true);
+ for(const date of ['2026-11-20','2026-11-25','2026-02-30','not-a-date']) expect(dailyEmailDateEligible(date,now)).toBe(false);
+ expect(await emailFactsStillCurrent({...job(),type:'OVERDUE_CUSTOMER',guard:{date:'2026-11-23'}} as OwnerEmailDelivery,now)).toBe(false);
+ expect(mock.credit).not.toHaveBeenCalled();
+});
+it('labels recovered summaries by their own date in both HTML and plain text', () => {
+ const email=renderOwnerEmail({type:'DAILY_SUMMARY',message:'Sales: HSD: 1,000 L',ownerName:'Owner',stationName:'Station',date:'2026-11-23',appUrl:'https://fuel.mindvector.tech',delayed:true});
+ expect(email.subject).toBe('Delayed summary · 2026-11-23 · Station');
+ expect(email.html).toContain('Delayed daily summary');expect(email.text).toContain('covers the business date shown above');expect(email.html).toContain('end of that day');
+});
+
+it('does not backfill daily emails for days before the current consent or support resume', async () => {
+ mock.settings.mockResolvedValue({...settings,dailySummaryHour:20});
+ const {addIndiaDays,indiaDate}=await import('../src/lib/india-time.js');
+ mock.owners.mockResolvedValue([{id:'owner-a',name:'Owner',email:'owner@example.com',ownerEmailPreference:{updatedAt:new Date()}}]);
+ await queueOwnerEmail({organizationId:'org-a',type:'DAILY_SUMMARY',eventKey:'missed',recordType:'CORE_DAILY_SUMMARY',message:'Yesterday',guard:{date:addIndiaDays(indiaDate(),-1)}});
+ expect(mock.createMany).not.toHaveBeenCalled();
+});

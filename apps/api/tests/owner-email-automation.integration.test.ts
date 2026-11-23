@@ -8,7 +8,7 @@ import { prisma } from '../src/lib/prisma.js';
 import { enqueueReview } from '../src/modules/nerve/review-events.js';
 import { prepareAgentEmails, scheduleOwnerEmails } from '../src/modules/notifications/email-scheduler.js';
 import { drainEmailQueue, queueEmailWelcome, queueOwnerEmail } from '../src/modules/notifications/email-queue.js';
-import { indiaParts } from '../src/lib/india-time.js';
+import { addIndiaDays, indiaDate, indiaDayRange, indiaParts } from '../src/lib/india-time.js';
 const suite = process.env.EMAIL_AUTOMATION_TEST_DATABASE_URL ? describe : describe.skip;
 suite('owner email automation on isolated PostgreSQL', () => {
  afterAll(async () => { vi.unstubAllGlobals(); await prisma.$disconnect(); });
@@ -91,4 +91,44 @@ suite('owner email automation on isolated PostgreSQL', () => {
   await Promise.all([drainEmailQueue(), drainEmailQueue()]); expect(sender).toHaveBeenCalledTimes(1);
   expect(await prisma.ownerEmailDelivery.count({ where: { organizationId: other.id } })).toBe(0);
  });
+ it('applies the health migration and persists success, failure and staleness',async()=>{
+  await prisma.$executeRawUnsafe('DROP TABLE "email_worker_heartbeats"');
+  const sql=await readFile(new URL('../../../prisma/migrations/20261124010000_email_worker_health/migration.sql',import.meta.url),'utf8');
+  await prisma.$executeRawUnsafe(sql);
+  const {trackEmailWorker,readEmailWorkerHealth}=await import('../src/modules/notifications/email-worker-health.js');
+  await trackEmailWorker('schedule',async()=>({failed:0}),result=>result.failed>0);
+  await trackEmailWorker('delivery',async()=>({accepted:1}));
+  let health=await readEmailWorkerHealth();expect(health.stages.find(s=>s.stage==='schedule')?.status).toBe('HEALTHY');
+  await expect(trackEmailWorker('delivery',async()=>{throw new Error('fixture');})).rejects.toThrow('fixture');
+  health=await readEmailWorkerHealth();expect(health.stages.find(s=>s.stage==='delivery')?.status).toBe('FAILED');
+  health=await readEmailWorkerHealth(new Date(Date.now()+31*60_000));expect(health.stages.find(s=>s.stage==='schedule')?.status).toBe('STALE');
+ });
+ it('recovers missed daily reports once after midnight, uses the original day and never replays pre-welcome days', async () => {
+  const now=new Date();const today=indiaDate(now);const yesterday=addIndiaDays(today,-1);
+  const start=indiaDayRange(addIndiaDays(today,-5)).start;
+  const org=await prisma.organization.create({data:{name:'Recovery fixture',subscriptionActivatedAt:start}});
+  const owner=await prisma.user.create({data:{organizationId:org.id,name:'Recovery owner',email:`${org.id}@example.com`,passwordHash:'test',role:'OWNER',ownerEmailPreference:{create:{organizationId:org.id,enabled:true,updatedAt:start}}}});
+  await prisma.ownerNotificationSettings.create({data:{organizationId:org.id,dailySummaryHour:0,overdueCustomerEnabled:false}});
+  await queueEmailWelcome(org.id);
+  const welcome=await prisma.ownerEmailDelivery.findFirstOrThrow({where:{organizationId:org.id,type:'OWNER_WELCOME'}});
+  // Only the two most recent days are after this recipient's welcome.
+  await prisma.ownerEmailDelivery.update({where:{id:welcome.id},data:{status:'ACCEPTED',acceptedAt:indiaDayRange(yesterday).start}});
+  const station=await prisma.station.create({data:{organizationId:org.id,name:'Recovery station',code:'RECOVERY',addressLine1:'Fixture',city:'Test',state:'Test',postalCode:'000000'}});
+  const product=await prisma.product.create({data:{organizationId:org.id,name:'Bottled water',code:'WATER',category:'RETAIL',unit:'PIECE'}});
+  for(const [date,quantity] of [[yesterday,2],[today,7]] as const) await prisma.sale.create({data:{organizationId:org.id,stationId:station.id,employeeId:owner.id,productId:product.id,kind:'PRODUCT',paymentMethod:'CASH',quantity,unitPrice:20,totalAmount:quantity*20,occurredAt:indiaDayRange(date).start}});
+  await Promise.all([scheduleOwnerEmails(now),scheduleOwnerEmails(now)]);
+  const jobs=await prisma.ownerEmailDelivery.findMany({where:{organizationId:org.id,type:'DAILY_SUMMARY'}});
+  expect(jobs).toHaveLength(2);
+  const previous=jobs.find(job=>(job.guard as {date:string}).date===yesterday)!;
+  expect(previous.message).toContain('WATER: 2 piece');expect(previous.message).not.toContain('7 piece');
+  const sender=vi.fn(async()=>Response.json({data:{succeeded:1,failed:0,email_id:randomUUID()}}));vi.stubGlobal('fetch',sender);
+  // Drain only this isolated organization; overlap cannot send twice.
+  await Promise.all([drainEmailQueue({organizationId:org.id}),drainEmailQueue({organizationId:org.id})]);
+  expect(sender).toHaveBeenCalledTimes(2);
+  const bodies=sender.mock.calls.map(call=>JSON.parse((call as unknown as [string,RequestInit])[1].body as string));
+  expect(bodies.some(body=>body.subject===`Delayed summary · ${yesterday} · Recovery fixture`)).toBe(true);
+  await scheduleOwnerEmails(now);await drainEmailQueue({organizationId:org.id});expect(sender).toHaveBeenCalledTimes(2);
+  expect(await prisma.ownerEmailDelivery.count({where:{organizationId:org.id,type:'OVERDUE_CUSTOMER'}})).toBe(0);
+ });
+
 });

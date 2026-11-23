@@ -5,6 +5,7 @@ import { Prisma, type OwnerEmailDelivery, type OwnerNotificationType, type Owner
 import { env } from '../../config/env.js';
 import { prisma } from '../../lib/prisma.js';
 import { indiaDate } from '../../lib/india-time.js';
+import { dailyEmailDateEligible } from './email-report-period.js';
 import { emailDesign } from './email-template.js';
 import { coreDailyMessage, stockAlertMessage, receiptMessage, shiftMessage, isRecentReceipt } from './agent-messages.js';
 import { readDailyOperatingFacts, readReceiptMessageFacts, readShiftMessageFacts, readTankAlertFacts } from './message-facts.js';
@@ -26,7 +27,7 @@ export function allowsOwnerEmail(type: OwnerNotificationType, recordType: string
 // Sending is available to every organization. Consent and an accepted welcome
 // for the exact owner/address remain mandatory at queueing and delivery time.
 export const emailDeliveryReady = (_organizationId?: string) => Boolean(env.EMAIL_DELIVERY_ENABLED && env.SMTP2GO_API_KEY);
-const owners = (organizationId: string, db: Prisma.TransactionClient) => db.user.findMany({ where: { organizationId, role: 'OWNER', active: true, loginEnabled: true, ownerEmailPreference: { is: { organizationId, enabled: true, adminPaused: false } } }, select: { id: true, email: true, name: true } });
+const owners = (organizationId: string, db: Prisma.TransactionClient) => db.user.findMany({ where: { organizationId, role: 'OWNER', active: true, loginEnabled: true, ownerEmailPreference: { is: { organizationId, enabled: true, adminPaused: false } } }, select: { id: true, email: true, name: true, ownerEmailPreference: { select: { updatedAt: true } } } });
 /** Activation is recipient-specific; an old address or another owner cannot unlock email. */
 export async function acceptedWelcome(organizationId: string, ownerId: string, destination: string, db: Prisma.TransactionClient = prisma) {
   return db.ownerEmailDelivery.findFirst({ where: { organizationId, ownerId, destination, type: 'OWNER_WELCOME', status: 'ACCEPTED', acceptedAt: { not: null } }, select: { id: true, acceptedAt: true }, orderBy: { acceptedAt: 'desc' } });
@@ -46,6 +47,10 @@ export async function queueOwnerEmail(input: { organizationId: string; stationId
         const hour = input.type === 'DAILY_SUMMARY' ? settings.dailySummaryHour : settings.creditReportHour;
         const scheduledAt = new Date(`${input.guard.date ?? indiaDate()}T${String(hour).padStart(2, '0')}:00:00+05:30`);
         if (scheduledAt < welcome.acceptedAt) continue;
+        // A fresh consent/resume starts future reports; do not backfill days
+        // when this owner might have been opted out or administratively paused.
+        if (input.type === 'DAILY_SUMMARY' && input.guard.date && input.guard.date < indiaDate()
+          && owner.ownerEmailPreference && scheduledAt < owner.ownerEmailPreference.updatedAt) continue;
       }
     }
     const dedupeKey = `email:${digest([input.organizationId, input.stationId ?? null, input.type, input.eventKey, owner.id, destination])}`;
@@ -54,6 +59,14 @@ export async function queueOwnerEmail(input: { organizationId: string; stationId
       type: input.type, eventKey: input.eventKey, dedupeKey, recordType: input.recordType, message: input.message,
       guard: { ...input.guard, ownerName: owner.name } as Prisma.InputJsonValue,
     } });
+    // Rebuild only a daily report that has never crossed the provider boundary.
+    // Accepted, failed, unknown and processing jobs are never replayed or overwritten.
+    if (input.type === 'DAILY_SUMMARY') await db.ownerEmailDelivery.updateMany({
+      where: { organizationId: input.organizationId, ownerId: owner.id, destination, dedupeKey, attempts: 0,
+        OR: [{ status: 'PENDING' }, { status: 'SUPPRESSED', suppressionReason: { in: ['source_changed', 'message_expired'] } }] },
+      data: { message: input.message, guard: { ...input.guard, ownerName: owner.name } as Prisma.InputJsonValue,
+        status: 'PENDING', suppressionReason: null, errorMessage: null },
+    });
     // Explicit admin preparation may restore a never-attempted, suppressed welcome.
     // Accepted, failed or uncertain provider attempts retain their existing recovery rules.
     if (input.type === 'OWNER_WELCOME') await db.ownerEmailDelivery.updateMany({ where: { organizationId: input.organizationId, ownerId: owner.id, destination, dedupeKey, status: 'SUPPRESSED', attempts: 0 }, data: { status: 'PENDING', suppressionReason: null, errorMessage: null, nextAttemptAt: new Date() } });
@@ -69,7 +82,8 @@ export async function queueEmailWelcome(organizationId: string, db: Prisma.Trans
 export async function emailFactsStillCurrent(job: OwnerEmailDelivery, now: Date) {
   const guard = job.guard as Guard;
   if (job.type === 'OWNER_WELCOME') return true;
-  if (['DAILY_SUMMARY', 'OVERDUE_CUSTOMER'].includes(job.type) && (guard.date ?? indiaDate(job.createdAt)) !== indiaDate(now)) return false;
+  if (job.type === 'OVERDUE_CUSTOMER' && (guard.date ?? indiaDate(job.createdAt)) !== indiaDate(now)) return false;
+  if (job.type === 'DAILY_SUMMARY' && !dailyEmailDateEligible(guard.date ?? indiaDate(job.createdAt), now)) return false;
   if (job.type === 'OVERDUE_CUSTOMER') {
     const credit = await creditDeliverySnapshot(job.organizationId, now);
     return Boolean(credit.facts.some(customer => customer.outstanding > 0) && guard.snapshot && credit.snapshot === guard.snapshot);
@@ -151,7 +165,7 @@ export async function drainEmailQueue(options: { organizationId?: string; delive
         : !organization || (job.stationId && !station) ? 'fuel_station_unavailable'
         : job.type !== 'OWNER_WELCOME' && !planActive ? 'subscription_inactive'
         : job.type !== 'OWNER_WELCOME' && !allowsOwnerEmail(job.type, job.recordType, hasActiveIntelligence(organization)) ? 'category_not_in_plan'
-        : job.type !== 'OWNER_WELCOME' && fresh.getTime() - job.createdAt.getTime() > 86_400_000 ? 'message_expired'
+        : !['OWNER_WELCOME', 'DAILY_SUMMARY'].includes(job.type) && fresh.getTime() - job.createdAt.getTime() > 86_400_000 ? 'message_expired'
         : !(await emailFactsStillCurrent(job, fresh)) ? 'source_changed' : null;
       if (reason) { await finish({ status: 'SUPPRESSED', suppressionReason: reason }); continue; }
       if (!emailDeliveryReady(job.organizationId)) { await finish({ status: 'PENDING' }); continue; }

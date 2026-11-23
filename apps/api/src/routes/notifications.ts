@@ -1,3 +1,4 @@
+import { trackEmailWorker } from '../modules/notifications/email-worker-health.js';
 import { readOwnerEmailState } from '../modules/notifications/email-owner-state.js';
 import { prepareAgentEmails, scheduleOwnerEmails } from '../modules/notifications/email-scheduler.js';
 import { drainEmailQueue } from '../modules/notifications/email-queue.js';
@@ -19,20 +20,29 @@ import { listAlerts, markAlert, notifyMarketPriceOutlook, registerPushDevice, ru
 
 export const notificationsRouter = Router();
 
+// Vercel supplies CRON_SECRET for its independent daily fallback. This route
+// sends email only; it cannot activate accounts or send WhatsApp messages.
+notificationsRouter.get('/cron/email-fallback', async (req, res) => {
+  if (!env.CRON_SECRET || req.get('authorization') !== `Bearer ${env.CRON_SECRET}`) throw new AppError(401, 'CRON_UNAUTHORIZED', 'This scheduled task is not authorized.');
+  const scheduled = await trackEmailWorker('schedule', () => scheduleOwnerEmails(), result => result.failed > 0);
+  const delivered = await trackEmailWorker('delivery', () => drainEmailQueue());
+  res.status(scheduled.failed ? 503 : 200).json({ ...scheduled, ...delivered });
+});
+
 notificationsRouter.get('/cron/email-schedule', async (req, res) => {
   if (!env.EMAIL_CRON_SECRET || req.get('authorization') !== `Bearer ${env.EMAIL_CRON_SECRET}`) throw new AppError(401, 'CRON_UNAUTHORIZED', 'This scheduled task is not authorized.');
-  const result = await scheduleOwnerEmails();
-  res.status(result.failed ? 503 : 200).json(result);
+  const result = await trackEmailWorker('schedule', () => scheduleOwnerEmails(), result => result.failed > 0);
+  res.status(result.failed ? 503 : 200).json({ ...result, backupConfigured: Boolean(env.CRON_SECRET) });
 });
 
 notificationsRouter.get('/cron/email-agent-messages', async (req, res) => {
   if (!env.EMAIL_CRON_SECRET || req.get('authorization') !== `Bearer ${env.EMAIL_CRON_SECRET}`) throw new AppError(401, 'CRON_UNAUTHORIZED', 'This scheduled task is not authorized.');
-  res.json(await prepareAgentEmails());
+  res.json(await trackEmailWorker('agents', () => prepareAgentEmails()));
 });
 
 notificationsRouter.get('/cron/email-delivery', async (req, res) => {
   if (!env.EMAIL_CRON_SECRET || req.get('authorization') !== `Bearer ${env.EMAIL_CRON_SECRET}`) throw new AppError(401, 'CRON_UNAUTHORIZED', 'This scheduled task is not authorized.');
-  res.json(await drainEmailQueue());
+  res.json(await trackEmailWorker('delivery', () => drainEmailQueue()));
 });
 
 notificationsRouter.get('/cron/whatsapp-delivery', async (req, res) => {

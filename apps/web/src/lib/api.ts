@@ -630,7 +630,7 @@ export const api = {
   updatePlatformServiceTicket: (id: string, input: { status: ServiceTicketStatus; adminNote?: string }) =>
     request<{ ticket: Pick<PlatformServiceTicket, "id" | "status" | "adminNote" | "resolvedAt" | "updatedAt"> }>(`/platform/service-tickets/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
   pauseOwnerEmails: (id: string, ownerId: string, paused: boolean) => request(`/platform/customers/${id}/email-owner/${ownerId}/pause`, { method: 'PUT', body: JSON.stringify({ paused }) }),
-  ownerEmailDeliveries: (id: string) => request<{ ready: boolean; recipients?: OwnerEmailRecipient[]; deliveries: OwnerEmailDelivery[] }>(`/platform/customers/${id}/email-deliveries`),
+  ownerEmailDeliveries: (id: string) => request<{ ready: boolean; workerHealth?: { backupConfigured?: boolean; stages: Array<{ stage: string; status: string; lastSucceededAt: string | null }> }; recipients?: OwnerEmailRecipient[]; deliveries: OwnerEmailDelivery[] }>(`/platform/customers/${id}/email-deliveries`),
   prepareOwnerEmailWelcome: (id: string, ownerId?: string) => request<{ prepared: boolean }>(`/platform/customers/${id}/email-welcome`, { method: 'POST', body: JSON.stringify({ ownerId }) }),
   previewOwnerEmail: (id: string, deliveryId: string) => request<{ subject: string; html: string; text: string }>(`/platform/customers/${id}/email-deliveries/${deliveryId}/preview`),
   retryOwnerEmail: (id: string, deliveryId: string) => request<{ queued: boolean }>(`/platform/customers/${id}/email-deliveries/${deliveryId}/retry`, { method: 'POST' }),
