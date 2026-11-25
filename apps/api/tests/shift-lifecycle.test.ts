@@ -42,7 +42,7 @@ describe('closing shift', () => {
     expect(saved.nozzleAssignments.create).toEqual([{nozzleId:'n',userId:'u'}]);
     expect(saved.openingCashHandover).toMatchObject({ previousShiftId: 'previous', previousClosingCash: '50.00', expectedOpening: '50.00', actualOpening: '50.00', difference: '0.00', enteredById: 'u' });
   });
-  it('opens with an active nozzle left without a fixed attendant', async () => {
+  it('rejects opening when an active nozzle has no attendant', async () => {
     const tx: any = {
       historicalSalesImport:{findMany:vi.fn().mockResolvedValue([])},
       tankReading:{findMany:vi.fn().mockResolvedValue([])},
@@ -53,8 +53,8 @@ describe('closing shift', () => {
       user:{findMany:vi.fn().mockResolvedValue([{id:'u'}])},
     };
     db.$transaction.mockImplementation(async fn=>fn(tx));
-    await openShift('org',{stationId:'station',managerId:'u',userIds:['u'],nozzleAssignments:[],openingCash:0,tankReadings:[{id:'t',value:1000}],nozzleReadings:[{id:'n',value:1000}]});
-    expect(tx.shift.create.mock.calls[0][0].data.nozzleAssignments.create).toEqual([]);
+    await expect(openShift('org',{stationId:'station',managerId:'u',userIds:['u'],nozzleAssignments:[],openingCash:0,tankReadings:[{id:'t',value:1000}],nozzleReadings:[{id:'n',value:1000}]})).rejects.toMatchObject({ code: 'NOZZLE_ASSIGNMENTS_INVALID' });
+    expect(tx.shift.create).not.toHaveBeenCalled();
   });
   it('creates only missing metered sales and rejects a repeated close', async () => {
     const shift = { id: 's', stationId: 'station', status: 'OPEN', configurationId: 'config', openedAt: new Date(), notes: null,

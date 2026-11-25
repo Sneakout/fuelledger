@@ -409,13 +409,12 @@ export async function openShift(organizationId: string, input: OpenShiftInput, e
   }
   const assignedNozzleIds = input.nozzleAssignments.map((row) => row.nozzleId);
   if (
-    new Set(assignedNozzleIds).size !== assignedNozzleIds.length ||
-    assignedNozzleIds.some((id) => !nozzles.some((nozzle) => nozzle.id === id))
+    !exact(assignedNozzleIds, nozzles)
   )
     throw new AppError(
       400,
       "NOZZLE_ASSIGNMENTS_INVALID",
-      "Choose each assigned nozzle only once from this petrol pump.",
+      "Assign one attendant to every active nozzle before opening the shift.",
     );
   const users = await tx.user.findMany({
     where: {

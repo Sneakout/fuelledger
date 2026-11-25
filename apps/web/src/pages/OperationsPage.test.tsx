@@ -153,18 +153,27 @@ it('opens from the reviewed DSR morning values and submits their version', async
   const data: any = workspace(1000);
   data.stations[0].lastClosing.closingCash = "0";
   data.stations[0].openingReadings = { version: 'reviewed-dsr', blockingReason: null,
-    tanks: [{ id: 'ms', value: 5000, date: '2026-11-25', registerId: 'register' }],
+    tanks: [{ id: 'ms', value: 7719.826000000001, date: '2026-11-25', registerId: 'register' }],
     nozzles: [{ id: 'n', value: 20000, source: 'DSR', date: '2026-11-25' }],
   };
   data.stations[0].configurations[0].dispensers = [{ code: 'D1', location: null, nozzles: [{ id: 'n', code: 'N1', openingMeter: 12627, product: { code: 'MS', name: 'Petrol' } }] }];
   shiftBootstrap.mockReset().mockResolvedValue(data); openShift.mockReset().mockResolvedValue({ shift: { id: 'new' } });
   render(<MemoryRouter><OperationsPage /></MemoryRouter>);
   expect(await screen.findByText('Start from confirmed DSR · 2026-11-25 morning')).toBeInTheDocument();
-  expect(screen.getByRole('spinbutton', { name: 'DSR morning stock in litres for MS · MS' })).toHaveValue(5000);
+  expect(screen.getByRole('spinbutton', { name: 'DSR morning stock in litres for MS · MS' })).toHaveValue(7719.83);
   expect(screen.getByRole('spinbutton', { name: 'DSR morning stock in litres for MS · MS' })).toHaveAttribute('readonly');
   expect(screen.getByText('20,000')).toBeInTheDocument();
+  expect(screen.getByText('Petrol')).toHaveClass('nozzle-product-name');
+  const attendant = screen.getByRole('combobox', { name: /Attendant for D1/ });
+  expect(attendant).toBeRequired();
+  expect(attendant).toHaveValue('');
   fireEvent.click(screen.getByRole('button', { name: /^Open shift$/ }));
-  await waitFor(() => expect(openShift).toHaveBeenCalledWith(expect.objectContaining({ openingReadingsVersion: 'reviewed-dsr', nozzleReadings: [{ id: 'n', value: 20000 }], tankReadings: expect.arrayContaining([{ id: 'ms', value: 5000 }]) })));
+  expect(await screen.findByText('Assign an attendant to every nozzle before opening this shift.')).toBeInTheDocument();
+  expect(openShift).not.toHaveBeenCalled();
+  expect(attendant).toHaveFocus();
+  fireEvent.change(attendant, { target: { value: 'owner' } });
+  fireEvent.click(screen.getByRole('button', { name: /^Open shift$/ }));
+  await waitFor(() => expect(openShift).toHaveBeenCalledWith(expect.objectContaining({ openingReadingsVersion: 'reviewed-dsr', nozzleReadings: [{ id: 'n', value: 20000 }], tankReadings: expect.arrayContaining([{ id: 'ms', value: 7719.826000000001 }]) })));
 });
 
 it('requires an owner confirmation and reason before cancelling, then loads replacement readings', async () => {

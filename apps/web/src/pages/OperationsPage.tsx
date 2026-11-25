@@ -18,7 +18,7 @@ const money = (value: string | number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
   }).format(Number(value));
 const cashMoney = (value: string | number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value));
 const captured = (value: string) => `${formatIndiaDateTime(value)} IST`;
@@ -29,7 +29,9 @@ const meterLabel = (
   `${dispenser.code} / ${nozzle.code} · ${nozzle.product.code}${
     dispenser.location ? ` · ${dispenser.location}` : ""
   }`;
-const litres = (value: number) => `${value.toLocaleString("en-IN", { maximumFractionDigits: 3 })} L`;
+const readingNumber = (value: number) => Number(value.toFixed(2));
+const formatReading = (value: number) => value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+const litres = (value: number) => `${formatReading(value)} L`;
 function bridgeValues(shift: Shift, tankId: string, actual: number, closingMeters: Reading[], testing: ClosingNozzleReading[]) {
   const tank = shift.tankReadings.find((reading) => reading.tankId === tankId)!;
   const nozzleIds = new Set(tank.stockBridge.nozzles.map((nozzle) => nozzle.id));
@@ -65,8 +67,8 @@ function Field({
         type="number"
         min="0"
         step="0.01"
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        value={readingNumber(value)}
+        onChange={(e) => onChange(readingNumber(Number(e.target.value)))}
       />
     </label>
   );
@@ -207,10 +209,10 @@ export function OperationsPage() {
         d.nozzles.map((n) => {
           const prior = last?.nozzleAssignments?.find(row => row.nozzleId === n.id)?.userId;
           const candidate = prior ?? n.attendantAssignment?.userId;
-          return { nozzleId: n.id, userId: stationUsers.some(user => user.id === candidate) ? candidate! : manager.id };
+          return { nozzleId: n.id, userId: stationUsers.some(user => user.id === candidate) ? candidate! : "" };
         }),
       ) ?? [];
-      const assignedAttendants = [...new Set(configuredAssignments.map(row => row.userId))];
+      const assignedAttendants = [...new Set(configuredAssignments.map(row => row.userId).filter(Boolean))];
       setManagerId(manager.id);
       setUserIds([...new Set([manager.id, ...assignedAttendants])]);
       setNozzleAssignments(configuredAssignments);
@@ -244,7 +246,7 @@ export function OperationsPage() {
     data?.users.filter(
       (user) => user.role === "OWNER" || user.stationIds.includes(stationId),
     ) ?? [];
-  const attendants = stationUsers.filter((user) => user.role === "STAFF");
+  const attendants = stationUsers.filter((user) => ["STAFF", "MANAGER", "OWNER"].includes(user.role));
   useEffect(() => {
     if (active) {
       setCloseTanks(
@@ -332,6 +334,13 @@ export function OperationsPage() {
   async function open() {
     if (!stationId || !managerId) {
       setError("Choose a fuel station and manager.");
+      return;
+    }
+    const requiredNozzles = config?.dispensers.flatMap(dispenser => dispenser.nozzles) ?? [];
+    const unassigned = requiredNozzles.find(nozzle => !nozzleAssignments.some(assignment => assignment.nozzleId === nozzle.id && assignment.userId));
+    if (unassigned) {
+      setError("Assign an attendant to every nozzle before opening this shift.");
+      document.getElementById(`attendant-${unassigned.id}`)?.focus();
       return;
     }
     if (expectedCash !== null && expectedCash < 0) {
@@ -507,23 +516,23 @@ export function OperationsPage() {
                     <div className="nozzle-closing-row" key={reading.nozzleId}>
                       <span className="nozzle-identity">
                         <b>{meterLabel(reading.nozzle.dispenser, reading.nozzle)}</b>
-                        <small>{reading.nozzle.product.name}</small>
+                        <strong className="nozzle-product-name">{reading.nozzle.product.name}</strong>
                       </span>
                       <span className="nozzle-attendant" data-label="Attendant">
                         {assignment?.user.name ?? "Not assigned"}
                       </span>
                       <span className="opening-meter" data-label="Opening meter (L)">
-                        {Number(reading.openingMeter).toLocaleString("en-IN")}
+                        {formatReading(Number(reading.openingMeter))}
                       </span>
                       <label data-label="Closing meter (L)">
                         <input
                           aria-label={`Closing meter in litres for ${reading.nozzle.code}`}
                           type="number"
                           min={Number(reading.openingMeter)}
-                          step="0.001"
-                          value={closeNozzles.find((item) => item.id === reading.nozzleId)?.value ?? 0}
+                          step="0.01"
+                          value={readingNumber(closeNozzles.find((item) => item.id === reading.nozzleId)?.value ?? 0)}
                           onChange={(event) =>
-                            replace(closeNozzles, reading.nozzleId, Number(event.target.value), setCloseNozzles)
+                            replace(closeNozzles, reading.nozzleId, readingNumber(Number(event.target.value)), setCloseNozzles)
                           }
                         />
                       </label>
@@ -534,12 +543,12 @@ export function OperationsPage() {
                           min="0"
                           step="0.01"
                           placeholder="0.00"
-                          value={closeCollections.find((item) => item.id === reading.nozzleId)?.value || ""}
+                          value={readingNumber(closeCollections.find((item) => item.id === reading.nozzleId)?.value ?? 0) || ""}
                           onChange={(event) =>
                             replace(
                               closeCollections,
                               reading.nozzleId,
-                              event.target.value === "" ? 0 : Number(event.target.value),
+                              event.target.value === "" ? 0 : readingNumber(Number(event.target.value)),
                               setCloseCollections,
                             )
                           }
@@ -550,7 +559,7 @@ export function OperationsPage() {
                           <span><Beaker size={14} /> Testing / calibration</span>
                           <small>
                             {(testingReadings.find((item) => item.id === reading.nozzleId)?.testingQuantity ?? 0) > 0
-                              ? `${testingReadings.find((item) => item.id === reading.nozzleId)?.testingQuantity.toLocaleString("en-IN")} L recorded`
+                              ? `${testingReadings.find((item) => item.id === reading.nozzleId)?.testingQuantity.toLocaleString("en-IN", { maximumFractionDigits: 2 })} L recorded`
                               : "No testing"}
                           </small>
                         </summary>
@@ -562,13 +571,13 @@ export function OperationsPage() {
                               type="number"
                               min="0"
                               max={Math.max(0, (closeNozzles.find((item) => item.id === reading.nozzleId)?.value ?? Number(reading.openingMeter)) - Number(reading.openingMeter))}
-                              step="0.001"
-                              value={testingReadings.find((item) => item.id === reading.nozzleId)?.testingQuantity || ""}
+                              step="0.01"
+                              value={readingNumber(testingReadings.find((item) => item.id === reading.nozzleId)?.testingQuantity ?? 0) || ""}
                               placeholder="0"
                               onChange={(event) =>
                                 setTestingReadings((current) =>
                                   current.map((item) => item.id === reading.nozzleId
-                                    ? { ...item, testingQuantity: event.target.value === "" ? 0 : Number(event.target.value) }
+                                    ? { ...item, testingQuantity: event.target.value === "" ? 0 : readingNumber(Number(event.target.value)) }
                                     : item),
                                 )
                               }
@@ -600,7 +609,7 @@ export function OperationsPage() {
                               (closeNozzles.find((item) => item.id === reading.nozzleId)?.value ?? Number(reading.openingMeter)) -
                               Number(reading.openingMeter) -
                               (testingReadings.find((item) => item.id === reading.nozzleId)?.testingQuantity ?? 0),
-                            ).toLocaleString("en-IN")} L</strong>
+                            ).toLocaleString("en-IN", { maximumFractionDigits: 2 })} L</strong>
                           </p>
                         </div>
                       </details>
@@ -755,7 +764,7 @@ export function OperationsPage() {
             </p>
             <div className="opening-nozzle-head" aria-hidden="true">
               <span>Nozzle & product</span>
-              <span>Attendant (optional)</span>
+              <span>Attendant · required</span>
               <span>Meter reading</span>
             </div>
             {config?.dispensers.flatMap((dispenser) =>
@@ -768,17 +777,20 @@ export function OperationsPage() {
                   <div className="opening-nozzle-row" key={nozzle.id}>
                     <span>
                       <b>{meterLabel(dispenser, nozzle)}</b>
-                      <small>{nozzle.product.name}</small>
+                      <strong className="nozzle-product-name">{nozzle.product.name}</strong>
                     </span>
                     <label>
-                      <small>Assigned attendant · optional</small>
+                      <small>Assigned attendant · required</small>
                       <select
+                        required
+                        id={`attendant-${nozzle.id}`}
+                        aria-label={`Attendant for ${meterLabel(dispenser, nozzle)}`}
                         value={assignment?.userId ?? ""}
                         onChange={(event) =>
                           assignAttendant(nozzle.id, event.target.value)
                         }
                       >
-                        <option value="">No fixed attendant</option>
+                        <option value="" disabled>Select attendant</option>
                         {attendants.map((attendant) => (
                           <option key={attendant.id} value={attendant.id}>
                             {attendant.name}
@@ -789,7 +801,7 @@ export function OperationsPage() {
                     <span className="opening-nozzle-value">
                       <small>{selected?.openingReadings?.nozzles.find(source => source.id === nozzle.id)?.source === 'DSR' ? 'DSR morning meter' : 'Meter reading'}</small>
                       <output>
-                        {(reading?.value ?? 0).toLocaleString("en-IN")}
+                        {formatReading(reading?.value ?? 0)}
                       </output>
                     </span>
                   </div>
@@ -872,7 +884,7 @@ export function OperationsPage() {
                 </small>
               </span>
               <span>{s.status.replaceAll("_", " ")}</span>
-              <span>{s.summary.fuelVolume.toLocaleString()} L metered</span>
+              <span>{formatReading(s.summary.fuelVolume)} L metered</span>
             </div>
           ))}
         {!data.shifts.length && <p>No shifts yet. Open the first one above.</p>}
@@ -1024,7 +1036,7 @@ function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance,
             <small>{bridge.testingLoss > 0 ? "Not returned" : "No stock consumed"}</small>
           </span>
           <span data-label="Expected"><b>{litres(bridge.expected)}</b>{Math.abs(Number(reading.stockBridge.adjustments)) > 0.001 && <small>Includes {Number(reading.stockBridge.adjustments) > 0 ? "+" : ""}{litres(Number(reading.stockBridge.adjustments))} approved adjustments</small>}</span>
-          {onChange ? <label data-label="Actual dip"><input aria-label={`Actual closing dip in litres for ${reading.tank.code}`} type="number" min="0" step="0.001" value={actual ?? ""} onChange={(event) => onChange({ id: reading.tankId, value: Number(event.target.value) })}/></label>
+          {onChange ? <label data-label="Actual dip"><input aria-label={`Actual closing dip in litres for ${reading.tank.code}`} type="number" min="0" step="0.01" value={actual === null ? "" : readingNumber(actual)} onChange={(event) => onChange({ id: reading.tankId, value: readingNumber(Number(event.target.value)) })}/></label>
             : <span data-label="Actual dip">{actual === null ? "Unavailable" : litres(actual)}</span>}
           <span className={outside ? "stock-difference variance" : "stock-difference"} data-label="Difference"><b>{actual === null ? "—" : `${bridge.difference > 0 ? "+" : ""}${litres(bridge.difference)}`}</b>{actual !== null && <small>{outside ? (onChange ? "Explain in closing note" : "Outside tolerance") : "Within tolerance"}</small>}</span>
         </div>;
@@ -1076,8 +1088,8 @@ function Readings({
               </span>
               <span className="opening-tank-input">
                 <small>{dsr ? "DSR morning stock (L)" : "Actual opening dip (L)"}</small>
-                <input readOnly={!!dsr} aria-label={`${dsr ? "DSR morning stock" : "Actual opening dip"} in litres for ${label}`} type="number" min="0" step="0.001" value={value}
-                  onChange={event => onChange({ id, value: Number(event.target.value) })}
+                <input readOnly={!!dsr} aria-label={`${dsr ? "DSR morning stock" : "Actual opening dip"} in litres for ${label}`} type="number" min="0" step="0.01" value={readingNumber(value)}
+                  onChange={event => onChange({ id, value: readingNumber(Number(event.target.value)) })}
                 />
               </span>
             </label>
@@ -1133,7 +1145,7 @@ function ShiftSummary({
       <div>
         <span>Metered volume</span>
         <strong>
-          {volume.toLocaleString(undefined, { maximumFractionDigits: 3 })} L
+          {volume.toLocaleString(undefined, { maximumFractionDigits: 2 })} L
         </strong>
       </div>
       <div>

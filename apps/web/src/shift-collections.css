@@ -110,3 +110,15 @@
 }
 .opening-cash-details { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
 .opening-cash-details > summary { color: var(--green); font-size: 13px; font-weight: 750; cursor: pointer; }
+
+.opening-nozzle-row .nozzle-product-name,
+.nozzle-closing-row .nozzle-product-name {
+  display: block;
+  color: var(--forest);
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.opening-nozzle-row select:required:invalid { color: var(--muted); }
