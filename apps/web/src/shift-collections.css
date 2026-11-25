@@ -115,9 +115,11 @@
 .nozzle-closing-row .nozzle-product-name {
   display: block;
   color: var(--forest);
-  font-size: 15px;
-  font-weight: 750;
-  line-height: 1.4;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.45;
+  letter-spacing: -.01em;
   white-space: normal;
   overflow-wrap: anywhere;
 }

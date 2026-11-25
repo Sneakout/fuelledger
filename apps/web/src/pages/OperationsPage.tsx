@@ -22,6 +22,10 @@ const money = (value: string | number) =>
   }).format(Number(value));
 const cashMoney = (value: string | number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(value));
 const captured = (value: string) => `${formatIndiaDateTime(value)} IST`;
+const shiftProductLabel = (product: { code: string; name: string }) => {
+  const code = product.code.trim().toUpperCase();
+  return code === "MS" ? "MS/Petrol" : code === "HSD" ? "HSD/Diesel" : product.name;
+};
 const meterLabel = (
   dispenser: { code: string; location: string | null },
   nozzle: { code: string; product: { code: string } },
@@ -516,7 +520,7 @@ export function OperationsPage() {
                     <div className="nozzle-closing-row" key={reading.nozzleId}>
                       <span className="nozzle-identity">
                         <b>{meterLabel(reading.nozzle.dispenser, reading.nozzle)}</b>
-                        <strong className="nozzle-product-name">{reading.nozzle.product.name}</strong>
+                        <strong className="nozzle-product-name">{shiftProductLabel(reading.nozzle.product)}</strong>
                       </span>
                       <span className="nozzle-attendant" data-label="Attendant">
                         {assignment?.user.name ?? "Not assigned"}
@@ -777,7 +781,7 @@ export function OperationsPage() {
                   <div className="opening-nozzle-row" key={nozzle.id}>
                     <span>
                       <b>{meterLabel(dispenser, nozzle)}</b>
-                      <strong className="nozzle-product-name">{nozzle.product.name}</strong>
+                      <strong className="nozzle-product-name">{shiftProductLabel(nozzle.product)}</strong>
                     </span>
                     <label>
                       <small>Assigned attendant · required</small>

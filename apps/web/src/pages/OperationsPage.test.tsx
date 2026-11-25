@@ -163,7 +163,7 @@ it('opens from the reviewed DSR morning values and submits their version', async
   expect(screen.getByRole('spinbutton', { name: 'DSR morning stock in litres for MS · MS' })).toHaveValue(7719.83);
   expect(screen.getByRole('spinbutton', { name: 'DSR morning stock in litres for MS · MS' })).toHaveAttribute('readonly');
   expect(screen.getByText('20,000')).toBeInTheDocument();
-  expect(screen.getByText('Petrol')).toHaveClass('nozzle-product-name');
+  expect(screen.getByText('MS/Petrol')).toHaveClass('nozzle-product-name');
   const attendant = screen.getByRole('combobox', { name: /Attendant for D1/ });
   expect(attendant).toBeRequired();
   expect(attendant).toHaveValue('');
