@@ -661,7 +661,9 @@ const reading = z.object({
   id: z.string().cuid(),
   value: z.coerce.number().min(0),
 });
+export const cancelShiftSchema = z.object({ reason: z.string().trim().min(5).max(500) });
 export const openShiftSchema = z.object({
+  openingReadingsVersion: z.string().max(64).optional(),
   stationId: z.string().cuid(),
   managerId: z.string().cuid(),
   userIds: z.array(z.string().cuid()).min(1),

@@ -76,7 +76,7 @@ export async function tankReceiptHistory(organizationId: string, stationId: stri
     const oldest = rows.at(-1)?.occurredAt;
     if (!oldest || !newest) return merge([]);
 
-    const station = { stationId, station: { organizationId } };
+    const station = { status: { not: 'CANCELLED' as const }, stationId, station: { organizationId } };
     const shiftFields = {
       id: true, shiftNumber: true, openedAt: true, closedAt: true,
       tankReadings: { select: { tankId: true } },

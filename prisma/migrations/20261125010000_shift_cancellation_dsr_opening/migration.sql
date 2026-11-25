@@ -1,0 +1,2 @@
+ALTER TYPE "ShiftStatus" ADD VALUE IF NOT EXISTS 'CANCELLED';
+ALTER TABLE "shifts" ADD COLUMN "opening_source" JSONB, ADD COLUMN "cancellation" JSONB;

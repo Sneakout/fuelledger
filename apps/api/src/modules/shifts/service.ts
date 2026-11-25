@@ -1,3 +1,6 @@
+import { openingReadings, savedOpeningSource } from './opening-readings.js';
+import { historicalTankReceipts } from './historical-receipts.js';
+import { indiaDayRange } from '../../lib/india-time.js';
 import { closingCollectionFacts } from '../../lib/shift-collections.js';
 import { requiresFuelShift } from '@fuelledger/shared';
 import { safeTransaction } from '../../lib/safe-save.js';
@@ -38,9 +41,12 @@ const exact = (ids: string[], values: Array<{ id: string }>) =>
   new Set(ids).size === ids.length &&
   ids.length === values.length &&
   ids.every((id) => values.some((value) => value.id === id));
-type BridgeDb = Pick<Prisma.TransactionClient, 'inventoryLedger' | 'nozzle'>;
-async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: string; shiftNumber: number; stationId: string; configurationId: string; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }, asOf = new Date(), closing = false) {
-  const occurredAt = shiftMovementWindow(closing ? { openedAt: shift.openedAt, closedAt: asOf } : shift, asOf);
+type BridgeDb = Pick<Prisma.TransactionClient, 'inventoryLedger' | 'nozzle' | 'historicalSalesImport' | 'tank'>;
+async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: string; shiftNumber: number; stationId: string; configurationId: string; openingSource?: unknown; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }, asOf = new Date(), closing = false) {
+  const source = savedOpeningSource(shift.openingSource);
+  const starts = source?.tanks.map(tank => indiaDayRange(tank.date).start) ?? [];
+  const earliest = starts.reduce((min, at) => at < min ? at : min, shift.openedAt);
+  const occurredAt = shiftMovementWindow(closing ? { openedAt: earliest, closedAt: asOf } : { ...shift, openedAt: earliest }, asOf);
   const [movements, nozzles] = await Promise.all([
     db.inventoryLedger.findMany({
       where: {
@@ -89,8 +95,15 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: st
       },
     }),
   ]);
+  const dsrReceipts = starts.length ? await historicalTankReceipts(db, organizationId, shift.stationId) : [];
   return new Map(shift.tankReadings.map((reading) => {
-    const rows = movements.filter((movement) => movement.tankId === reading.tankId);
+    const baseline = source?.tanks.find(tank => tank.id === reading.tankId);
+    const start = baseline ? indiaDayRange(baseline.date).start : shift.openedAt;
+    const rows = movements.filter((movement) => movement.tankId === reading.tankId &&
+      (movement.occurredAt >= start || movement.sale?.shiftId === shift.id));
+    const supplemental = dsrReceipts.filter(receipt => baseline && receipt.occurredAt >= start && receipt.occurredAt <= (shift.closedAt ?? asOf) && receipt.productId === reading.tank?.productId);
+    if (closing && baseline && supplemental.some(receipt => receipt.allocationRequired || receipt.overlapMismatch))
+      throw new AppError(409, 'DSR_RECEIPT_REVIEW_REQUIRED', 'Review the DSR receipt allocation or overlapping purchases before closing this shift.');
     if (reading.tank && rows.some(movement => movement.productId !== reading.tank!.productId))
       throw new AppError(409, 'STOCK_SCOPE_INVALID', 'A stock movement does not match the product assigned to this tank.');
     const receipts = rows.filter((movement) => movement.type === 'RECEIPT');
@@ -100,7 +113,8 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: st
     const testingLoss = rows.filter(movement => movement.type === 'ADJUSTMENT' &&
       movement.occurredAt.getTime() === shift.closedAt?.getTime());
     return [reading.tankId, {
-      received: receipts.reduce((sum, movement) => sum.add(movement.quantityDelta), new Prisma.Decimal(0)),
+      received: receipts.reduce((sum, movement) => sum.add(movement.quantityDelta), new Prisma.Decimal(0)).add(supplemental.filter(receipt => receipt.tankId === reading.tankId).reduce((sum, receipt) => sum.add(receipt.quantity), new Prisma.Decimal(0))),
+      historicalReceived: supplemental.filter(receipt => receipt.tankId === reading.tankId).reduce((sum, receipt) => sum.add(receipt.quantity), new Prisma.Decimal(0)),
       counterSales: sales.filter(movement => !movement.sale?.shiftId || !requiresFuelShift(movement.sale.product))
         .reduce((sum, movement) => sum.minus(movement.quantityDelta), new Prisma.Decimal(0)),
       postedSales: shift.closedAt ? sales.reduce((sum, movement) => sum.minus(movement.quantityDelta), new Prisma.Decimal(0)) : undefined,
@@ -124,7 +138,7 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: st
     }] as const;
   }));
 }
-async function withStockBridge<T extends { id: string; shiftNumber: number; stationId: string; configurationId: string; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }>(organizationId: string, shift: T, db: BridgeDb, asOf = new Date()) {
+async function withStockBridge<T extends { id: string; shiftNumber: number; stationId: string; configurationId: string; openingSource?: unknown; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }>(organizationId: string, shift: T, db: BridgeDb, asOf = new Date()) {
   const bridge = await stockBridge(db, organizationId, shift, asOf);
   return { ...shift, tankReadings: shift.tankReadings.map((reading) => ({ ...reading, receivedDuringShift: bridge.get(reading.tankId)?.received ?? new Prisma.Decimal(0), stockBridge: bridge.get(reading.tankId) })) };
 }
@@ -156,11 +170,15 @@ export async function shiftDetails(organizationId: string, id: string) {
     })), shift.openedAt, previous);
     return {
       ...summary(withBridge),
-      openingStockReview: shift.tankReadings.map(reading => ({
-        code: reading.tank.code,
-        actual: reading.openingDip,
-        ...openings.get(reading.tankId)!,
-      })),
+      openingStockReview: shift.tankReadings.map(reading => {
+        const dsr = savedOpeningSource(shift.openingSource)?.tanks.find(source => source.id === reading.tankId);
+        return {
+          code: reading.tank.code,
+          actual: reading.openingDip,
+          ...openings.get(reading.tankId)!,
+          ...(dsr ? { expectedOpening: new Prisma.Decimal(dsr.value), received: new Prisma.Decimal(0), adjustments: new Prisma.Decimal(0), netOther: new Prisma.Decimal(0), checkpoint: { source: 'Confirmed DSR', date: dsr.date, at: null, incomplete: false } } : {}),
+        };
+      }),
       receiptTimingChanges: movedOut,
     };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
@@ -235,7 +253,7 @@ async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizatio
         stationAccess: { select: { stationId: true } },
       },
     }),
-    tx.shift.findMany({ where: { ...shiftScope, status: { not: 'OPEN' } }, orderBy: { openedAt: 'desc' }, take: 8, include }),
+    tx.shift.findMany({ where: { ...shiftScope, status: { notIn: ['OPEN', 'CANCELLED'] } }, orderBy: { openedAt: 'desc' }, take: 8, include }),
     tx.shift.findMany({ where: { ...shiftScope, status: 'OPEN' }, orderBy: { openedAt: 'desc' }, include }),
   ]);
   const shifts = [...openShifts, ...recentShifts];
@@ -258,6 +276,7 @@ async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizatio
     const openings = await tankOpeningBalances(tx, organizationId, stationTanks, asOf, previous, true);
     return {
       ...station,
+      openingReadings: await openingReadings(tx, organizationId, station.id, station.configurations[0]?.tanks ?? [], station.configurations[0]?.dispensers.flatMap(dispenser => dispenser.nozzles) ?? [], previous ?? null, asOf),
       availableTankStock: stationTanks.map(tank => ({
         id: tank.id,
         value: inventoryByTank.get(tank.id) ?? new Prisma.Decimal(tank.openingStock),
@@ -289,6 +308,7 @@ async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizatio
   }));
   return {
     stations: shapedStations,
+    cancelledShifts: await tx.shift.findMany({ where: { ...shiftScope, status: 'CANCELLED' }, orderBy: { openedAt: 'desc' }, take: 10, select: { id: true, stationId: true, shiftNumber: true, openedAt: true, cancellation: true } }),
     users: users.map((user) => ({
       id: user.id,
       name: user.name,
@@ -356,6 +376,10 @@ export async function openShift(organizationId: string, input: OpenShiftInput, e
       nozzleReadings: { select: { nozzleId: true, closingMeter: true } },
     },
   });
+  const baseline = await openingReadings(tx, organizationId, station.id, tanks, nozzles, previous, openedAt);
+  if (baseline.blockingReason) throw new AppError(409, 'OPENING_DSR_REVIEW_REQUIRED', baseline.blockingReason);
+  if ((baseline.tanks.length || input.openingReadingsVersion) && input.openingReadingsVersion !== baseline.version)
+    throw new AppError(409, 'OPENING_SOURCE_CHANGED', 'The opening readings have changed. Refresh the opening form and review the latest DSR readings.');
   const cashHandover = cashHandoverSnapshot(input, previous, enteredById, openedAt);
   const tankSources = tanks.map((tank) => ({
     id: tank.id,
@@ -366,21 +390,21 @@ export async function openShift(organizationId: string, input: OpenShiftInput, e
   const openings = await tankOpeningBalances(tx, organizationId, tankSources, openedAt, previous);
   for (const reading of input.tankReadings) {
     const tank = tanks.find((item) => item.id === reading.id)!;
-    const expected = Number(openings.get(tank.id)!.expectedOpening);
+    const dsr = baseline.tanks.find(source => source.id === tank.id);
+    const expected = dsr?.value ?? Number(openings.get(tank.id)!.expectedOpening);
+    if (dsr && Math.abs(reading.value - expected) > 0.001)
+      throw new AppError(409, 'OPENING_DSR_TANK_MISMATCH', `This tank must open from its confirmed DSR morning stock of ${expected.toLocaleString()} L. Correct the DSR first if needed.`);
     if (Math.abs(reading.value - expected) > 0.001 && !input.notes?.trim())
       throw new AppError(400, "OPENING_TANK_VARIANCE_NOTE_REQUIRED", `Add a reason for the ${tank.code} opening difference of ${Math.abs(reading.value - expected).toLocaleString()} L.`);
   }
   for (const reading of input.nozzleReadings) {
     const nozzle = nozzles.find((item) => item.id === reading.id)!;
-    const prior = previous?.nozzleReadings.find(
-      (row) => row.nozzleId === reading.id,
-    )?.closingMeter;
-    const expected = Number(prior ?? nozzle.openingMeter);
+    const expected = baseline.nozzles.find(source => source.id === nozzle.id)!.value;
     if (Math.abs(reading.value - expected) > 0.001)
       throw new AppError(
         409,
         "OPENING_READING_MISMATCH",
-        `Nozzle ${nozzle.code} must open at ${expected.toLocaleString()} L, matching ${prior !== null && prior !== undefined ? `shift #${previous!.shiftNumber}'s closing meter` : "its configured opening meter"}. Refresh and try again.`,
+        `Nozzle ${nozzle.code} must open at ${expected.toLocaleString()} L from the latest opening source. Refresh and review the opening readings.`,
       );
   }
   const assignedNozzleIds = input.nozzleAssignments.map((row) => row.nozzleId);
@@ -430,6 +454,7 @@ export async function openShift(organizationId: string, input: OpenShiftInput, e
       shiftNumber: (latest._max.shiftNumber ?? 0) + 1,
       managerId: input.managerId,
       status: "OPEN",
+      openingSource: baseline as unknown as Prisma.InputJsonValue,
       openedAt,
       openingCash: new Prisma.Decimal(input.openingCash),
       openingCashHandover: cashHandover,
@@ -538,6 +563,8 @@ export async function closeShift(
     const difference = tankReading.value - expected;
     return { tank: saved.tank.code, opening: Number(saved.openingDip), actual: tankReading.value, expected, difference, sales, testingLoss };
   });
+  if (tankChecks.some(item => item.expected < -0.001))
+    throw new AppError(409, 'STOCK_INSUFFICIENT', 'The closing nozzle movements exceed the stock available from opening stock and recorded receipts. Review the readings and deliveries.');
   const unchanged = tankChecks.filter((item) =>
     item.sales + item.testingLoss > 0.001 &&
     Math.abs(item.actual - item.opening) <= 0.001 &&
@@ -668,7 +695,11 @@ export async function closeShift(
           reading.testingQuantity,
         );
         const meterOpening = meterClosing.sub(quantity);
-        if (nozzle.product.inventoryTracked)
+        // The complete DSR-based interval was checked above against its saved
+        // morning stock + once-counted receipts - all nozzle movements/testing.
+        // A daily DSR receipt has no exact timestamp, so it cannot satisfy the
+        // unrelated generic intraday availability check; do not invent a time.
+        if (nozzle.product.inventoryTracked && !savedOpeningSource(shift.openingSource)?.tanks.some(source => source.id === tankId))
           await assertStockAvailable(
             tx,
             {
@@ -740,7 +771,11 @@ export async function closeShift(
 
       if (reading.testingQuantity > 0.001 && !reading.testingReturned) {
         const testingQuantity = new Prisma.Decimal(reading.testingQuantity);
-        if (nozzle.product.inventoryTracked)
+        // The complete DSR-based interval was checked above against its saved
+        // morning stock + once-counted receipts - all nozzle movements/testing.
+        // A daily DSR receipt has no exact timestamp, so it cannot satisfy the
+        // unrelated generic intraday availability check; do not invent a time.
+        if (nozzle.product.inventoryTracked && !savedOpeningSource(shift.openingSource)?.tanks.some(source => source.id === tankId))
           await assertStockAvailable(
             tx,
             {
@@ -873,4 +908,27 @@ export async function updateNozzleCustody(
       ? "Nozzle assignments were confirmed when this shift opened and are locked until it closes."
       : "Closed shift assignments are permanent custody records and cannot be changed.",
   );
+}
+
+
+export async function cancelShift(organizationId: string, userId: string, id: string, reason: string) {
+  if (reason.trim().length < 5 || reason.trim().length > 500)
+    throw new AppError(400, 'CANCELLATION_REASON_REQUIRED', 'Explain why this shift was opened by mistake (5–500 characters).');
+  return safeTransaction(prisma, async tx => {
+    const owner = await tx.user.findFirst({ where: { id: userId, organizationId, role: 'OWNER', active: true }, select: { id: true, name: true } });
+    if (!owner) throw new AppError(403, 'SHIFT_CANCEL_OWNER_ONLY', 'Only the account owner can cancel a mistaken shift.');
+    const shift = await tx.shift.findFirst({ where: { id, station: { organizationId } }, include: { ...include, _count: { select: { sales: true } }, reconciliation: { select: { id: true } } } });
+    if (!shift) throw new AppError(404, 'SHIFT_NOT_FOUND', 'This shift is unavailable.');
+    if (shift.status !== 'OPEN') throw new AppError(409, 'SHIFT_NOT_OPEN', 'Only an open shift can be cancelled. Refresh to see its current status.');
+    if (shift._count.sales || shift.reconciliation || shift.closedAt || shift.closingCash !== null ||
+        shift.tankReadings.some(row => row.closingDip !== null) ||
+        shift.nozzleReadings.some(row => row.closingMeter !== null || Number(row.testingQuantity) !== 0) ||
+        shift.nozzleAssignments.some(row => row.collectionAmount !== null))
+      throw new AppError(409, 'SHIFT_HAS_ACTIVITY', 'This shift has saved activity and cannot be cancelled. Review its sales and reconciliation instead.');
+    const claimed = await tx.shift.updateMany({ where: { id, status: 'OPEN' }, data: {
+      status: 'CANCELLED', cancellation: { reason: reason.trim(), cancelledAt: new Date().toISOString(), cancelledById: owner.id, cancelledByName: owner.name },
+    } });
+    if (claimed.count !== 1) throw new AppError(409, 'SHIFT_NOT_OPEN', 'The shift changed while cancelling. Refresh and review it.');
+    return { id: shift.id, shiftNumber: shift.shiftNumber, status: 'CANCELLED' as const };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }

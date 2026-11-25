@@ -106,6 +106,9 @@ function ShiftTimes({
 }
 export function OperationsPage() {
   const navigate = useNavigate();
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelConfirmed, setCancelConfirmed] = useState(false);
+  const [cancelNotice, setCancelNotice] = useState("");
   const { selectedStationId, selectStation: selectWorkspaceStation } = useStation();
   const editedOpeningTanks = useRef(new Set<string>());
   const receiptHistory = useRef<HTMLDetailsElement>(null);
@@ -183,12 +186,12 @@ export function OperationsPage() {
     setCashReason("");
     setCashRefreshStatus("");
     setOpenTanks(
-      config?.tanks.map((t) => ({ id: t.id, value: Number(station.availableTankStock.find(reading => reading.id === t.id)?.expectedOpening ?? t.openingStock) })) ??
+      config?.tanks.map((t) => ({ id: t.id, value: Number(station.openingReadings?.tanks.find(reading => reading.id === t.id)?.value ?? station.availableTankStock.find(reading => reading.id === t.id)?.expectedOpening ?? t.openingStock) })) ??
         [],
     );
     setOpenNozzles(
       config?.dispensers.flatMap((d) =>
-        d.nozzles.map((n) => ({ id: n.id, value: Number(last?.nozzleReadings.find(reading=>reading.id===n.id)?.value??n.openingMeter) })),
+        d.nozzles.map((n) => ({ id: n.id, value: Number(station.openingReadings?.nozzles.find(reading => reading.id === n.id)?.value ?? last?.nozzleReadings.find(reading=>reading.id===n.id)?.value??n.openingMeter) })),
       ) ?? [],
     );
     const stationUsers =
@@ -273,6 +276,7 @@ export function OperationsPage() {
       setCloseCash(Number(active.openingCash));
     }
   }, [active?.id]);
+  useEffect(() => { setCancelConfirmed(false); setCancelReason(""); }, [active?.id]);
   const refreshStock = async (validationMessage?: string) => {
     setRefreshingStock(true);
     if (!validationMessage) setError("");
@@ -285,7 +289,10 @@ export function OperationsPage() {
         Number(tank.expectedOpening) !== Number(selected?.availableTankStock.find(before => before.id === tank.id)?.expectedOpening),
       );
       setData(updated);
+      if (!active && station.openingReadings) setOpenNozzles(station.openingReadings.nozzles.map(({ id, value }) => ({ id, value })));
       setOpenTanks(current => current.map(reading => {
+        const dsr = station.openingReadings?.tanks.find(tank => tank.id === reading.id);
+        if (!active && dsr) return { ...reading, value: dsr.value };
         const after = station.availableTankStock.find(tank => tank.id === reading.id);
         if (!after || editedOpeningTanks.current.has(reading.id)) return reading;
         return { ...reading, value: Number(after.expectedOpening) };
@@ -340,6 +347,7 @@ export function OperationsPage() {
     try {
       await api.openShift({
         stationId,
+        openingReadingsVersion: selected?.openingReadings?.version,
         managerId,
         userIds,
         nozzleAssignments: nozzleAssignments.filter((assignment) => assignment.userId),
@@ -398,6 +406,19 @@ export function OperationsPage() {
       setSaving(false);
     }
   }
+  async function cancelMistakenShift() {
+    if (!active || !cancelConfirmed || cancelReason.trim().length < 5) return;
+    setSaving(true); setError("");
+    try {
+      await api.cancelShift(active.id, cancelReason.trim());
+      setData(current => current ? { ...current, shifts: current.shifts.filter(shift => shift.id !== active.id) } : current);
+      setCancelNotice(`Shift #${active.shiftNumber} was cancelled. Review the opening readings below before starting the replacement shift.`);
+      setCancelReason(""); setCancelConfirmed(false); setNotes("");
+      await load();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to cancel this shift. Refresh and try again.");
+    } finally { setSaving(false); }
+  }
   if (!data)
     return (
       <main className="page">
@@ -435,6 +456,14 @@ export function OperationsPage() {
         </div>
         {error && <div className="form-error" role="alert">{error}</div>}
         <ShiftTimes shift={active} closing />
+        {active.openingSource?.tanks.length ? <div className="opening-source-note"><strong>Opening readings · confirmed DSR morning · {active.openingSource.tanks[0]!.date}</strong><p>Closing meters will capture sales since these morning readings. Receipts recorded after the morning stock are included when checking closing stock.</p></div> : null}
+        {data.canCancelShift && <details className="shift-cancel-panel">
+          <summary>Opened this shift by mistake?</summary>
+          <p>Cancel it before recording any sales or closing readings. FuelNerve keeps the original opening and a cancellation record. Your DSR data stays saved.</p>
+          <label className="field"><span>Reason for cancellation</span><textarea maxLength={500} value={cancelReason} onChange={event => setCancelReason(event.target.value)} placeholder="For example, opened with old readings before the DSR was updated" /></label>
+          <label className="shift-cancel-confirm"><input type="checkbox" checked={cancelConfirmed} onChange={event => setCancelConfirmed(event.target.checked)} />I confirm shift #{active.shiftNumber} was opened by mistake. Discard any unsaved closing entries.</label>
+          <button type="button" className="secondary small" disabled={saving || !cancelConfirmed || cancelReason.trim().length < 5} onClick={() => void cancelMistakenShift()}>{saving ? "Cancelling…" : "Cancel mistaken shift"}</button>
+        </details>}
         <section className="shift-grid">
           <article className="reading-panel">
             <h2>Close the shift</h2>
@@ -633,10 +662,21 @@ export function OperationsPage() {
       <section className="shift-grid">
         <article className="reading-panel">
           <h2>Open shift</h2>
+          {data.canCancelShift && !!data.cancelledShifts?.some(shift => shift.stationId === stationId) && <details className="shift-cancel-panel">
+            <summary>Cancelled shifts</summary>
+            {data.cancelledShifts.filter(shift => shift.stationId === stationId).map(shift => <p key={shift.id}><strong>Shift #{shift.shiftNumber} · Cancelled</strong><br />{shift.cancellation?.reason}<br /><small>{shift.cancellation?.cancelledByName} · {shift.cancellation?.cancelledAt ? captured(shift.cancellation.cancelledAt) : 'Cancellation recorded'}</small></p>)}
+          </details>}
           <p className="time-note">
             <Clock3 /> Opening time is captured automatically when you open the
             shift.
           </p>
+          {cancelNotice && <div className="opening-source-note" role="status">{cancelNotice}</div>}
+          {selected?.openingReadings?.blockingReason && <div className="form-error" role="alert">{selected.openingReadings.blockingReason}</div>}
+          {!!selected?.openingReadings?.tanks.length && <div className="opening-source-note">
+            <strong>Start from confirmed DSR · {selected.openingReadings.tanks[0]!.date} morning</strong>
+            <p>Tank stock and nozzle meters are taken from your saved morning DSR. Closing meters will capture sales from this baseline. The time you open the shift is recorded separately.</p>
+            <p>Check these readings before opening. If a reading is wrong, correct the DSR and select Refresh stock.</p>
+          </div>}
           <div className="form-grid compact">
             <label className="field">
               <span>Fuel station</span>
@@ -747,7 +787,7 @@ export function OperationsPage() {
                       </select>
                     </label>
                     <span className="opening-nozzle-value">
-                      <small>Meter reading</small>
+                      <small>{selected?.openingReadings?.nozzles.find(source => source.id === nozzle.id)?.source === 'DSR' ? 'DSR morning meter' : 'Meter reading'}</small>
                       <output>
                         {(reading?.value ?? 0).toLocaleString("en-IN")}
                       </output>
@@ -769,6 +809,7 @@ export function OperationsPage() {
               id: tank.id,
               label: `${tank.code} · ${tank.product.code}`,
               opening: Number(tank.openingStock),
+              dsr: selected?.openingReadings?.tanks.find(reading => reading.id === tank.id),
               balance: selected?.availableTankStock.find(reading => reading.id === tank.id),
               lastClosingAt: selected?.lastClosing?.closedAt,
             })) ?? []}
@@ -796,7 +837,7 @@ export function OperationsPage() {
           </label>
           <button
             className="primary"
-            disabled={saving || refreshingStock || !stationId}
+            disabled={saving || refreshingStock || !stationId || !!selected?.openingReadings?.blockingReason}
             onClick={() => void open()}
           >
             <Play size={17} /> Open shift
@@ -971,6 +1012,7 @@ function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance,
           <span data-label="Opening">{litres(Number(reading.openingDip))}</span>
           <span data-label="Received">
             <b>{litres(Number(reading.stockBridge.received))}</b>
+            {Number(reading.stockBridge.historicalReceived ?? 0) > 0 && <small>Includes {litres(Number(reading.stockBridge.historicalReceived))} from confirmed DSR receipts · day recorded, exact time unavailable.</small>}
             {reading.stockBridge.deliveries.length > 0 && <details><summary>View {reading.stockBridge.deliveries.length} {reading.stockBridge.deliveries.length === 1 ? "delivery" : "deliveries"}</summary>{reading.stockBridge.deliveries.map((delivery) => <small key={delivery.id}>{[delivery.reference, delivery.supplier, litres(Number(delivery.quantity)), captured(delivery.occurredAt), delivery.correctedLate ? "Time corrected after closing" : delivery.recordedLate ? "Recorded after closing" : null].filter(Boolean).join(" · ")}</small>)}</details>}
           </span>
           <span data-label="Sales">
@@ -995,7 +1037,7 @@ function Readings({
   title, items, values, onChange, onUseExpected, onReviewReceipts, action, refreshStatus,
 }: {
   title: string;
-  items: Array<{ id: string; label: string; opening: number; balance?: ShiftStation["availableTankStock"][number] | undefined; lastClosingAt?: string | undefined }>;
+  items: Array<{ id: string; label: string; opening: number; dsr?: { value: number; date: string } | undefined; balance?: ShiftStation["availableTankStock"][number] | undefined; lastClosingAt?: string | undefined }>;
   values: Reading[];
   onChange(value: Reading): void;
   onUseExpected(value: Reading): void;
@@ -1003,7 +1045,7 @@ function Readings({
   action: React.ReactNode;
   refreshStatus: string;
 }) {
-  const hasBookDifference = items.some(({ balance }) => balance &&
+  const hasBookDifference = items.some(({ balance, dsr }) => !dsr && balance &&
     Math.abs(Number(balance.value) - Number(balance.expectedOpening)) > 0.001);
   return (
     <section className="shift-readings">
@@ -1013,9 +1055,9 @@ function Readings({
         <p><strong>Book stock and expected opening differ.</strong> Expected opening starts with the last measured closing dip and includes stock movements since then. Book stock reflects the full stock history. Check the receipt times and enter the dip measured at opening.</p>
         <button type="button" className="secondary small" onClick={onReviewReceipts}>Review tank receipt history</button>
       </div>}
-      {items.map(({ id, label, opening, balance, lastClosingAt }) => {
+      {items.map(({ id, label, opening, balance, lastClosingAt, dsr }) => {
         const value = values.find(reading => reading.id === id)?.value ?? 0;
-        const expected = Number(balance?.expectedOpening ?? opening);
+        const expected = Number(dsr?.value ?? balance?.expectedOpening ?? opening);
         const difference = value - expected;
         const bookDifference = balance ? Number(balance.value) - expected : 0;
         return (
@@ -1023,17 +1065,18 @@ function Readings({
             <label>
               <span>
                 <strong>{label}</strong>
-                {balance && <>
+                {dsr && <small>Confirmed DSR morning · {dsr.date} · Later receipts are included at closing.</small>}
+                {balance && !dsr && <>
                   <small>{balance.checkpoint ? `${balance.checkpoint.source} · ${balance.checkpoint.date}${balance.checkpoint.at ? ` · ${captured(balance.checkpoint.at)}` : " · morning"} · ${litres(Number(balance.lastActual))}` : balance.lastActual == null ? "Using book stock before opening" : `Last actual closing ${litres(Number(balance.lastActual))} · ${captured(lastClosingAt!)}`}</small>
                   <small>{balance.checkpoint ? "Received since measurement" : balance.lastActual == null ? "Receipts before opening" : "Received between shifts"} {litres(Number(balance.received))} · Adjustments {litres(Number(balance.adjustments))}{Number(balance.netOther) !== 0 && ` · Other movements ${litres(Number(balance.netOther))}`}</small>
                 </>}
-                <small><b>{balance?.checkpoint?.incomplete ? "Available before unrecorded sales" : "Expected opening"} {litres(expected)}</b>{balance && ` · Book stock now ${litres(Number(balance.value))}`}</small>
-                {balance?.stockIssues?.map(issue=><small className="form-error" key={issue}>{issue}</small>)}
+                <small><b>{dsr ? "Opening baseline" : balance?.checkpoint?.incomplete ? "Available before unrecorded sales" : "Expected opening"} {litres(expected)}</b>{balance && ` · Book stock now ${litres(Number(balance.value))}`}</small>
+                {!dsr && balance?.stockIssues?.map(issue=><small className="form-error" key={issue}>{issue}</small>)}
                 {Math.abs(bookDifference) > 0.001 && <small>Book stock is {litres(Math.abs(bookDifference))} {bookDifference > 0 ? "higher" : "lower"}.</small>}
               </span>
               <span className="opening-tank-input">
-                <small>Actual opening dip (L)</small>
-                <input aria-label={`Actual opening dip in litres for ${label}`} type="number" min="0" step="0.001" value={value}
+                <small>{dsr ? "DSR morning stock (L)" : "Actual opening dip (L)"}</small>
+                <input readOnly={!!dsr} aria-label={`${dsr ? "DSR morning stock" : "Actual opening dip"} in litres for ${label}`} type="number" min="0" step="0.001" value={value}
                   onChange={event => onChange({ id, value: Number(event.target.value) })}
                 />
               </span>

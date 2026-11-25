@@ -4,7 +4,7 @@ import { indiaDate, indiaDayRange } from '../../lib/india-time.js';
 
 /** Read confirmed registers only. DSR receipt quantities are daily product totals,
  * so posted deliveries on the same day are components, never extra deliveries. */
-export async function historicalTankReceipts(tx: Prisma.TransactionClient, organizationId: string, stationId: string) {
+export async function historicalTankReceipts(tx: Pick<Prisma.TransactionClient, 'historicalSalesImport' | 'inventoryLedger' | 'tank'>, organizationId: string, stationId: string) {
   const registers = await tx.historicalSalesImport.findMany({
     where: { organizationId, stationId, product: { organizationId, tankLinked: true } },
     select: { id: true, productId: true, rows: true, product: { select: { code: true, unit: true } } },
@@ -42,7 +42,7 @@ export async function historicalTankReceipts(tx: Prisma.TransactionClient, organ
       occurredAt: at, reference: 'Confirmed historical DSR', supplier: null,
       recordedLate: false, correctedLate: false, previousShift: null,
       period: 'DATE_ONLY' as const, shiftId: null, shiftNumber: null, tankInShift: null,
-      tank: tank?.code ?? null, product: register.product.code, unit: register.product.unit,
+      tankId: tank?.id ?? null, productId: register.productId, tank: tank?.code ?? null, product: register.product.code, unit: register.product.unit,
       receiptScopeMismatch: false, timingMismatch: false,
       allocationRequired: !tank, overlapMismatch: postedQuantity.gt(declared),
     }];

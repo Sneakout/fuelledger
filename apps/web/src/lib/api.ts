@@ -331,6 +331,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  cancelShift: (id: string, reason: string) => request<{ shift: { id: string; shiftNumber: number; status: string } }>(`/shifts/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) }),
   closeShift: (id: string, input: ShiftCloseForm) =>
     request<{ shift: Shift }>(`/shifts/${id}/close`, {
       method: "POST",
@@ -832,6 +833,7 @@ export type ClosingNozzleReading = Reading & {
   testingReturned: boolean;
 };
 export type ShiftOpenForm = {
+  openingReadingsVersion?: string | undefined;
   cashHandover?: { previousShiftId: string | null; previousClosingCash: number | null; added: number; removed: number; bankDeposited?: number; otherWithdrawals?: number; reason?: string };
   stationId: string;
   managerId: string;
@@ -849,7 +851,14 @@ export type ShiftCloseForm = {
   nozzleCollections: Array<{ nozzleId: string; amount: number }>;
   notes?: string;
 };
+export type ShiftOpeningReadings = {
+  version: string;
+  nozzles: Array<{ id: string; value: number; source: string; date: string | null }>;
+  tanks: Array<{ id: string; value: number; date: string; registerId: string }>;
+  blockingReason: string | null;
+};
 export type ShiftStation = {
+  openingReadings?: ShiftOpeningReadings;
   id: string;
   name: string;
   code: string;
@@ -925,6 +934,7 @@ export type ShiftReceipt = ShiftDelivery & {
   timingMismatch: boolean;
 };
 export type Shift = {
+  openingSource?: ShiftOpeningReadings | null;
   openingCashHandover?: { previousShiftId: string | null; previousClosingCash: string | null; added: string; removed: string; bankDeposited?: string | null; otherWithdrawals?: string | null; expectedOpening: string | null; actualOpening: string; difference: string | null; reason: string | null; enteredById: string | null; recordedAt: string } | null;
   id: string;
   shiftNumber: number;
@@ -956,6 +966,7 @@ export type Shift = {
       counterSales?: string;
       postedSales?: string;
       postedTestingLoss?: string;
+      historicalReceived?: string;
       received: string;
       adjustments: string;
       deliveries: ShiftDelivery[];
@@ -987,6 +998,8 @@ export type ShiftDetail = Shift & {
   receiptTimingChanges: Array<{ id: string; previousReceivedAt: string; receivedAt: string; receipt: { referenceNo: string | null } }>;
 };
 export type ShiftBootstrap = {
+  cancelledShifts?: Array<{ id: string; stationId: string; shiftNumber: number; openedAt: string; cancellation: { reason: string; cancelledAt: string; cancelledByName: string } | null }>;
+  canCancelShift?: boolean;
   stockVarianceTolerance: number;
   stations: ShiftStation[];
   users: Array<{

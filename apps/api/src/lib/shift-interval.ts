@@ -31,6 +31,7 @@ export async function shiftAtInstant(
   const shifts = await db.shift.findMany({
     where: {
       stationId,
+      status: { not: 'CANCELLED' },
       station: { organizationId },
       openedAt: { lte: instant },
       OR: [{ closedAt: null }, { closedAt: { gt: instant } }],

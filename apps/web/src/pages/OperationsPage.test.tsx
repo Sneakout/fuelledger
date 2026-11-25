@@ -3,14 +3,15 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { OperationsPage } from './OperationsPage';
 
-const { shiftBootstrap, tankReceiptHistory, openShift } = vi.hoisted(() => ({
+const { shiftBootstrap, tankReceiptHistory, openShift, cancelShift } = vi.hoisted(() => ({
   shiftBootstrap: vi.fn(),
   tankReceiptHistory: vi.fn(),
   openShift: vi.fn(),
+  cancelShift: vi.fn(),
 }));
 vi.mock('../lib/api', () => ({
   ApiRequestError: class extends Error {},
-  api: { shiftBootstrap, tankReceiptHistory, openShift },
+  api: { shiftBootstrap, tankReceiptHistory, openShift, cancelShift },
 }));
 vi.mock('../components/StationProvider', () => ({
   useStation: () => ({ selectedStationId: 'station-1', selectStation: vi.fn() }),
@@ -146,4 +147,46 @@ it('shows confirmed DSR receipts with their business day without inventing a shi
  expect(screen.getByText(/Already recorded through purchases 400 L/)).toBeInTheDocument();
  expect(screen.getByRole('link',{name:'View DSR'})).toHaveAttribute('href','/sales/history/import?stationId=station-1&productId=hsd&month=2026-11');
  expect(screen.queryByRole('button',{name:/View shift #/})).not.toBeInTheDocument();
+});
+
+it('opens from the reviewed DSR morning values and submits their version', async () => {
+  const data: any = workspace(1000);
+  data.stations[0].lastClosing.closingCash = "0";
+  data.stations[0].openingReadings = { version: 'reviewed-dsr', blockingReason: null,
+    tanks: [{ id: 'ms', value: 5000, date: '2026-11-25', registerId: 'register' }],
+    nozzles: [{ id: 'n', value: 20000, source: 'DSR', date: '2026-11-25' }],
+  };
+  data.stations[0].configurations[0].dispensers = [{ code: 'D1', location: null, nozzles: [{ id: 'n', code: 'N1', openingMeter: 12627, product: { code: 'MS', name: 'Petrol' } }] }];
+  shiftBootstrap.mockReset().mockResolvedValue(data); openShift.mockReset().mockResolvedValue({ shift: { id: 'new' } });
+  render(<MemoryRouter><OperationsPage /></MemoryRouter>);
+  expect(await screen.findByText('Start from confirmed DSR · 2026-11-25 morning')).toBeInTheDocument();
+  expect(screen.getByRole('spinbutton', { name: 'DSR morning stock in litres for MS · MS' })).toHaveValue(5000);
+  expect(screen.getByRole('spinbutton', { name: 'DSR morning stock in litres for MS · MS' })).toHaveAttribute('readonly');
+  expect(screen.getByText('20,000')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: /^Open shift$/ }));
+  await waitFor(() => expect(openShift).toHaveBeenCalledWith(expect.objectContaining({ openingReadingsVersion: 'reviewed-dsr', nozzleReadings: [{ id: 'n', value: 20000 }], tankReadings: expect.arrayContaining([{ id: 'ms', value: 5000 }]) })));
+});
+
+it('requires an owner confirmation and reason before cancelling, then loads replacement readings', async () => {
+  const data: any = workspace(0); data.canCancelShift = true;
+  data.shifts = [{ id: 'mistake', shiftNumber: 1, status: 'OPEN', openedAt: '2026-11-24T13:03:00Z',
+    station: { id: 'station-1', name: 'Test fuel station' }, manager: { name: 'Owner' }, openingCash: 0,
+    nozzleReadings: [], nozzleAssignments: [], tankReadings: [] }];
+  const replacement: any = workspace(0); replacement.canCancelShift = true;
+  replacement.cancelledShifts = [{ id: 'mistake', stationId: 'station-1', shiftNumber: 1, cancellation: { reason: 'Opened with old readings', cancelledAt: '2026-11-25T06:00:00Z', cancelledByName: 'Owner' } }];
+  shiftBootstrap.mockReset().mockResolvedValueOnce(data).mockResolvedValue(replacement);
+  tankReceiptHistory.mockResolvedValue({ receipts: [], nextCursor: null });
+  cancelShift.mockReset().mockResolvedValue({ shift: { id: 'mistake', status: 'CANCELLED' } });
+  render(<MemoryRouter><OperationsPage /></MemoryRouter>);
+  fireEvent.click(await screen.findByText('Opened this shift by mistake?'));
+  const button = screen.getByRole('button', { name: 'Cancel mistaken shift' });
+  expect(button).toBeDisabled();
+  fireEvent.change(screen.getByRole('textbox', { name: 'Reason for cancellation' }), { target: { value: 'Opened with old readings' } });
+  expect(button).toBeDisabled();
+  fireEvent.click(screen.getByRole('checkbox', { name: /I confirm shift #1/ }));
+  fireEvent.click(button);
+  expect(await screen.findByText(/Shift #1 was cancelled/)).toBeInTheDocument();
+  expect(cancelShift).toHaveBeenCalledWith('mistake', 'Opened with old readings');
+  expect(await screen.findByText('Cancelled shifts')).toBeInTheDocument();
+  expect(screen.getByText('Opened with old readings')).toBeInTheDocument();
 });
