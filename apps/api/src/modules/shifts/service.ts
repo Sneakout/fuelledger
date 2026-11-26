@@ -1,3 +1,4 @@
+import { resolveOpeningTime, validateOpeningSequence } from './opening-time.js';
 import { resolveClosingTime, validateClosingCutoff } from './closing-time.js';
 import { openingReadings, savedOpeningSource } from './opening-readings.js';
 import { historicalTankReceipts } from './historical-receipts.js';
@@ -43,9 +44,10 @@ const exact = (ids: string[], values: Array<{ id: string }>) =>
   ids.length === values.length &&
   ids.every((id) => values.some((value) => value.id === id));
 type BridgeDb = Pick<Prisma.TransactionClient, 'inventoryLedger' | 'nozzle' | 'historicalSalesImport' | 'tank'>;
-async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: string; shiftNumber: number; stationId: string; configurationId: string; openingSource?: unknown; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }, asOf = new Date(), closing = false, strictCutoff = false) {
+async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: string; shiftNumber: number; stationId: string; configurationId: string; openingTimeAudit?: unknown; openingSource?: unknown; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }, asOf = new Date(), closing = false, strictCutoff = false) {
   const source = savedOpeningSource(shift.openingSource);
-  const starts = source?.tanks.map(tank => indiaDayRange(tank.date).start) ?? [];
+  const selectedOpening = (shift.openingTimeAudit as { method?: string } | null)?.method === "SELECTED";
+  const starts = selectedOpening ? [] : source?.tanks.map(tank => indiaDayRange(tank.date).start) ?? [];
   const earliest = starts.reduce((min, at) => at < min ? at : min, shift.openedAt);
   const occurredAt = shiftMovementWindow(closing ? { openedAt: earliest, closedAt: asOf } : { ...shift, openedAt: earliest }, asOf);
   const [movements, nozzles] = await Promise.all([
@@ -96,10 +98,10 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: st
       },
     }),
   ]);
-  const dsrReceipts = starts.length ? await historicalTankReceipts(db, organizationId, shift.stationId) : [];
+  const dsrReceipts = source?.tanks.length ? await historicalTankReceipts(db, organizationId, shift.stationId) : [];
   return new Map(shift.tankReadings.map((reading) => {
     const baseline = source?.tanks.find(tank => tank.id === reading.tankId);
-    const start = baseline ? indiaDayRange(baseline.date).start : shift.openedAt;
+    const start = baseline && !selectedOpening ? indiaDayRange(baseline.date).start : shift.openedAt;
     const rows = movements.filter((movement) => movement.tankId === reading.tankId &&
       (movement.occurredAt >= start || movement.sale?.shiftId === shift.id));
     const supplemental = dsrReceipts.filter(receipt => baseline && receipt.occurredAt >= start && receipt.occurredAt <= (shift.closedAt ?? asOf) && receipt.productId === reading.tank?.productId);
@@ -141,7 +143,7 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: st
     }] as const;
   }));
 }
-async function withStockBridge<T extends { id: string; shiftNumber: number; stationId: string; configurationId: string; openingSource?: unknown; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }>(organizationId: string, shift: T, db: BridgeDb, asOf = new Date()) {
+async function withStockBridge<T extends { id: string; shiftNumber: number; stationId: string; configurationId: string; openingTimeAudit?: unknown; openingSource?: unknown; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }>(organizationId: string, shift: T, db: BridgeDb, asOf = new Date()) {
   const bridge = await stockBridge(db, organizationId, shift, asOf);
   return { ...shift, tankReadings: shift.tankReadings.map((reading) => ({ ...reading, receivedDuringShift: bridge.get(reading.tankId)?.received ?? new Prisma.Decimal(0), stockBridge: bridge.get(reading.tankId) })) };
 }
@@ -193,8 +195,7 @@ export async function bootstrap(organizationId: string, stationIds?: string[]) {
   });
 }
 
-async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizationId: string, stationIds?: string[]) {
-  const asOf = new Date();
+async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizationId: string, stationIds?: string[], asOf = new Date(), previewOnly = false) {
   const shiftScope = { station: { organizationId, ...(stationIds ? { id: { in: stationIds } } : {}) } };
   const [stations, users, recentShifts, openShifts] = await Promise.all([
     tx.station.findMany({
@@ -221,7 +222,7 @@ async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizatio
           },
         },
         shifts: {
-          where: { closedAt: { not: null } },
+          where: { closedAt: { not: null, lte: asOf } },
           orderBy: { closedAt: "desc" },
           take: 1,
           select: {
@@ -256,8 +257,8 @@ async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizatio
         stationAccess: { select: { stationId: true } },
       },
     }),
-    tx.shift.findMany({ where: { ...shiftScope, status: { notIn: ['OPEN', 'CANCELLED'] } }, orderBy: { openedAt: 'desc' }, take: 8, include }),
-    tx.shift.findMany({ where: { ...shiftScope, status: 'OPEN' }, orderBy: { openedAt: 'desc' }, include }),
+    previewOnly ? Promise.resolve([]) : tx.shift.findMany({ where: { ...shiftScope, status: { notIn: ['OPEN', 'CANCELLED'] } }, orderBy: { openedAt: 'desc' }, take: 8, include }),
+    previewOnly ? Promise.resolve([]) : tx.shift.findMany({ where: { ...shiftScope, status: 'OPEN' }, orderBy: { openedAt: 'desc' }, include }),
   ]);
   const shifts = [...openShifts, ...recentShifts];
   const stockSources = stations.flatMap((station) =>
@@ -276,7 +277,7 @@ async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizatio
   );
   const shapedStations = await Promise.all(stations.map(async ({ shifts: [previous], ...station }) => {
     const stationTanks = stockSources.filter(tank => tank.stationId === station.id);
-    const openings = await tankOpeningBalances(tx, organizationId, stationTanks, asOf, previous, true);
+    const openings = await tankOpeningBalances(tx, organizationId, stationTanks, asOf, previous, !previewOnly);
     return {
       ...station,
       openingReadings: await openingReadings(tx, organizationId, station.id, station.configurations[0]?.tanks ?? [], station.configurations[0]?.dispensers.flatMap(dispenser => dispenser.nozzles) ?? [], previous ?? null, asOf),
@@ -324,7 +325,8 @@ async function readOperationsBootstrap(tx: Prisma.TransactionClient, organizatio
 }
 export async function openShift(organizationId: string, input: OpenShiftInput, enteredById: string | null = null) {
   return safeTransaction(prisma, async (tx) => {
-  const openedAt = new Date();
+  const recordedAt = new Date();
+  const openedAt = resolveOpeningTime(input.openedAt, recordedAt);
   const station = await tx.station.findFirst({
     where: { id: input.stationId, organizationId, active: true },
     include: {
@@ -350,6 +352,7 @@ export async function openShift(organizationId: string, input: OpenShiftInput, e
       "STATION_NOT_CONFIGURED",
       "This fuel station needs an active configuration first.",
     );
+  if (input.openedAt) await validateOpeningSequence(tx, organizationId, station.id, openedAt);
   const tanks = config.tanks;
   const nozzles = config.dispensers.flatMap((dispenser) => dispenser.nozzles);
   if (
@@ -379,11 +382,13 @@ export async function openShift(organizationId: string, input: OpenShiftInput, e
       nozzleReadings: { select: { nozzleId: true, closingMeter: true } },
     },
   });
+  if (previous?.closedAt && previous.closedAt > openedAt)
+    throw new AppError(409, 'SHIFT_OPENING_OVERLAP', 'Opening time must be at or after the latest shift’s closing time.');
   const baseline = await openingReadings(tx, organizationId, station.id, tanks, nozzles, previous, openedAt);
   if (baseline.blockingReason) throw new AppError(409, 'OPENING_DSR_REVIEW_REQUIRED', baseline.blockingReason);
   if ((baseline.tanks.length || input.openingReadingsVersion) && input.openingReadingsVersion !== baseline.version)
     throw new AppError(409, 'OPENING_SOURCE_CHANGED', 'The opening readings have changed. Refresh the opening form and review the latest DSR readings.');
-  const cashHandover = cashHandoverSnapshot(input, previous, enteredById, openedAt);
+  const cashHandover = cashHandoverSnapshot(input, previous, enteredById, recordedAt);
   const tankSources = tanks.map((tank) => ({
     id: tank.id,
     stationId: station.id,
@@ -457,6 +462,7 @@ export async function openShift(organizationId: string, input: OpenShiftInput, e
       managerId: input.managerId,
       status: "OPEN",
       openingSource: baseline as unknown as Prisma.InputJsonValue,
+      openingTimeAudit: { recordedAt: recordedAt.toISOString(), enteredById, method: input.openedAt ? "SELECTED" : "NOW", openedAt: openedAt.toISOString() },
       openedAt,
       openingCash: new Prisma.Decimal(input.openingCash),
       openingCashHandover: cashHandover,
@@ -949,5 +955,17 @@ export async function shiftClosingPreview(organizationId: string, id: string, se
     if (selected) await validateClosingCutoff(tx, organizationId, shift, at);
     const bridge = await stockBridge(tx, organizationId, shift, at, true, Boolean(selected));
     return { shift: summary({ ...shift, tankReadings: shift.tankReadings.map(reading => ({ ...reading, receivedDuringShift: bridge.get(reading.tankId)?.received ?? new Prisma.Decimal(0), stockBridge: bridge.get(reading.tankId) })) }), closingAt: at };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+}
+
+
+export async function shiftOpeningPreview(organizationId: string, stationId: string, selected?: string) {
+  return prisma.$transaction(async tx => {
+    const at = resolveOpeningTime(selected);
+    const station = await tx.station.findFirst({ where: { id: stationId, organizationId, active: true }, select: { id: true } });
+    if (!station) throw new AppError(404, 'STATION_NOT_FOUND', 'Choose an active fuel station.');
+    await validateOpeningSequence(tx, organizationId, stationId, at, Boolean(selected));
+    const workspace = await readOperationsBootstrap(tx, organizationId, [stationId], at, true);
+    return { station: workspace.stations[0]!, openingAt: at };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 }

@@ -133,6 +133,11 @@ export async function readShiftMessageFacts(scope: Scope, shiftId: string, asOf 
     completeness: closedAt && collections && tanks.every(tank => tank.physicalClosing !== null) ? 'COMPLETE' : 'INCOMPLETE',
     shiftId, shiftNumber: shift.shiftNumber, station: shift.station, closedAt, sales: productSales(shift.sales), collections, tanks,
     openedAt: shift.openedAt,
+    openingRecordedAt: (() => {
+      const audit = shift.openingTimeAudit as { recordedAt?: string } | null;
+      const recorded = audit?.recordedAt ? new Date(audit.recordedAt) : null;
+      return recorded && Number.isFinite(recorded.getTime()) ? recorded : null;
+    })(),
     closingRecordedAt: (() => {
       const audit = shift.closingTimeAudit as { recordedAt?: string } | null;
       const recorded = audit?.recordedAt ? new Date(audit.recordedAt) : null;

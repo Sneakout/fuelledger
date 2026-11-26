@@ -326,6 +326,7 @@ export const api = {
     `/shifts/stations/${encodeURIComponent(stationId)}/receipts${before ? `?before=${encodeURIComponent(before)}` : ""}`,
   ),
   shiftBootstrap: (fresh = false) => request<ShiftBootstrap>("/shifts/bootstrap", fresh ? { cache: "no-store" } : undefined),
+  shiftOpeningPreview: (stationId: string, openedAt?: string) => request<{ station: ShiftStation; openingAt: string }>(`/shifts/stations/${encodeURIComponent(stationId)}/opening-preview${openedAt ? `?openedAt=${encodeURIComponent(openedAt)}` : ''}`, { cache: 'no-store' }),
   openShift: (input: ShiftOpenForm) =>
     request<{ shift: Shift }>("/shifts/open", {
       method: "POST",
@@ -834,6 +835,7 @@ export type ClosingNozzleReading = Reading & {
   testingReturned: boolean;
 };
 export type ShiftOpenForm = {
+  openedAt?: string | undefined;
   openingReadingsVersion?: string | undefined;
   cashHandover?: { previousShiftId: string | null; previousClosingCash: number | null; added: number; removed: number; bankDeposited?: number; otherWithdrawals?: number; reason?: string };
   stationId: string;
@@ -936,6 +938,7 @@ export type ShiftReceipt = ShiftDelivery & {
   timingMismatch: boolean;
 };
 export type Shift = {
+  openingTimeAudit?: { recordedAt: string; enteredById: string | null; method: "NOW" | "SELECTED"; openedAt: string } | null;
   closingTimeAudit?: { recordedAt: string; enteredById: string | null; method: "NOW" | "SELECTED"; closedAt: string } | null;
   openingSource?: ShiftOpeningReadings | null;
   openingCashHandover?: { previousShiftId: string | null; previousClosingCash: string | null; added: string; removed: string; bankDeposited?: string | null; otherWithdrawals?: string | null; expectedOpening: string | null; actualOpening: string; difference: string | null; reason: string | null; enteredById: string | null; recordedAt: string } | null;

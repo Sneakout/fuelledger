@@ -3,17 +3,18 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { OperationsPage } from './OperationsPage';
 
-const { shiftBootstrap, tankReceiptHistory, openShift, cancelShift, closeShift, shiftClosingPreview } = vi.hoisted(() => ({
+const { shiftBootstrap, tankReceiptHistory, openShift, cancelShift, closeShift, shiftClosingPreview, shiftOpeningPreview } = vi.hoisted(() => ({
   shiftBootstrap: vi.fn(),
   tankReceiptHistory: vi.fn(),
   openShift: vi.fn(),
   cancelShift: vi.fn(),
   closeShift: vi.fn(),
   shiftClosingPreview: vi.fn(),
+  shiftOpeningPreview: vi.fn(),
 }));
 vi.mock('../lib/api', () => ({
   ApiRequestError: class extends Error {},
-  api: { shiftBootstrap, tankReceiptHistory, openShift, cancelShift, closeShift, shiftClosingPreview },
+  api: { shiftBootstrap, tankReceiptHistory, openShift, cancelShift, closeShift, shiftClosingPreview, shiftOpeningPreview },
 }));
 vi.mock('../components/StationProvider', () => ({
   useStation: () => ({ selectedStationId: 'station-1', selectStation: vi.fn() }),
@@ -230,4 +231,30 @@ it('defaults to close now and checks a selected past IST closing time without lo
   expect(screen.getByRole('spinbutton', { name: 'Physical cash counted at closing (₹)' })).toHaveValue(250);
   fireEvent.click(screen.getByRole('button', { name: 'Close & review shift' }));
   await waitFor(() => expect(closeShift).toHaveBeenCalledWith('live', expect.objectContaining({ closedAt: '2026-11-25T12:00:00.000Z', closingCash: 250 })));
+});
+
+it('loads a selected opening date and keeps counted cash and attendant selections', async () => {
+ vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-26T06:00:00Z'));
+ const data: any = workspace(2000); data.stations[0].lastClosing.closingCash = '0';
+ const station = structuredClone(data.stations[0]);
+ station.openingReadings = { version: 'past-opening', nozzles: [], tanks: [], blockingReason: null };
+ station.availableTankStock = station.availableTankStock.map((row: any) => ({ ...row, expectedOpening: '1000', value: '1000' }));
+ shiftBootstrap.mockReset().mockResolvedValue(data);
+ shiftOpeningPreview.mockReset().mockResolvedValue({ station, openingAt: '2026-11-25T06:00:00Z' });
+ openShift.mockReset().mockResolvedValue({ shift: { id: 'new' } });
+ render(<MemoryRouter><OperationsPage /></MemoryRouter>);
+ expect(await screen.findByRole('combobox', { name: 'Shift opening time' })).toHaveValue('now');
+ fireEvent.change(screen.getByRole('spinbutton', { name: 'Physical cash at start (₹)' }), { target: { value: '0' } });
+ fireEvent.change(screen.getByRole('combobox', { name: 'Shift opening time' }), { target: { value: 'custom' } });
+ const time = screen.getByLabelText('Opening date and time (IST)');
+ fireEvent.change(time, { target: { value: '2026-11-27T11:30' } });
+ expect(screen.getByText('Opening time cannot be in the future.')).toBeInTheDocument();
+ expect(screen.getByRole('button', { name: /^Open shift$/ })).toBeDisabled();
+ fireEvent.change(time, { target: { value: '2026-11-25T11:30' } });
+ await waitFor(() => expect(shiftOpeningPreview).toHaveBeenCalledWith('station-1','2026-11-25T06:00:00.000Z'));
+ await waitFor(() => expect(screen.getByRole('button', { name: /^Open shift$/ })).toBeEnabled());
+ expect(screen.getByRole('spinbutton', { name: 'Actual opening dip in litres for MS · MS' })).toHaveValue(1000);
+ expect(screen.getByRole('spinbutton', { name: 'Physical cash at start (₹)' })).toHaveValue(0);
+ fireEvent.click(screen.getByRole('button', { name: /^Open shift$/ }));
+ await waitFor(() => expect(openShift).toHaveBeenCalledWith(expect.objectContaining({ openedAt: '2026-11-25T06:00:00.000Z', openingReadingsVersion: 'past-opening' })));
 });

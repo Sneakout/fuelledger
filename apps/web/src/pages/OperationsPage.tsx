@@ -109,12 +109,17 @@ function ShiftTimes({
           </b>
         </i>
       </span>
-      <p>Opening time is recorded automatically. The saved closing time is used for sales, stock and shift summaries.{shift.closingTimeAudit?.method === 'SELECTED' ? ` Closing entered ${captured(shift.closingTimeAudit.recordedAt)}.` : ''}</p>
+      <p>The saved opening and closing times are used for sales, stock and shift summaries.{shift.openingTimeAudit?.method === 'SELECTED' ? ` Opening entered ${captured(shift.openingTimeAudit.recordedAt)}.` : ''}{shift.closingTimeAudit?.method === 'SELECTED' ? ` Closing entered ${captured(shift.closingTimeAudit.recordedAt)}.` : ''}</p>
     </section>
   );
 }
 export function OperationsPage() {
   const navigate = useNavigate();
+  const [openingTimeMode, setOpeningTimeMode] = useState<'now' | 'custom'>('now');
+  const [openingLocal, setOpeningLocal] = useState('');
+  const [openingPreviewLoading, setOpeningPreviewLoading] = useState(false);
+  const [openingPreviewError, setOpeningPreviewError] = useState('');
+  const openingPreviewRequested = useRef(false);
   const [closingTimeMode, setClosingTimeMode] = useState<'now' | 'custom'>('now');
   const [closingLocal, setClosingLocal] = useState('');
   const [closingPreviewLoading, setClosingPreviewLoading] = useState(false);
@@ -234,6 +239,33 @@ export function OperationsPage() {
     () => data?.shifts.find(s => s.status === "OPEN" && s.station.id === stationId),
     [data, stationId],
   );
+  const openingDate = openingLocal ? new Date(`${openingLocal}:00+05:30`) : null;
+  const selectedOpeningAt = openingDate && Number.isFinite(openingDate.getTime()) ? openingDate.toISOString() : undefined;
+  const openingTimeError = openingTimeMode === 'custom' ? !selectedOpeningAt ? 'Choose the opening date and time.'
+    : openingDate!.getTime() > Date.now() ? 'Opening time cannot be in the future.' : '' : '';
+  function applyOpeningPreview(station: ShiftStation) {
+    setData(previous => previous ? { ...previous, stations: previous.stations.map(before => before.id === station.id ? station : before) } : previous);
+    if (station.openingReadings) setOpenNozzles(station.openingReadings.nozzles.map(({ id, value }) => ({ id, value })));
+    setOpenTanks(current => current.map(reading => {
+      const dsr = station.openingReadings?.tanks.find(tank => tank.id === reading.id);
+      const after = station.availableTankStock.find(tank => tank.id === reading.id);
+      return dsr ? { ...reading, value: dsr.value } : !after || editedOpeningTanks.current.has(reading.id) ? reading : { ...reading, value: Number(after.expectedOpening) };
+    }));
+  }
+  useEffect(() => {
+    if (!stationId || active || (openingTimeMode === 'now' && !openingPreviewRequested.current)) return;
+    if (openingTimeMode === 'custom') openingPreviewRequested.current = true;
+    if (openingTimeError) { setOpeningPreviewLoading(false); setOpeningPreviewError(''); return; }
+    let current = true;
+    setOpeningPreviewLoading(true); setOpeningPreviewError('');
+    const timer = window.setTimeout(() => {
+      void api.shiftOpeningPreview(stationId, openingTimeMode === 'custom' ? selectedOpeningAt : undefined).then(result => {
+        if (current) applyOpeningPreview(result.station);
+      }).catch(error => { if (current) setOpeningPreviewError(error instanceof Error ? error.message : 'Unable to check the opening readings. Try Refresh stock.'); })
+        .finally(() => { if (current) setOpeningPreviewLoading(false); });
+    }, 300);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [stationId, active?.id, openingTimeMode, selectedOpeningAt, openingTimeError]);
   const closingDate = closingLocal ? new Date(`${closingLocal}:00+05:30`) : null;
   const selectedClosingAt = closingDate && Number.isFinite(closingDate.getTime()) ? closingDate.toISOString() : undefined;
   const closingTimeError = closingTimeMode === 'custom' ? !selectedClosingAt ? 'Choose the closing date and time.'
@@ -268,6 +300,13 @@ export function OperationsPage() {
     setRefreshingCash(true);
     setCashRefreshStatus("");
     try {
+      if (!active && openingTimeMode === 'custom') {
+        if (openingTimeError) throw new Error(openingTimeError);
+        const result = await api.shiftOpeningPreview(stationId, selectedOpeningAt);
+        applyOpeningPreview(result.station); setOpeningPreviewError('');
+        setCashRefreshStatus('Previous closing cash checked for the selected opening time. Your counted cash and handover entries have been kept.');
+        return;
+      }
       const updated = await api.shiftBootstrap(true);
       const station = updated.stations.find(item => item.id === stationId);
       if (!station) throw new Error("Fuel station unavailable");
@@ -320,6 +359,13 @@ export function OperationsPage() {
     if (!validationMessage) setError("");
     setStockRefreshStatus("");
     try {
+      if (!active && openingTimeMode === 'custom') {
+        if (openingTimeError) throw new Error(openingTimeError);
+        const result = await api.shiftOpeningPreview(stationId, selectedOpeningAt);
+        applyOpeningPreview(result.station); setOpeningPreviewError('');
+        setStockRefreshStatus('Opening readings refreshed for the selected date and time.');
+        return;
+      }
       if (active && closingTimeMode === 'custom') {
         if (closingTimeError) throw new Error(closingTimeError);
         const result = await api.shiftClosingPreview(active.id, selectedClosingAt);
@@ -375,6 +421,9 @@ export function OperationsPage() {
       );
   };
   async function open() {
+    if (openingTimeError || openingPreviewError || openingPreviewLoading) {
+      setError(openingTimeError || openingPreviewError || 'Wait for the opening readings check to finish.'); return;
+    }
     if (!stationId || !managerId) {
       setError("Choose a fuel station and manager.");
       return;
@@ -399,6 +448,7 @@ export function OperationsPage() {
     try {
       await api.openShift({
         stationId,
+        openedAt: openingTimeMode === "custom" ? selectedOpeningAt : undefined,
         openingReadingsVersion: selected?.openingReadings?.version,
         managerId,
         userIds,
@@ -733,15 +783,22 @@ export function OperationsPage() {
             <summary>Cancelled shifts</summary>
             {data.cancelledShifts.filter(shift => shift.stationId === stationId).map(shift => <p key={shift.id}><strong>Shift #{shift.shiftNumber} · Cancelled</strong><br />{shift.cancellation?.reason}<br /><small>{shift.cancellation?.cancelledByName} · {shift.cancellation?.cancelledAt ? captured(shift.cancellation.cancelledAt) : 'Cancellation recorded'}</small></p>)}
           </details>}
-          <p className="time-note">
-            <Clock3 /> Opening time is captured automatically when you open the
-            shift.
-          </p>
+          <section className="shift-closing-time">
+            <label className="field"><span>Shift opening time</span><select aria-label="Shift opening time" value={openingTimeMode} disabled={saving} onChange={event => setOpeningTimeMode(event.target.value as 'now' | 'custom')}>
+              <option value="now">Open now</option><option value="custom">Choose date and time</option>
+            </select></label>
+            {openingTimeMode === 'custom' && <label className="field"><span>Opening date and time (IST)</span><input type="datetime-local" step="60" value={openingLocal} disabled={saving}
+              min={selected?.lastClosing ? indiaDateTimeLocal(Math.ceil(new Date(selected.lastClosing.closedAt).getTime() / 60000) * 60000) : undefined} max={indiaDateTimeLocal()} onChange={event => setOpeningLocal(event.target.value)} /></label>}
+            <p>{openingTimeMode === 'now' ? 'FuelNerve will use the time you submit this opening.' : 'Choose when this shift actually started. Review the opening counts for that time; DSR readings are taken from the selected business date.'} All times are in IST. The time you enter this record is saved separately.</p>
+            {openingTimeError && <div className="form-error" role="alert">{openingTimeError}</div>}
+            {openingPreviewError && <div className="form-error" role="alert">{openingPreviewError}</div>}
+            {openingPreviewLoading && <p role="status">Checking opening readings for the selected time…</p>}
+          </section>
           {cancelNotice && <div className="opening-source-note" role="status">{cancelNotice}</div>}
           {selected?.openingReadings?.blockingReason && <div className="form-error" role="alert">{selected.openingReadings.blockingReason}</div>}
           {!!selected?.openingReadings?.tanks.length && <div className="opening-source-note">
             <strong>Start from confirmed DSR · {selected.openingReadings.tanks[0]!.date} morning</strong>
-            <p>Tank stock and nozzle meters are taken from your saved morning DSR. Closing meters will capture sales from this baseline. The time you open the shift is recorded separately.</p>
+            <p>Tank stock and nozzle meters are taken from your saved morning DSR. Closing meters will capture sales from this baseline. Review these as opening counts for the chosen start. The entry time is recorded separately.</p>
             <p>Check these readings before opening. If a reading is wrong, correct the DSR and select Refresh stock.</p>
           </div>}
           <div className="form-grid compact">
@@ -885,6 +942,7 @@ export function OperationsPage() {
             })) ?? []}
             values={openTanks}
             refreshStatus={stockRefreshStatus}
+            openingAt={openingTimeMode === "custom" ? selectedOpeningAt : undefined}
             onReviewReceipts={() => {
               const history = receiptHistory.current;
               if (!history) return;
@@ -907,7 +965,7 @@ export function OperationsPage() {
           </label>
           <button
             className="primary"
-            disabled={saving || refreshingStock || !stationId || !!selected?.openingReadings?.blockingReason}
+            disabled={saving || refreshingStock || openingPreviewLoading || !!openingTimeError || !!openingPreviewError || !stationId || !!selected?.openingReadings?.blockingReason}
             onClick={() => void open()}
           >
             <Play size={17} /> Open shift
@@ -1104,7 +1162,7 @@ function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance,
   </section>;
 }
 function Readings({
-  title, items, values, onChange, onUseExpected, onReviewReceipts, action, refreshStatus,
+  title, items, values, onChange, onUseExpected, onReviewReceipts, action, refreshStatus, openingAt,
 }: {
   title: string;
   items: Array<{ id: string; label: string; opening: number; dsr?: { value: number; date: string } | undefined; balance?: ShiftStation["availableTankStock"][number] | undefined; lastClosingAt?: string | undefined }>;
@@ -1114,6 +1172,7 @@ function Readings({
   onReviewReceipts(): void;
   action: React.ReactNode;
   refreshStatus: string;
+  openingAt?: string | undefined;
 }) {
   const hasBookDifference = items.some(({ balance, dsr }) => !dsr && balance &&
     Math.abs(Number(balance.value) - Number(balance.expectedOpening)) > 0.001);
@@ -1140,7 +1199,7 @@ function Readings({
                   <small>{balance.checkpoint ? `${balance.checkpoint.source} · ${balance.checkpoint.date}${balance.checkpoint.at ? ` · ${captured(balance.checkpoint.at)}` : " · morning"} · ${litres(Number(balance.lastActual))}` : balance.lastActual == null ? "Using book stock before opening" : `Last actual closing ${litres(Number(balance.lastActual))} · ${captured(lastClosingAt!)}`}</small>
                   <small>{balance.checkpoint ? "Received since measurement" : balance.lastActual == null ? "Receipts before opening" : "Received between shifts"} {litres(Number(balance.received))} · Adjustments {litres(Number(balance.adjustments))}{Number(balance.netOther) !== 0 && ` · Other movements ${litres(Number(balance.netOther))}`}</small>
                 </>}
-                <small><b>{dsr ? "Opening baseline" : balance?.checkpoint?.incomplete ? "Available before unrecorded sales" : "Expected opening"} {litres(expected)}</b>{balance && ` · Book stock now ${litres(Number(balance.value))}`}</small>
+                <small><b>{dsr ? "Opening baseline" : balance?.checkpoint?.incomplete ? "Available before unrecorded sales" : "Expected opening"} {litres(expected)}</b>{balance && ` · Book stock ${openingAt ? "at opening" : "now"} ${litres(Number(balance.value))}`}</small>
                 {!dsr && balance?.stockIssues?.map(issue=><small className="form-error" key={issue}>{issue}</small>)}
                 {Math.abs(bookDifference) > 0.001 && <small>Book stock is {litres(Math.abs(bookDifference))} {bookDifference > 0 ? "higher" : "lower"}.</small>}
               </span>

@@ -18,13 +18,14 @@ suite('backdated shift closing in isolated PostgreSQL', () => {
     const product = await prisma.product.create({ data: { organizationId: org.id, code: 'MS', name: 'Petrol', category: 'FUEL', unit: 'LITRE', tankLinked: true, meterLinked: true, sellingPrice: 100, purchasePrice: 90 } });
     const tank = await prisma.tank.create({ data: { configurationId: config.id, productId: product.id, code: 'T1', tankType: 'UNDERGROUND', dipMethod: 'MANUAL', nominalCapacity: 20000, workingCapacity: 19000, openingStock: 10000 } });
     const nozzle = await prisma.nozzle.create({ data: { dispenserId: dispenser.id, productId: product.id, code: 'N1', openingMeter: 1000, tankMappings: { create: { tankId: tank.id } } } });
-    const shift = await openShift(org.id, { stationId: station.id, managerId: owner.id, userIds: [owner.id], nozzleAssignments: [{ nozzleId: nozzle.id, userId: owner.id }], openingCash: 0, tankReadings: [{ id: tank.id, value: 10000 }], nozzleReadings: [{ id: nozzle.id, value: 1000 }] }, owner.id);
     const selected = new Date('2026-11-25T12:00:00Z');
     await prisma.inventoryLedger.createMany({ data: [
       { organizationId: org.id, stationId: station.id, productId: product.id, tankId: tank.id, type: 'RECEIPT', quantityDelta: 500, occurredAt: new Date('2026-11-25T08:00:00Z') },
       { organizationId: org.id, stationId: station.id, productId: product.id, tankId: tank.id, type: 'RECEIPT', quantityDelta: 2000, occurredAt: new Date('2026-11-25T13:00:00Z') },
     ] });
     vi.setSystemTime(new Date('2026-11-26T06:00:00Z'));
+    const shift = await openShift(org.id, { openedAt: '2026-11-25T06:00:00Z', stationId: station.id, managerId: owner.id, userIds: [owner.id], nozzleAssignments: [{ nozzleId: nozzle.id, userId: owner.id }], openingCash: 0, tankReadings: [{ id: tank.id, value: 10000 }], nozzleReadings: [{ id: nozzle.id, value: 1000 }] }, owner.id);
+    expect(shift.openingTimeAudit).toMatchObject({ recordedAt: '2026-11-26T06:00:00.000Z', method: 'SELECTED', enteredById: owner.id });
     const input = { closedAt: selected.toISOString(), closingCash: 9500, tankReadings: [{ id: tank.id, value: 10400 }], nozzleReadings: [{ id: nozzle.id, value: 1100, testingQuantity: 5, testingReturned: false }], nozzleCollections: [{ nozzleId: nozzle.id, amount: 9500 }] };
     await expect(closeShift(org.id, shift.id, { ...input, closedAt: '2026-11-25T05:00:00Z' }, owner.id)).rejects.toMatchObject({ code: 'SHIFT_CLOSING_BEFORE_OPENING' });
     await expect(closeShift(org.id, shift.id, { ...input, closedAt: '2026-11-27T06:00:00Z' }, owner.id)).rejects.toMatchObject({ code: 'SHIFT_CLOSING_IN_FUTURE' });

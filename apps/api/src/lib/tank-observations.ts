@@ -61,7 +61,7 @@ export async function readLatestTankObservations(db: Pick<Prisma.TransactionClie
   const [registers, checks, shifts] = await Promise.all([
     db.historicalSalesImport.findMany({where:{organizationId,stationId:{in:stationIds},productId:{in:[...new Set(tanks.map(tank => tank.productId))]},monthStart:{lte:asOf}},select:{id:true,stationId:true,productId:true,updatedAt:true,rows:true}}),
     db.tankReading.findMany({where:{organizationId,stationId:{in:stationIds},tankId:{in:tankIds},recordedAt:{lte:asOf}},orderBy:{recordedAt:'desc'},distinct:['tankId'],select:{id:true,tankId:true,stationId:true,physicalStock:true,dipReading:true,recordedAt:true}}),
-    db.shiftTankReading.findMany({where:{tankId:{in:tankIds},shift:{status:{not:'CANCELLED'},station:{organizationId},stationId:{in:stationIds},openedAt:{lte:asOf}}},orderBy:{shift:{openedAt:'desc'}},distinct:['tankId'],select:{tankId:true,openingDip:true,closingDip:true,shift:{select:{id:true,stationId:true,shiftNumber:true,openingSource:true,openedAt:true,closedAt:true}}}}),
+    db.shiftTankReading.findMany({where:{tankId:{in:tankIds},shift:{status:{not:'CANCELLED'},station:{organizationId},stationId:{in:stationIds},openedAt:{lte:asOf}}},orderBy:{shift:{openedAt:'desc'}},distinct:['tankId'],select:{tankId:true,openingDip:true,closingDip:true,shift:{select:{id:true,stationId:true,shiftNumber:true,openingTimeAudit:true,openingSource:true,openedAt:true,closedAt:true}}}}),
   ]);
   const byTank = new Map(tanks.map(tank => [tank.id,tank]));
   const candidates = dsrObservationCandidates(tanks, registers, asOf);
@@ -74,9 +74,10 @@ export async function readLatestTankObservations(db: Pick<Prisma.TransactionClie
     const shift = reading.shift;
     for (const [source,volume,at] of [['SHIFT_OPENING',reading.openingDip,shift.openedAt],['SHIFT_CLOSING',reading.closingDip,shift.closedAt]] as const) {
       if (volume === null || !at || at > asOf) continue;
-      // Reusing a DSR morning dip is not a new timestamped physical measurement.
+      // A reused DSR keeps morning precision unless the user confirms these
+      // opening counts for an explicitly selected operational start.
       const snapshot = shift.openingSource as { tanks?: Array<{ id: string }> } | null;
-      if (source === 'SHIFT_OPENING' && snapshot?.tanks?.some(row => row.id === tank.id)) continue;
+      if (source === 'SHIFT_OPENING' && snapshot?.tanks?.some(row => row.id === tank.id) && (shift.openingTimeAudit as { method?: string } | null)?.method !== 'SELECTED') continue;
       candidates.push({...tank,stationId:shift.stationId,volume:Number(volume),dipCm:null,date:indiaDate(at),observedAt:at.toISOString(),precision:'EXACT',source,sourceId:shift.id,sourceLabel:`Shift #${shift.shiftNumber} ${source === 'SHIFT_CLOSING' ? 'closing' : 'opening'}`,sourcePath:`/operations?shiftId=${shift.id}`,savedAt:null});
     }
   }

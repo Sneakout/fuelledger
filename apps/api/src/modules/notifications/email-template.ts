@@ -11,7 +11,7 @@ export const emailDesign: Partial<Record<OwnerNotificationType, { title: string;
 };
 export const escapeEmailHtml = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
 export type ShiftEmailDetails = {
-  number: number; openedAt: Date; closedAt: Date; recordedAt?: Date | null; managerName: string | null;
+  number: number; openedAt: Date; openingRecordedAt?: Date | null; closedAt: Date; recordedAt?: Date | null; managerName: string | null;
   staff: Array<{ name: string; nozzles: string[] }>;
   channels: Array<{ method: string; expected: string; adjustment: string; actual: string; difference: string }>;
   difference: string; correction: boolean; previousMessage?: string | undefined;
@@ -22,10 +22,12 @@ const channelName: Record<string,string> = { CASH: 'Cash · notes and coins', UP
 function shiftSections(shift: ShiftEmailDetails, shiftCurrentMessage: string) {
   const e = escapeEmailHtml;
   const detail = (label: string, value: string) => `<tr><td style="padding:8px 0;font-size:13px;line-height:1.6;color:#60756c;vertical-align:top;width:90px">${e(label)}</td><td style="padding:8px 0;font-size:14px;line-height:1.6;color:#173f35;font-weight:600">${e(value)}</td></tr>`;
+  const openingEntered = shift.openingRecordedAt && shift.openingRecordedAt.getTime() - shift.openedAt.getTime() > 60_000 ? shift.openingRecordedAt : null;
   const recordedLater = shift.recordedAt && shift.recordedAt.getTime() - shift.closedAt.getTime() > 60_000 ? shift.recordedAt : null;
   const team = shift.staff.map(member => `${member.name}${member.nozzles.length ? ' — ' + member.nozzles.join(', ') : ''}`);
   const rows = [detail('Opened',shiftTime(shift.openedAt)),detail('Closed',shiftTime(shift.closedAt)),detail('Manager',shift.managerName ?? 'Not recorded'),...team.map((value,i)=>detail(i===0?'Shift team':'',value))];
-  if (recordedLater) rows.splice(2, 0, detail('Closing entered', shiftTime(recordedLater)));
+  if (openingEntered) rows.splice(2, 0, detail('Opening entered', shiftTime(openingEntered)));
+  if (recordedLater) rows.splice(openingEntered ? 3 : 2, 0, detail('Closing entered', shiftTime(recordedLater)));
   if (!team.length) rows.push(detail('Shift team','No staff assignments recorded'));
   const channels = shift.channels.filter(c => [c.expected,c.adjustment,c.actual,c.difference].some(n => !new Prisma.Decimal(n).isZero()));
   const paymentRows = channels.map(c => {
@@ -46,7 +48,7 @@ function shiftSections(shift: ShiftEmailDetails, shiftCurrentMessage: string) {
     if(changed.length) changes += `<table role="presentation" width="100%" style="margin-bottom:16px">${changed.map(line=>`<tr><td style="padding:10px;background:#fff6e5;color:#825412;font-size:13px;line-height:1.7">Previously: ${e(oldLines.get(line.split(':')[0]!)!)}<br>Now: ${e(line)}</td></tr>`).join('')}</table>`;
   }
   return {html:`${changes}<h2 style="font-size:17px;margin:0 0 8px;color:#173f35">Shift #${shift.number} · your team and timings</h2><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px">${rows.join('')}</table>${channels.length?`<h2 style="font-size:17px;margin:0 0 8px;color:#173f35">How payments were recorded</h2><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:12px;background:#f4f8f5;border-radius:12px">${paymentRows}</table><p style="font-size:12px;line-height:1.7;color:#60756c;margin:0 0 24px">Cash, UPI, card and other collections are shown separately. Customer and fleet credit are amounts owed, not money collected.</p>`:''}`,
-  text:`${shift.correction?'Updated summary — this replaces the earlier email for this shift.\n\n':''}${changesText}Shift #${shift.number}\nOpened: ${shiftTime(shift.openedAt)}\nClosed: ${shiftTime(shift.closedAt)}\n${recordedLater ? `Closing entered: ${shiftTime(recordedLater)}\n` : ''}Manager: ${shift.managerName ?? 'Not recorded'}\nShift team: ${team.join('; ') || 'No staff assignments recorded'}\n\nHow payments were recorded\n${channels.map(c=>`${channelName[c.method]??c.method}: ${money(['CREDIT','FLEET'].includes(c.method)?c.expected:c.actual)}${new Prisma.Decimal(c.adjustment).isZero()?'':` (adjustment ${money(c.adjustment)})`}`).join('\n')}\nCustomer and fleet credit are money owed, not collected.\n\n`};
+  text:`${shift.correction?'Updated summary — this replaces the earlier email for this shift.\n\n':''}${changesText}Shift #${shift.number}\nOpened: ${shiftTime(shift.openedAt)}\n${openingEntered ? `Opening entered: ${shiftTime(openingEntered)}\n` : ''}Closed: ${shiftTime(shift.closedAt)}\n${recordedLater ? `Closing entered: ${shiftTime(recordedLater)}\n` : ''}Manager: ${shift.managerName ?? 'Not recorded'}\nShift team: ${team.join('; ') || 'No staff assignments recorded'}\n\nHow payments were recorded\n${channels.map(c=>`${channelName[c.method]??c.method}: ${money(['CREDIT','FLEET'].includes(c.method)?c.expected:c.actual)}${new Prisma.Decimal(c.adjustment).isZero()?'':` (adjustment ${money(c.adjustment)})`}`).join('\n')}\nCustomer and fleet credit are money owed, not collected.\n\n`};
 }
 export function renderOwnerEmail(input: { type: OwnerNotificationType; message: string; ownerName: string; stationName: string; appUrl: string; sourceId?: string | undefined; date: string; shift?: ShiftEmailDetails; delayed?: boolean }) {
   const base = emailDesign[input.type];

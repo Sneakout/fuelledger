@@ -234,9 +234,10 @@ it('does not backfill daily emails for days before the current consent or suppor
 
 it('shows the actual backdated shift times separately from the later closing entry time', () => {
  const mail=renderOwnerEmail({type:'SHIFT_CLOSED_SUMMARY',message:'Sales: MS: 95 L',ownerName:'Owner',stationName:'Station',date:'2026-11-25',appUrl:'https://fuel.mindvector.tech',shift:{number:8,
-  openedAt:new Date('2026-11-25T06:00:00Z'),closedAt:new Date('2026-11-25T12:00:00Z'),recordedAt:new Date('2026-11-26T06:00:00Z'),managerName:'Owner',staff:[],channels:[],difference:'0',correction:false}});
+  openedAt:new Date('2026-11-25T06:00:00Z'),openingRecordedAt:new Date('2026-11-26T06:00:00Z'),closedAt:new Date('2026-11-25T12:00:00Z'),recordedAt:new Date('2026-11-26T06:00:00Z'),managerName:'Owner',staff:[],channels:[],difference:'0',correction:false}});
  expect(mail.text).toContain('Opened: 25 Nov 2026');
  expect(mail.text).toContain('Closed: 25 Nov 2026');
+ expect(mail.text).toContain('Opening entered: 26 Nov 2026');
  expect(mail.text).toContain('Closing entered: 26 Nov 2026');
  expect(mail.html).toContain('Closing entered');
  expect(mail.text).toContain('IST');

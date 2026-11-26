@@ -742,6 +742,7 @@ model Shift {
   openingCash         Decimal                   @map("opening_cash") @db.Decimal(12, 2)
   closingCash         Decimal?                  @map("closing_cash") @db.Decimal(12, 2)
   openingCashHandover  Json?                     @map("opening_cash_handover")
+  openingTimeAudit    Json?                     @map("opening_time_audit")
   openingSource       Json?                     @map("opening_source")
   cancellation        Json?
   closingTimeAudit    Json?                     @map("closing_time_audit")

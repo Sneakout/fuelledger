@@ -13,7 +13,7 @@ export type OpeningReadings = {
   blockingReason: string | null;
 };
 
-/** A morning DSR can start today's operations, never rewind a later live closing.
+/** A morning DSR can start operations on its business date, never rewind a later live closing.
  * Its date is a business-day boundary, not an invented physical capture time. */
 export async function openingReadings(db: Pick<Prisma.TransactionClient, 'historicalSalesImport' | 'sale'>,
   organizationId: string, stationId: string, tanks: Tank[], nozzles: Nozzle[], previous: Previous, at: Date): Promise<OpeningReadings> {
@@ -39,7 +39,7 @@ export async function openingReadings(db: Pick<Prisma.TransactionClient, 'histor
     if (!Array.isArray(row.nozzleReadings) || !Array.isArray(row.tankReadings) ||
       productNozzles.some(nozzle => !row.nozzleReadings.some(reading => reading.nozzleId === nozzle.id && Number.isFinite(reading.meterReading) && reading.meterReading >= 0)) ||
       productTanks.some(tank => !row.tankReadings.some(reading => reading.tankId === tank.id && Number.isFinite(reading.calibration?.volumeLitres ?? reading.openingStock) && (reading.calibration?.volumeLitres ?? reading.openingStock) >= 0 && (!reading.calibration || reading.calibration.reviewConfirmed)))) {
-      result.blockingReason = `Today's DSR does not include verified readings for every active tank and nozzle of this product. Complete the DSR before opening.`;
+      result.blockingReason = `The DSR for ${date} does not include verified readings for every active tank and nozzle of this product. Complete it before opening.`;
       continue;
     }
     for (const nozzle of productNozzles) {
@@ -55,7 +55,7 @@ export async function openingReadings(db: Pick<Prisma.TransactionClient, 'histor
     // Recorded sales after a morning baseline cannot also be recreated by closing
     // the same meters. Do not silently fall back to old configuration readings.
     const recorded = await db.sale.findFirst({ where: { organizationId, stationId, productId: register.productId, occurredAt: { gte: start, lte: at } }, select: { id: true } });
-    if (recorded) result.blockingReason = 'Sales are already recorded after today’s DSR morning readings. Review those sales before using the same readings to open a shift.';
+    if (recorded) result.blockingReason = `Sales are already recorded after the DSR morning readings on ${date}. Review those sales before using the same readings to open a shift.`;
   }
   result.nozzles.sort((a, b) => a.id.localeCompare(b.id));
   result.tanks.sort((a, b) => a.id.localeCompare(b.id));
