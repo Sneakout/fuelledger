@@ -422,10 +422,10 @@ export function AskNerveChat({ stationId, stationName, isDemo = false, asOf, pri
         isDemo={isDemo}
         onBack={() => { setSubmittingId(null); setPreviewingId(submittingInvoice.id); }}
         onClose={() => setSubmittingId(null)}
-        onSubmitted={(created, priceApprovals) => {
+        onSubmitted={(created) => {
           setInvoices(current => current.map(invoice => invoice.id === submittingInvoice.id ? { ...invoice, submitted: { id: created.id, invoiceNumber: created.invoiceNumber } } : invoice));
           setPurchaseRecords(current => ({ ...current, invoices: current.invoices.some(invoice => invoice.id === created.id) ? current.invoices : [created, ...current.invoices] }));
-          if (priceApprovals.length > 0) onRecordsChanged();
+          onRecordsChanged();
         }}
       />}
     </dialog>
