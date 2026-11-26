@@ -19,9 +19,9 @@ export async function bootstrap(organizationId: string,stationIds?:string[]) {
   const [stations, products, ledger, receipts, movements] = await Promise.all([
     prisma.station.findMany({ where: { organizationId, active: true,...(stationIds?{id:{in:stationIds}}:{}) }, include: { configurations: { where: { active: true }, take: 1, include: { tanks: { where: { status: 'ACTIVE' }, include: tankInclude(asOf) } } } } }),
     prisma.product.findMany({ where: { organizationId, active: true, inventoryTracked: true }, select: { id: true, name: true, code: true, unit: true, packSizeLitres: true, category: true, tankLinked: true, purchasePrice: true, purchasePriceHistory: { where: { effectiveFrom: { lte: asOf } }, orderBy: { effectiveFrom: 'desc' }, take: 1 } } }),
-    prisma.inventoryLedger.findMany({ where: { organizationId,...(stationIds?{stationId:{in:stationIds}}:{}) }, orderBy: { occurredAt: 'desc' }, take: 80, include: { product: { select: { name: true, code: true, unit: true } }, station: { select: { name: true, code: true } }, tank: { select: { code: true } } } }),
+    prisma.inventoryLedger.findMany({ where: { organizationId,...(stationIds?{stationId:{in:stationIds}}:{}) }, orderBy: { occurredAt: 'desc' }, take: 80, include: { receiptLine: { select: { receipt: { select: { receivedDate: true } } } }, product: { select: { name: true, code: true, unit: true } }, station: { select: { name: true, code: true } }, tank: { select: { code: true } } } }),
     prisma.purchaseReceipt.findMany({ where: { organizationId,...(stationIds?{stationId:{in:stationIds}}:{}) }, orderBy: { receivedAt: 'desc' }, take: 20, include: { station: { select: { name: true } }, lines: { include: { product: { select: { name: true, code: true, unit: true } }, tank: { select: { code: true } } } } } }),
-    prisma.inventoryLedger.findMany({ where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), occurredAt: { lte: asOf } }, select: { stationId: true, productId: true, tankId: true, type: true, quantityDelta: true, occurredAt: true, product: { select: { tankLinked: true } }, tank: { select: { productId: true, configuration: { select: { stationId: true } } } } } }),
+    prisma.inventoryLedger.findMany({ where: { organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}), occurredAt: { lte: asOf } }, select: { stationId: true, productId: true, tankId: true, type: true, quantityDelta: true, occurredAt: true, receiptLine: { select: { receipt: { select: { receivedDate: true, createdAt: true } } } }, product: { select: { tankLinked: true } }, tank: { select: { productId: true, configuration: { select: { stationId: true } } } } } }),
   ]);
   for (const movement of movements) {
     if ((movement.product.tankLinked && !movement.tankId) || (movement.tankId && (!movement.tank || movement.tank.productId !== movement.productId || movement.tank.configuration.stationId !== movement.stationId)))
@@ -40,11 +40,12 @@ export async function bootstrap(organizationId: string,stationIds?:string[]) {
     if (!observation) return {...line,latestObservation:null,operationalStock:null};
     const at = observation.observedAt ? new Date(observation.observedAt) : null;
     const atHistory=at?(await readTankStockTimelines(prisma,organizationId,[{id:tank.id,stationId:station.id,productId:tank.productId,openingStock:tank.openingStock}],at)).get(tank.id):null;
-    const bookThen = at ? atHistory ? Number(atHistory.quantity) : Number(tank.openingStock) + sum(entries.filter(entry => entry.occurredAt <= at)) : null;
+    const uncertainReceiptAtReading = Boolean(at && entries.some(entry => entry.receiptLine?.receipt.receivedDate === observation.date && entry.receiptLine.receipt.createdAt > at));
+    const bookThen = at && !uncertainReceiptAtReading ? atHistory ? Number(atHistory.quantity) : Number(tank.openingStock) + sum(entries.filter(entry => entry.occurredAt <= at)) : null;
     return {...line,operationalStock:operationalStocks.get(tank.id)??null,latestObservation:observation,physicalStock:observation.volume,dipReading:observation.dipCm,readAt:at,bookStockAtReading:bookThen,variance:bookThen === null ? null : observation.volume-bookThen};
   }) ?? []));
   const untanked = stations.flatMap(station => products.filter(product => !product.tankLinked).map(product => reconciliation({ station, product, entries: ledgerByStationProduct.get(`${station.id}:${product.id}`) ?? [] })));
-  return { asOf, stations, products, tanks, untanked, ledger, receipts };
+  return { asOf, stations, products, tanks, untanked, ledger: ledger.map(entry => ({ ...entry, receivedDate: entry.receiptLine?.receipt?.receivedDate ?? null })), receipts };
 }
 
 export type StockMovementForAnalysis = { id: string; tankId: string | null; type: 'RECEIPT' | 'SALE' | 'ADJUSTMENT'; quantityDelta: Prisma.Decimal | number; occurredAt: Date; note: string | null };

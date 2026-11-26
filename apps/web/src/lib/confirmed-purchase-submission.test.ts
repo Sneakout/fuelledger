@@ -84,3 +84,15 @@ describe("confirmed purchase submission", () => {
     expect(validateConfirmedPurchase(draft, "", "supplier-1").join(" ")).toContain("selected fuel station");
   });
 });
+
+
+it('uses the invoice delivery day by default and converts an optional actual time from IST', () => {
+ const make = (options = {}) => buildConfirmedPurchaseInput(draft, 'station-1', 'supplier-1', ['product-1'], options);
+ expect(make()).toMatchObject({ receivedDate: draft.invoiceDate });
+ expect(make().receivedAt).toBeUndefined();
+ expect(make({ deliveryDate:'2026-09-03',deliveryTime:'08:30' })).toMatchObject({ receivedAt:'2026-09-03T03:00:00.000Z' });
+ expect(make({ deliveryDate:'2026-09-03',deliveryTime:'08:30' }).receivedDate).toBeUndefined();
+ expect(make({ receiveNow:false }).receivedDate).toBeUndefined();
+ expect(() => make({ deliveryDate:'2026-02-30' })).toThrow();
+ expect(() => make({ deliveryDate:'2999-01-01' })).toThrow();
+});

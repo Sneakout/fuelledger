@@ -22,7 +22,7 @@ describe('selected opening times', () => {
  });
  it('requires a known receipt time for an intraday start but does not change Open now', async () => {
   receipts.mockResolvedValue([{ businessDate: '2026-11-25', quantity: { gt: () => true } }]);
-  const db = { shift: { findFirst: vi.fn().mockResolvedValue(null) } };
+  const db = { shift: { findFirst: vi.fn().mockResolvedValue(null) }, inventoryLedger: { findFirst: vi.fn().mockResolvedValue(null) } };
   await expect(validateOpeningSequence(db as never, 'org', 'station', at)).rejects.toMatchObject({ code: 'SHIFT_OPENING_RECEIPT_TIME_REQUIRED' });
   await expect(validateOpeningSequence(db as never, 'org', 'station', at, false)).resolves.toBeUndefined();
  });

@@ -1,6 +1,7 @@
 import type { PurchaseInvoiceInput } from "@fuelledger/shared";
 import type { PurchaseInvoice, PurchaseProduct, PurchaseStation, Supplier } from "./api";
 import { calculatedInvoiceTotal, validateEditableInvoiceDraft, type EditableInvoiceDraft } from "../components/EditableInvoiceReviewDialog";
+import { indiaDate } from "./india-time";
 import { defaultPurchaseDueDate } from "./purchase-due-date";
 
 export function findMatchingSupplier(draft: EditableInvoiceDraft, suppliers: Supplier[]) {
@@ -91,7 +92,7 @@ export function buildConfirmedPurchaseInput(
   stationId: string,
   supplierId: string,
   productIds: Array<string | null>,
-  options: { receiveNow?: boolean; tankIds?: Array<string | null> } = {},
+  options: { receiveNow?: boolean; tankIds?: Array<string | null>; deliveryDate?: string; deliveryTime?: string | undefined } = {},
 ): PurchaseInvoiceInput {
   const errors = validateConfirmedPurchase(draft, stationId, supplierId);
   if (errors.length) throw new Error(errors[0]);
@@ -107,6 +108,7 @@ export function buildConfirmedPurchaseInput(
     taxAmount: Number(draft.taxAmount || 0),
     purchasePriceExcludedAmount: Number(draft.purchasePriceExcludedAmount || 0) || undefined,
     receiveNow,
+    ...(receiveNow ? confirmedReceiptTiming(options.deliveryDate ?? draft.invoiceDate, options.deliveryTime) : {}),
     paidNow: false,
     attachment: null,
     lines: draft.lines.map((line, index) => ({
@@ -120,6 +122,20 @@ export function buildConfirmedPurchaseInput(
       hsnCode: line.hsnCode.trim() || undefined,
     })),
   };
+}
+
+export function confirmedReceiptTiming(day: string, time?: string) {
+  const validDay = /^\d{4}-\d{2}-\d{2}$/.test(day) && !Number.isNaN(Date.parse(`${day}T00:00:00Z`)) && new Date(`${day}T00:00:00Z`).toISOString().slice(0,10) === day;
+  if (!validDay) throw new Error("Choose a valid stock delivery date.");
+  if (time) {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error("Choose a valid unloading time.");
+    const at = new Date(`${day}T${time}:00+05:30`);
+    if (at > new Date()) throw new Error("Stock delivery cannot be in the future.");
+    return { receivedAt: at.toISOString(), receiptTimingReason: "Actual unloading time confirmed during invoice review." };
+  }
+  const today = indiaDate();
+  if (day > today) throw new Error("Stock delivery cannot be on a future date.");
+  return { receivedDate: day };
 }
 
 function isoDate(value: string) {

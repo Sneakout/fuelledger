@@ -920,7 +920,7 @@ export type ShiftDelivery = {
 };
 export type ShiftReceipt = ShiftDelivery & {
   period: "DURING" | "GAP" | "BEFORE_FIRST" | "OVERLAP" | "DATE_ONLY";
-  source?: "DSR";
+  source?: "DSR" | "PURCHASE";
   businessDate?: string;
   sourceUrl?: string;
   dsrQuantity?: string;
@@ -973,6 +973,7 @@ export type Shift = {
       postedSales?: string;
       postedTestingLoss?: string;
       historicalReceived?: string;
+      receiptTimingPending?: boolean;
       received: string;
       adjustments: string;
       deliveries: ShiftDelivery[];
@@ -1332,6 +1333,7 @@ export type ReconciliationLine = {
   densityRecordedAt: string | null;
 };
 export type InventoryLedgerEntry = {
+  receivedDate?: string | null;
   id: string;
   type: string;
   quantityDelta: string;
@@ -1553,7 +1555,8 @@ export type PurchaseInvoice = {
     paymentMethod: string;
     paidAt: string;
   }>;
-  receipt: { id: string; receivedAt: string; receivedAtReason: string | null; createdAt: string; createdBy: { name: string } } | null;
+  receipt: { id: string; receivedAt: string;
+    receivedDate?: string | null; receivedAtReason: string | null; createdAt: string; createdBy: { name: string } } | null;
   attachments: AttachmentMeta[];
   createdBy: { name: string };
   corrections: Array<{
@@ -1643,6 +1646,7 @@ export type PurchasesBootstrap = {
 };
 export type InvoiceImportPolicy = { enabled: boolean; monitored: boolean };
 export type PurchaseInvoiceReceiptInput = {
+  receivedDate?: string;
   receivedAt?: string;
   receiptTimingReason?: string;
   allocations: Array<{ invoiceLineId: string; productId: string; tankId?: string | null }>;
@@ -1814,7 +1818,7 @@ export type ReportsBootstrap = {
     shifts: Array<{ id:string;shiftNumber:number;station:string;stationCode:string;manager:string;status:string;openedAt:string;closedAt:string|null;openingCash:number;closingCash:number|null;sales:number;expectedCollection:number;actualCollection:number;variance:number;reconciledAt:string|null;reconciledBy:string|null;notes:string|null;collections:Array<{paymentMethod:string;expected:number;actual:number;adjustment:number;variance:number;reason:string|null}>;nozzles:Array<{dispenser:string;nozzle:string;product:string;productCode:string;opening:number;closing:number|null;testing:number;testingReturned:boolean}>;tanks:Array<{tank:string;product:string;productCode:string;opening:number;closing:number|null}> }>;
     tankReadings: Array<{id:string;station:string;stationCode:string;tank:string;product:string;productCode:string;unit:string;physicalStock:number;dipReading:number|null;recordedAt:string;recordedBy:string;notes:string|null}>;
     densityReadings: Array<{id:string;station:string;stationCode:string;tank:string;product:string;productCode:string;density:number;recordedAt:string;recordedBy:string}>;
-    purchases: Array<{id:string;invoiceNumber:string;station:string;stationCode:string;supplier:string;supplierCode:string;invoiceDate:string;dueDate:string;subtotal:number;taxAmount:number;totalAmount:number;paidAmount:number;status:string;receivedAt:string|null;lines:Array<{description:string;product:string|null;productCode:string|null;unit:string|null;quantity:number;unitCost:number;taxRate:number;hsnCode:string|null;lineTotal:number}>;receivedLines:Array<{product:string;productCode:string;unit:string;quantity:number;unitCost:number}>}>;
+    purchases: Array<{id:string;invoiceNumber:string;station:string;stationCode:string;supplier:string;supplierCode:string;invoiceDate:string;dueDate:string;subtotal:number;taxAmount:number;totalAmount:number;paidAmount:number;status:string;receivedAt:string|null;receivedDate?:string|null;lines:Array<{description:string;product:string|null;productCode:string|null;unit:string|null;quantity:number;unitCost:number;taxRate:number;hsnCode:string|null;lineTotal:number}>;receivedLines:Array<{product:string;productCode:string;unit:string;quantity:number;unitCost:number}>}>;
     approvals: Array<{id:string;station:string;actionType:string;status:string;reason:string;requestedBy:string;requestedAt:string;decidedBy:string|null;decidedAt:string|null;decisionNote:string|null;executedAt:string|null;version:number}>;
     customerLedger: Array<{id:string;station:string;stationCode:string;customer:string;customerCode:string;type:string;description:string;amount:number;dueDate:string|null;disputedAt:string|null;occurredAt:string;sourceType:string;sourceId:string|null;referenceNo:string|null;createdBy:string}>;
     supplierPayments: Array<{id:string;station:string;stationCode:string;supplier:string;supplierCode:string;invoiceNumber:string|null;amount:number;paymentMethod:string;referenceNo:string|null;paidAt:string;createdBy:string}>;

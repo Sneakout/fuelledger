@@ -3,7 +3,7 @@ export type PurchaseReviewInvoice = {
   lines: Array<{ id: string; productId: string | null; product: string; unit: string; quantity: number; receivedQuantity: number; unitCost: number; agreedRate: number | null; taxRate: number; agreedTaxRate: number | null }>;
   receiptId: string | null; correctionCount: number;
 };
-export type UnmatchedPurchaseReceipt = { id: string; supplier: string; referenceNo: string | null; receivedAt: string; lines: Array<{ productId: string; product: string; unit: string; quantity: number }> };
+export type UnmatchedPurchaseReceipt = { id: string; supplier: string; referenceNo: string | null; receivedAt: string | null; receivedDate?: string | null; lines: Array<{ productId: string; product: string; unit: string; quantity: number }> };
 
 export function analyzePurchases(invoices: PurchaseReviewInvoice[], unmatchedReceipts: UnmatchedPurchaseReceipt[], asOf: Date) {
   const findings: any[] = [];
@@ -22,7 +22,7 @@ export function analyzePurchases(invoices: PurchaseReviewInvoice[], unmatchedRec
     const daysOverdue = Math.max(0, Math.floor((day(asOf).getTime() - day(new Date(invoice.dueDate)).getTime()) / 86_400_000));
     if (invoice.outstanding > .005 && daysOverdue > 0 && invoice.status !== "VOID") findings.push({ type: "SUPPLIER_PAYMENT_OVERDUE", invoiceId: invoice.id, receiptId: invoice.receiptId, title: `${invoice.supplier}'s ${invoice.invoiceNumber} payment is overdue`, explanation: `${money(invoice.outstanding)} remains payable ${daysOverdue} day${daysOverdue === 1 ? "" : "s"} after the due date.${invoice.outstanding < invoice.totalAmount ? " A partial payment is recorded." : ""}`, severity: daysOverdue >= 30 ? "URGENT" : "ATTENTION", daysOverdue, outstanding: invoice.outstanding, paymentStatus: invoice.outstanding < invoice.totalAmount ? "PART_PAID_OVERDUE" : "OVERDUE" });
   }
-  for (const receipt of unmatchedReceipts) findings.push({ type: "PURCHASE_RECEIPT_UNMATCHED", receiptId: receipt.id, title: `${receipt.supplier}'s receipt is not matched to an invoice`, explanation: `Receipt ${receipt.referenceNo ?? receipt.id} dated ${receipt.receivedAt.slice(0, 10)} has recorded stock lines but no linked supplier invoice.`, severity: "ATTENTION" });
+  for (const receipt of unmatchedReceipts) findings.push({ type: "PURCHASE_RECEIPT_UNMATCHED", receiptId: receipt.id, title: `${receipt.supplier}'s receipt is not matched to an invoice`, explanation: `Receipt ${receipt.referenceNo ?? receipt.id} dated ${receipt.receivedDate ?? receipt.receivedAt?.slice(0, 10) ?? "date not recorded"} has recorded stock lines but no linked supplier invoice.`, severity: "ATTENTION" });
   return findings;
 }
 

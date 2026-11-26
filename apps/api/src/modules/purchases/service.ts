@@ -7,7 +7,7 @@ import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { defaultExpenseCategories } from '../../lib/default-expense-categories.js';
 import { effectivePriceAt } from '../../lib/effective-price.js';
-import { indiaDate, indiaDayStart } from '../../lib/india-time.js';
+import { indiaDate, indiaDayRange, indiaDayStart } from '../../lib/india-time.js';
 import { assertStockAvailable, bookStockAt } from '../../lib/stock.js';
 import { affectsClosedShift, shiftAtInstant } from '../../lib/shift-interval.js';
 import { collectionAccount, postJournal } from '../accounting/service.js';
@@ -39,7 +39,7 @@ const invoiceInclude = {
     },
   },
   payments: { orderBy: { paidAt: 'desc' as const } },
-  receipt: { select: { id: true, receivedAt: true, receivedAtReason: true, createdAt: true, createdBy: { select: { name: true } }, lines: { select: { productId: true, quantity: true, product: { select: { name: true, unit: true } } } } } },
+  receipt: { select: { id: true, receivedDate: true, receivedAt: true, receivedAtReason: true, createdAt: true, createdBy: { select: { name: true } }, lines: { select: { productId: true, quantity: true, product: { select: { name: true, unit: true } } } } } },
   attachments: {
     select: { id: true, fileName: true, mimeType: true, size: true },
   },
@@ -69,30 +69,36 @@ const expenseInclude = {
 const outstanding = (invoice: { totalAmount: Prisma.Decimal; payments: Array<{ amount: Prisma.Decimal }> }) => Number(invoice.totalAmount) - invoice.payments.reduce((sum, row) => sum + Number(row.amount), 0);
 const receiptTimeToleranceMs = 60 * 1000;
 const legacyAuditLagMs = 5 * 60 * 1000;
-export function resolveReceiptTiming(requestedAt?: string, reason?: string, now = new Date()) {
-  if (!requestedAt) return { receivedAt: now, receivedAtReason: null };
+export function resolveReceiptTiming(requestedAt?: string, reason?: string, now = new Date(), receivedDate?: string) {
+  if (receivedDate) {
+    if (requestedAt || !/^\d{4}-\d{2}-\d{2}$/.test(receivedDate) || Number.isNaN(Date.parse(`${receivedDate}T00:00:00Z`)) || new Date(`${receivedDate}T00:00:00Z`).toISOString().slice(0,10) !== receivedDate) throw new AppError(400, 'RECEIPT_DATE_INVALID', 'Choose a valid delivery day or an exact arrival time.');
+    if (receivedDate > indiaDate(now)) throw new AppError(400, 'RECEIPT_TIME_FUTURE', 'Stock cannot be received on a future date.');
+    return { receivedAt: indiaDayRange(receivedDate).start, receivedDate, receivedAtReason: reason?.trim() || 'Delivery date confirmed; exact unloading time not recorded.' };
+  }
+  if (!requestedAt) return { receivedAt: now, receivedDate: null, receivedAtReason: null };
   const receivedAt = new Date(requestedAt);
+  if (!Number.isFinite(receivedAt.getTime())) throw new AppError(400, 'RECEIPT_TIME_INVALID', 'Choose a valid unloading date and time.');
   if (receivedAt.getTime() > now.getTime() + receiptTimeToleranceMs)
     throw new AppError(400, 'RECEIPT_TIME_FUTURE', 'Stock cannot be received in the future. Check the receipt date and time.');
   const isPast = receivedAt.getTime() < now.getTime() - receiptTimeToleranceMs;
   const receivedAtReason = reason?.trim() || null;
   if (isPast && (!receivedAtReason || receivedAtReason.length < 5))
     throw new AppError(400, 'RECEIPT_TIME_REASON_REQUIRED', 'Explain why an earlier stock receipt time is being entered.');
-  return { receivedAt, receivedAtReason };
+  return { receivedAt, receivedDate: null, receivedAtReason };
 }
 
 export async function receiptTimingAudit(organizationId: string, stationIds?: string[]) {
   const receipts = await prisma.purchaseReceipt.findMany({
     where: { organizationId, invoiceId: { not: null }, ...(stationIds ? { stationId: { in: stationIds } } : {}) },
     select: {
-      id: true, referenceNo: true, receivedAt: true, receivedAtReason: true, createdAt: true,
+      id: true, referenceNo: true, receivedDate: true, receivedAt: true, receivedAtReason: true, createdAt: true,
       supplierName: true, station: { select: { id: true, name: true, code: true } },
       createdBy: { select: { name: true } }, invoice: { select: { invoiceNumber: true, invoiceDate: true } },
     },
     orderBy: { receivedAt: 'desc' },
   });
   const candidates = await Promise.all(receipts.filter(receipt =>
-    receipt.invoice && !receipt.receivedAtReason &&
+    receipt.invoice && !receipt.receivedDate && !receipt.receivedAtReason &&
     Math.abs(receipt.receivedAt.getTime() - receipt.invoice.invoiceDate.getTime()) < 1_000 &&
     receipt.createdAt.getTime() - receipt.receivedAt.getTime() > legacyAuditLagMs,
   ).map(async receipt => {
@@ -121,8 +127,8 @@ export async function receiptTimingRepairPreview(organizationId: string, receipt
   if (Number.isNaN(receivedAt.getTime())) throw new AppError(400, 'RECEIPT_TIME_INVALID', 'Choose a valid stock receipt time.');
   const receipt = await prisma.purchaseReceipt.findFirst({ where: { id: receiptId, organizationId, ...(stationIds ? { stationId: { in: stationIds } } : {}) }, include: { lines: { select: { id: true, tankId: true, productId: true, quantity: true } }, invoice: { select: { invoiceNumber: true, invoiceDate: true } } } });
   if (!receipt) throw new AppError(404, 'RECEIPT_NOT_FOUND', 'This receipt was not found.');
-  const [oldShift, newShift, ledgerCount, journal] = await Promise.all([shiftAtInstant(prisma, organizationId, receipt.stationId, receipt.receivedAt), shiftAtInstant(prisma, organizationId, receipt.stationId, receivedAt), prisma.inventoryLedger.count({ where: { receiptLine: { receiptId } } }), prisma.journal.findFirst({ where: { sourceType: 'PURCHASE_INVOICE', sourceId: receipt.invoiceId ?? '' }, select: { id: true, journalDate: true, reference: true } })]);
-  return { recordsChanged: false, receipt: { id: receipt.id, invoiceNumber: receipt.invoice?.invoiceNumber ?? receipt.referenceNo, previousReceivedAt: receipt.receivedAt, proposedReceivedAt: receivedAt, quantities: receipt.lines }, oldShift, newShift, affectsClosedShift: affectsClosedShift(oldShift) || affectsClosedShift(newShift), inventoryLedgerEntries: ledgerCount, journal: journal ? { id: journal.id, journalDate: journal.journalDate, reference: journal.reference, willChange: false } : null, warning: 'Only receipt timing and linked inventory movement timestamps change. Quantities, payments, invoice totals and journals remain unchanged.' };
+  const [oldShift, newShift, ledgerCount, journal] = await Promise.all([receipt.receivedDate ? null : shiftAtInstant(prisma, organizationId, receipt.stationId, receipt.receivedAt), shiftAtInstant(prisma, organizationId, receipt.stationId, receivedAt), prisma.inventoryLedger.count({ where: { receiptLine: { receiptId } } }), prisma.journal.findFirst({ where: { sourceType: 'PURCHASE_INVOICE', sourceId: receipt.invoiceId ?? '' }, select: { id: true, journalDate: true, reference: true } })]);
+  return { recordsChanged: false, receipt: { id: receipt.id, invoiceNumber: receipt.invoice?.invoiceNumber ?? receipt.referenceNo, previousReceivedDate: receipt.receivedDate, previousReceivedAt: receipt.receivedDate ? null : receipt.receivedAt, proposedReceivedAt: receivedAt, quantities: receipt.lines }, oldShift, newShift, affectsClosedShift: affectsClosedShift(oldShift) || affectsClosedShift(newShift), inventoryLedgerEntries: ledgerCount, journal: journal ? { id: journal.id, journalDate: journal.journalDate, reference: journal.reference, willChange: false } : null, warning: 'Only receipt timing and linked inventory movement timestamps change. Quantities, payments, invoice totals and journals remain unchanged.' };
 }
 
 export async function receiptShiftImpact(organizationId: string, stationId: string, receivedAtValue: string, stationIds?: string[]) {
@@ -295,7 +301,7 @@ export async function createCategory(organizationId: string, input: ExpenseCateg
   }
 }
 export async function createInvoice(organizationId: string, userId: string, input: PurchaseInvoiceInput) {
-  const receiptTiming = input.receiveNow ? resolveReceiptTiming(input.receivedAt, input.receiptTimingReason) : null;
+  const receiptTiming = input.receiveNow ? resolveReceiptTiming(input.receivedAt, input.receiptTimingReason, new Date(), input.receivedDate) : null;
   const [station, supplier, products] = await Promise.all([
     prisma.station.findFirst({
       where: { id: input.stationId, organizationId, active: true },
@@ -390,12 +396,13 @@ export async function createInvoice(organizationId: string, userId: string, inpu
             referenceNo: invoice.invoiceNumber,
             receivedAt: receiptTiming!.receivedAt,
             receivedAtReason: receiptTiming!.receivedAtReason,
+            receivedDate: receiptTiming!.receivedDate,
             notes: 'Received with purchase invoice',
             createdById: userId,
           },
         });
         await enqueueReview(tx, { type: 'RECEIPT_RECORDED', organizationId, stationId: station.id, resourceId: receipt.id, occurredAt: receipt.receivedAt });
-        const affectedShift = await shiftAtInstant(tx, organizationId, station.id, receipt.receivedAt);
+        const affectedShift = receipt.receivedDate ? null : await shiftAtInstant(tx, organizationId, station.id, receipt.receivedAt);
         if (receiptTiming!.receivedAtReason)
           await tx.receiptTimingAuditEvent.create({
             data: {
@@ -511,7 +518,7 @@ export async function createInvoice(organizationId: string, userId: string, inpu
         });
       }
       if (!input.receiveNow) await enqueueReview(tx, { type: 'INVOICE_CHANGED', organizationId, stationId: invoice.stationId, resourceId: invoice.id, occurredAt: invoice.invoiceDate });
-      return invoice;
+      return tx.purchaseInvoice.findUniqueOrThrow({ where: { id: invoice.id }, include: invoiceInclude });
     });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AppError(409, 'INVOICE_EXISTS', 'This invoice number already exists for the supplier.');
@@ -536,7 +543,7 @@ export async function receiveInvoiceStock(organizationId: string, userId: string
     if (!line.productId || line.productId !== allocation.productId)
       throw new AppError(409, 'INVOICE_PRODUCT_CHANGED', `${line.description} is not linked to the same inventory product saved on the invoice. Review it in Purchases before receiving stock.`);
   }
-  const timing = resolveReceiptTiming(input.receivedAt, input.receiptTimingReason);
+  const timing = resolveReceiptTiming(input.receivedAt, input.receiptTimingReason, new Date(), input.receivedDate);
   const productHsnUpdates = planProductHsnUpdates(invoice.lines, products);
   try {
     await safeTransaction(prisma, async tx => {
@@ -544,7 +551,7 @@ export async function receiveInvoiceStock(organizationId: string, userId: string
         where: { id: productId, organizationId, OR: [{ hsnCode: null }, { hsnCode: '' }] },
         data: { hsnCode },
       })));
-      const receipt = await tx.purchaseReceipt.create({ data: { organizationId, stationId: invoice.stationId, supplierId: invoice.supplier.id, invoiceId: invoice.id, supplierName: invoice.supplier.name, referenceNo: invoice.invoiceNumber, receivedAt: timing.receivedAt, receivedAtReason: timing.receivedAtReason, notes: 'Received after OCR invoice confirmation', createdById: userId } });
+      const receipt = await tx.purchaseReceipt.create({ data: { organizationId, stationId: invoice.stationId, supplierId: invoice.supplier.id, invoiceId: invoice.id, supplierName: invoice.supplier.name, referenceNo: invoice.invoiceNumber, receivedAt: timing.receivedAt, receivedDate: timing.receivedDate, receivedAtReason: timing.receivedAtReason, notes: 'Received after OCR invoice confirmation', createdById: userId } });
       for (const line of invoice.lines) {
         const allocation = allocations.get(line.id)!;
         const product = products.find(item => item.id === allocation.productId)!;
@@ -734,8 +741,8 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
       await tx.purchaseInvoiceCorrection.create({ data: {
         invoiceId: id, reason: input.correctionReason, correctedById: userId,
         previousTotal: invoice.totalAmount, correctedTotal: new Prisma.Decimal(pricing.totalAmount),
-        beforeLines: { invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate.toISOString(), dueDate: invoice.dueDate.toISOString(), receivedAt: invoice.receipt?.receivedAt.toISOString() ?? null, notes: invoice.notes, lines: invoice.lines.map(line => ({id:line.id, quantity:Number(line.quantity), unitCost:Number(line.unitCost)})), payments: invoice.payments.map(p => ({id:p.id, amount:Number(p.amount), origin:p.origin})) },
-        afterLines: { invoiceNumber: input.invoiceNumber, invoiceDate: input.invoiceDate, dueDate: input.dueDate, receivedAt: input.receivedAt ?? invoice.receipt?.receivedAt.toISOString() ?? null, receivedAtReason: correctedReceiptTiming?.receivedAtReason ?? null, notes: input.notes ?? null, lines: pricing.lines.map(line => ({id:line.id, quantity:line.quantity, unitCost:line.unitCost})) }
+        beforeLines: { invoiceNumber: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate.toISOString(), dueDate: invoice.dueDate.toISOString(), receivedAt: invoice.receipt?.receivedAt.toISOString() ?? null, receivedDate: invoice.receipt?.receivedDate ?? null, notes: invoice.notes, lines: invoice.lines.map(line => ({id:line.id, quantity:Number(line.quantity), unitCost:Number(line.unitCost)})), payments: invoice.payments.map(p => ({id:p.id, amount:Number(p.amount), origin:p.origin})) },
+        afterLines: { invoiceNumber: input.invoiceNumber, invoiceDate: input.invoiceDate, dueDate: input.dueDate, receivedAt: input.receivedAt ?? invoice.receipt?.receivedAt.toISOString() ?? null, receivedAtReason: correctedReceiptTiming?.receivedAtReason ?? null, receivedDate: correctedReceiptTiming ? null : invoice.receipt?.receivedDate ?? null, notes: input.notes ?? null, lines: pricing.lines.map(line => ({id:line.id, quantity:line.quantity, unitCost:line.unitCost})) }
       } });
       let status: 'PAID' | 'PART_PAID' | 'OPEN' = pricing.totalAmount - effectivePaid < 0.01 ? 'PAID' : effectivePaid > 0 ? 'PART_PAID' : 'OPEN';
       await tx.purchaseInvoice.update({
@@ -830,7 +837,7 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
           where: { id: invoice.receipt.id },
           data: {
             referenceNo: input.invoiceNumber,
-            ...(correctedReceiptTiming ? { receivedAt: correctedReceiptTiming.receivedAt, receivedAtReason: correctedReceiptTiming.receivedAtReason } : {}),
+            ...(correctedReceiptTiming ? { receivedAt: correctedReceiptTiming.receivedAt, receivedDate: null, receivedAtReason: correctedReceiptTiming.receivedAtReason } : {}),
           },
         });
         if (correctedReceiptTiming) await tx.inventoryLedger.updateMany({
@@ -844,7 +851,7 @@ export async function updateInvoice(organizationId: string, userId: string, id: 
               organizationId,
               stationId: invoice.stationId,
               receiptId: invoice.receipt.id,
-              previousReceivedAt: invoice.receipt.receivedAt,
+              previousReceivedAt: invoice.receipt.receivedDate ? null : invoice.receipt.receivedAt,
               receivedAt: correctedReceiptTiming.receivedAt,
               reason: input.correctionReason,
               affectedShiftId: affectedShift?.id ?? null,

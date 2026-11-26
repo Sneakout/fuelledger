@@ -81,7 +81,7 @@ export function receiptMessage(facts: ReceiptFacts, appUrl?: string) {
   }) ?? [];
   return [
     `FuelNerve Purchase Agent · Stock received · ${facts.station.name}`,
-    `Supplier: ${facts.supplierName} · Received: ${indiaDate(facts.receivedAt)}`,
+    `Supplier: ${facts.supplierName} · Received: ${facts.receivedDate ?? indiaDate(facts.receivedAt)}${facts.receivedDate ? ' · unloading time not recorded' : ''}`,
     ...deliveryLines,
     ...(shortfalls.length ? [`Partial receipt: ${shortfalls.join(' · ')}`] : []),
     ...(invoice ? [

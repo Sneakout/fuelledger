@@ -995,3 +995,5 @@ a.nerve-agent-card:hover{transform:translateY(-1px);border-color:#a9c9ba;box-sha
   .invoice-submit-success button{grid-column:1/-1}
   .attention-card.activity-card{padding:19px}
 }
+
+.invoice-delivery-date{display:grid;gap:10px;padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--surface,#f4f8f5)}.invoice-delivery-date h3{font-family:inherit;font-weight:700;font-size:16px;line-height:1.5;color:var(--forest);margin:0 0 5px}.invoice-delivery-date>p{font-size:12px;line-height:1.6;color:var(--muted);margin:0 0 12px}.invoice-delivery-date input[type=date],.invoice-delivery-date input[type=time]{font:inherit;width:100%;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--ink);box-sizing:border-box}

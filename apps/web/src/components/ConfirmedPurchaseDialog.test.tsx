@@ -39,10 +39,32 @@ describe("confirmed purchase dialog", () => {
     expect(create).toBeEnabled();
     fireEvent.click(create);
     await waitFor(() => expect(mocks.createImportedPurchaseInvoice).toHaveBeenCalledOnce());
-    expect(mocks.createImportedPurchaseInvoice).toHaveBeenCalledWith(expect.objectContaining({ receiveNow: true, paidNow: false, attachment: null, lines: [expect.objectContaining({ productId: "product-1", tankId: "tank-1" })] }));
+    expect(mocks.createImportedPurchaseInvoice).toHaveBeenCalledWith(expect.objectContaining({ receiveNow: true, receivedDate: "2026-09-02", paidNow: false, attachment: null, lines: [expect.objectContaining({ productId: "product-1", tankId: "tank-1" })] }));
     expect(await screen.findByText("Invoice created")).toBeInTheDocument();
     expect(screen.getByText(/added to the selected tanks and inventory/i)).toBeInTheDocument();
     expect(onSubmitted).toHaveBeenCalledOnce();
+  });
+
+  it("lets the owner change the delivery day and enter a real IST unloading time before reconfirming", async () => {
+    mocks.invoiceImportPolicy.mockResolvedValue({ enabled:true,monitored:false });
+    mocks.purchasesBootstrap.mockResolvedValue(bootstrap);
+    mocks.createImportedPurchaseInvoice.mockResolvedValue({invoice:{id:'new',invoiceNumber:'IOCL-91',totalAmount:'11800',supplier:{name:'IOCL'}}});
+    render(<ConfirmedPurchaseDialog draft={draft} stationId="station-1" stationName="FuelNerve Petroleum" isDemo={false} onBack={vi.fn()} onClose={vi.fn()} onSubmitted={vi.fn()}/>);
+    const create=await screen.findByRole('button',{name:/Create invoice & receive stock/});
+    expect(screen.getByLabelText('Delivery date')).toHaveValue('2026-09-02');
+    expect(screen.getByText(/No exact time or shift will be assumed/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox',{name:/I checked the supplier/}));
+    fireEvent.change(screen.getByLabelText('Delivery date'),{target:{value:'2026-09-03'}});
+    expect(create).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox',{name:/I know the unloading time/}));
+    expect(create).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Unloading time · IST'),{target:{value:'08:30'}});
+    fireEvent.click(screen.getByRole('checkbox',{name:/I checked the supplier/}));
+    fireEvent.click(create);
+    await waitFor(()=>expect(mocks.createImportedPurchaseInvoice).toHaveBeenCalledOnce());
+    const input=mocks.createImportedPurchaseInvoice.mock.calls[0]![0];
+    expect(input.receivedAt).toBe('2026-09-03T03:00:00.000Z');
+    expect(input.receivedDate).toBeUndefined();
   });
 
   it("shows when a captured HSN will fill a missing product master value", async () => {
@@ -87,7 +109,7 @@ describe("confirmed purchase dialog", () => {
     const repair = await screen.findByRole("button", { name: /Receive stock for existing invoice/ });
     fireEvent.click(screen.getByRole("checkbox", { name: /I checked the supplier/ }));
     fireEvent.click(repair);
-    await waitFor(() => expect(mocks.receiveImportedPurchaseInvoice).toHaveBeenCalledWith("invoice-1", { allocations: [{ invoiceLineId: "invoice-line-1", productId: "product-1", tankId: "tank-1" }] }));
+    await waitFor(() => expect(mocks.receiveImportedPurchaseInvoice).toHaveBeenCalledWith("invoice-1", { receivedDate: "2026-09-02", allocations: [{ invoiceLineId: "invoice-line-1", productId: "product-1", tankId: "tank-1" }] }));
     expect(mocks.createImportedPurchaseInvoice).not.toHaveBeenCalled();
     expect(await screen.findByText("Stock receipt created")).toBeInTheDocument();
     expect(screen.getByText("HSD purchase price changed")).toBeInTheDocument();

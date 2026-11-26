@@ -64,7 +64,7 @@ describe("Nerve invoice import route", async () => {
       lines: [{ ...input.lines[0], productId: "cm00000000000000000000003", tankId: "cm00000000000000000000004" }],
     });
     expect(response.status).toBe(201);
-    expect(purchases.createInvoice).toHaveBeenCalledWith("org-1", "owner-1", expect.objectContaining({ receiveNow: true, lines: [expect.objectContaining({ productId: "cm00000000000000000000003", tankId: "cm00000000000000000000004" })] }));
+    expect(purchases.createInvoice).toHaveBeenCalledWith("org-1", "owner-1", expect.objectContaining({ receiveNow: true, receivedDate: "2026-09-02", lines: [expect.objectContaining({ productId: "cm00000000000000000000003", tankId: "cm00000000000000000000004" })] }));
   });
 
   it("repairs the missing receipt of an existing imported invoice without recreating it", async () => {

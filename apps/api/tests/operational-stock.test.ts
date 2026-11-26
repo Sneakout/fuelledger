@@ -70,3 +70,19 @@ it('does not extrapolate invalid or future physical checkpoints',()=>{
  expect(()=>calculate([],[],{...observation,volume:NaN})).toThrow('Review the latest tank measurement');
  expect(()=>calculate([],[],{...observation,date:'2026-11-22'})).toThrow('Review the latest tank measurement');
 });
+
+
+it('never treats the date-only sorting boundary as an unloading time relative to a measured dip', () => {
+ const receipt={...movement('RECEIPT',4000,'2026-11-19T18:30:00Z'),receiptDate:'2026-11-20'};
+ const exact={...observation,volume:6000,precision:'EXACT' as const,source:'TANK_CHECK' as const,observedAt:'2026-11-20T06:00:00Z'};
+ const sameDay=operationalStockPosition(tank,exact,[],[receipt],at);
+ expect(sameDay.quantity).toBe(6000);
+ expect(sameDay.incomplete).toBe(true);
+ expect(sameDay.issues.join(' ')).toContain('no exact unloading time');
+ const confirmedBeforeMeasurement=operationalStockPosition(tank,exact,[],[{...receipt,receiptRecordedAt:new Date('2026-11-20T05:00:00Z')}],at);
+ expect(confirmedBeforeMeasurement.quantity).toBe(6000); expect(confirmedBeforeMeasurement.incomplete).toBe(false);
+ const previousDay={...exact,date:'2026-11-19',observedAt:'2026-11-19T06:00:00Z'};
+ expect(operationalStockPosition(tank,previousDay,[],[receipt],at).quantity).toBe(10000);
+ const nextDay={...exact,date:'2026-11-21',observedAt:'2026-11-21T06:00:00Z'};
+ expect(operationalStockPosition(tank,nextDay,[],[receipt],at).quantity).toBe(6000);
+});

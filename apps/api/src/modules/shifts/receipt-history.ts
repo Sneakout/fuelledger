@@ -11,6 +11,7 @@ export const receiptDetails = {
   supplierName: true,
   createdAt: true,
   receivedAt: true,
+  receivedDate: true,
   invoice: { select: { invoiceNumber: true } },
   timingEvents: { orderBy: { changedAt: 'desc' }, take: 1, select: { changedAt: true, previousReceivedAt: true } },
 } satisfies Prisma.PurchaseReceiptSelect;
@@ -114,11 +115,12 @@ export async function tankReceiptHistory(organizationId: string, stationId: stri
     const previousShifts = new Map(earlierAssignments);
     return merge(rows.map(movement => {
         const at = movement.occurredAt;
-        const containing = intervals.filter(shift => shiftContains(shift, at));
+        const dayOnly = movement.receiptLine?.receipt?.receivedDate;
+        const containing = dayOnly ? [] : intervals.filter(shift => shiftContains(shift, at));
         const during = containing[0];
         const following = intervals.find(shift => shift.openedAt > at) ?? next;
         const hadShift = Boolean(prior || intervals.some(shift => shift.openedAt <= at));
-        const assigned = during ?? following;
+        const assigned = dayOnly ? null : during ?? following;
         const validTank = movement.tank?.configuration.stationId === stationId &&
           movement.tank.productId === movement.productId && movement.product.organizationId === organizationId;
         const receipt = movement.receiptLine?.receipt;
@@ -127,8 +129,10 @@ export async function tankReceiptHistory(organizationId: string, stationId: stri
         const previousShift = oldTime ? previousShifts.get(oldTime.getTime()) : null;
         return {
           ...deliveryEvidence(validReceipt ? movement : { ...movement, receiptLine: null }, during ? during.closedAt : following?.openedAt),
-          previousShift: previousShift && previousShift.id !== assigned?.id ? { id: previousShift.id, number: previousShift.shiftNumber } : null,
-          period: containing.length > 1 ? 'OVERLAP' as const : during ? 'DURING' as const : hadShift ? 'GAP' as const : 'BEFORE_FIRST' as const,
+          previousShift: !dayOnly && previousShift && previousShift.id !== assigned?.id ? { id: previousShift.id, number: previousShift.shiftNumber } : null,
+          source: 'PURCHASE' as const,
+          businessDate: dayOnly ?? undefined,
+          period: dayOnly ? 'DATE_ONLY' as const : containing.length > 1 ? 'OVERLAP' as const : during ? 'DURING' as const : hadShift ? 'GAP' as const : 'BEFORE_FIRST' as const,
           shiftId: containing.length > 1 ? null : assigned?.id ?? null,
           shiftNumber: containing.length > 1 ? null : assigned?.shiftNumber ?? null,
           tankInShift: assigned?.tankReadings.some(reading => reading.tankId === movement.tank?.id) ?? null,

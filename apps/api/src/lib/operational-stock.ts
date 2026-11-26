@@ -30,6 +30,10 @@ export function operationalStockPosition(tank:HistoricalStockTank, observation:T
   } else {
     const checkpoint=new Date(observation.observedAt!);
     for(const row of scoped) {
+      if (row.receiptDate) {
+        if (row.receiptDate === observation.date && (!row.receiptRecordedAt || row.receiptRecordedAt > checkpoint)) issues.push(`${row.receiptDate}: a delivery has no exact unloading time. Confirm whether it arrived before or after the latest tank measurement.`);
+        if (row.receiptDate <= observation.date) continue;
+      }
       // Receipts at the closing boundary belong to the following interval.
       if(row.occurredAt<checkpoint||(row.occurredAt.getTime()===checkpoint.getTime()&&!(observation.source==='SHIFT_CLOSING'&&row.type==='RECEIPT')))continue;
       if(row.type==='SALE'&&row.sourceStartedAt&&row.sourceStartedAt<checkpoint)issues.push('A posted sale spans the latest measurement. Its consumption cannot be split at the dip time; review the shift readings.');
@@ -48,7 +52,7 @@ export async function readOperationalStocks(db:Pick<Prisma.TransactionClient,'hi
   if(!tanks.length||!observations.size)return new Map<string,OperationalStock>();
   const [registers,ledger]=await Promise.all([
     db.historicalSalesImport.findMany({where:{organizationId,stationId:{in:[...new Set(tanks.map(t=>t.stationId))]},productId:{in:[...new Set(tanks.map(t=>t.productId))]},monthStart:{lte:asOf}},select:{id:true,stationId:true,productId:true,rows:true}}),
-    db.inventoryLedger.findMany({where:{organizationId,tankId:{in:tanks.map(t=>t.id)},occurredAt:{lte:asOf}},select:{stationId:true,productId:true,tankId:true,type:true,quantityDelta:true,occurredAt:true,sale:{select:{shift:{select:{openedAt:true}}}}}}),
+    db.inventoryLedger.findMany({where:{organizationId,tankId:{in:tanks.map(t=>t.id)},occurredAt:{lte:asOf}},select:{stationId:true,productId:true,tankId:true,type:true,quantityDelta:true,occurredAt:true,receiptLine:{select:{receipt:{select:{receivedDate:true,createdAt:true}}}},sale:{select:{shift:{select:{openedAt:true}}}}}}),
   ]);
   for(const movement of ledger) {
     const tank=tanks.find(t=>t.id===movement.tankId);
@@ -57,7 +61,7 @@ export async function readOperationalStocks(db:Pick<Prisma.TransactionClient,'hi
   const result=new Map<string,OperationalStock>();
   for(const tank of tanks) {
     const observation=observations.get(tank.id);
-    if(observation)result.set(tank.id,operationalStockPosition(tank,observation,registers,ledger.map(row=>({...row,sourceStartedAt:row.sale?.shift?.openedAt})),asOf));
+    if(observation)result.set(tank.id,operationalStockPosition(tank,observation,registers,ledger.map(row=>({...row,sourceStartedAt:row.sale?.shift?.openedAt,receiptDate:row.receiptLine?.receipt?.receivedDate,receiptRecordedAt:row.receiptLine?.receipt?.createdAt})),asOf));
   }
   return result;
 }

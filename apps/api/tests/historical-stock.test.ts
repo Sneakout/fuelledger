@@ -79,3 +79,15 @@ describe('one stock timeline for DSR and live records',()=>{
   expect(result.sales.toNumber()).toBe(1000);
  });
 });
+
+
+it('flags date-only invoice receipts for intraday cutoffs but includes them once in a completed day',()=>{
+ const receipt={...live(1,'RECEIPT',4000),occurredAt:new Date('2026-10-31T18:30:00Z'),receiptDate:'2026-11-01'};
+ const rows=[row(1,1000,5000,4000)];
+ const intraday=calculate(rows,[receipt],new Date('2026-11-01T12:00:00Z'));
+ expect(intraday.blocking).toBe(true);
+ const confirmedBeforeCutoff = calculate(rows,[{...receipt,receiptRecordedAt:new Date('2026-11-01T11:00:00Z')}],new Date('2026-11-01T12:00:00Z'));
+ expect(confirmedBeforeCutoff.blocking).toBe(false);
+ const complete=calculate(rows,[receipt],new Date('2026-11-01T18:29:59.999Z'));
+ expect(complete.blocking).toBe(false); expect(Number(complete.receipts)).toBe(4000); expect(Number(complete.quantity)).toBe(9000);
+});

@@ -1,10 +1,10 @@
 import { Prisma } from '@prisma/client';
 import { calculateHistoricalNozzleSales, hasFollowingMorning, type HistoricalSalesRowInput } from '@fuelledger/shared';
 import { AppError } from './errors.js';
-import { addIndiaDays, indiaDate } from './india-time.js';
+import { addIndiaDays, indiaDate, indiaDayRange } from './india-time.js';
 
 export type HistoricalStockTank = {id:string;stationId:string;productId:string;openingStock:Prisma.Decimal.Value};
-export type StockMovement = {stationId:string;productId:string;tankId:string|null;type:string;quantityDelta:Prisma.Decimal.Value;occurredAt:Date;sourceStartedAt?:Date|undefined};
+export type StockMovement = {stationId:string;productId:string;tankId:string|null;type:string;quantityDelta:Prisma.Decimal.Value;occurredAt:Date;sourceStartedAt?:Date|undefined;receiptDate?:string|null|undefined;receiptRecordedAt?:Date|undefined};
 export type StockRegister = {id:string;stationId:string;productId:string;rows:unknown};
 export type StockTimeline = {
   quantity:Prisma.Decimal; opening:Prisma.Decimal; receipts:Prisma.Decimal; sales:Prisma.Decimal; adjustments:Prisma.Decimal;
@@ -34,6 +34,7 @@ export function composeStockTimeline(tank:HistoricalStockTank,registers:StockReg
     else result.adjustments=result.adjustments.add(delta);
   }
   const issue=(message:string,blocking=false)=>{result.issues.push(message);result.blocking ||= blocking;};
+  for (const row of applicable) if (row.receiptDate === today && (!row.receiptRecordedAt || row.receiptRecordedAt > at) && at.getTime() < indiaDayRange(today).endExclusive.getTime() - 1) issue(`${today}: a delivery is recorded by day only. Confirm its unloading time before using an intraday stock balance.`, true);
   if(anchor)for(let index=0;index<rows.length;index++) {
     const row=rows[index]!,next=rows[index+1]; if(row.date<anchor.date)continue;
     if(!Number.isFinite(row.receiptQuantity)||row.receiptQuantity<0||!Number.isFinite(row.testingQuantity)||row.testingQuantity<0) {issue(`${row.date}: invalid DSR receipt or testing quantity.`,true);continue;}
@@ -93,7 +94,7 @@ export async function readTankStockTimelines(db:HistoricalStockReader,organizati
   if(!registers.length)return new Map<string,StockTimeline>();
   const affected=tanks.filter(tank=>registers.some(record=>record.stationId===tank.stationId&&record.productId===tank.productId));
   const [ledger,nozzles]=await Promise.all([
-    db.inventoryLedger.findMany({where:{organizationId,tankId:{in:affected.map(tank=>tank.id)},occurredAt:{lte:at}},select:{stationId:true,productId:true,tankId:true,type:true,quantityDelta:true,occurredAt:true,sale:{select:{shift:{select:{openedAt:true}}}}}}),
+    db.inventoryLedger.findMany({where:{organizationId,tankId:{in:affected.map(tank=>tank.id)},occurredAt:{lte:at}},select:{stationId:true,productId:true,tankId:true,type:true,quantityDelta:true,occurredAt:true,receiptLine:{select:{receipt:{select:{receivedDate:true,createdAt:true}}}},sale:{select:{shift:{select:{openedAt:true}}}}}}),
     db.nozzle.findMany({where:{productId:{in:[...new Set(affected.map(tank=>tank.productId))]},dispenser:{configuration:{station:{organizationId},stationId:{in:[...new Set(affected.map(tank=>tank.stationId))]}}}},select:{id:true,tankMappings:{select:{tankId:true}}}}),
   ]);
   for(const movement of ledger) {
@@ -101,5 +102,5 @@ export async function readTankStockTimelines(db:HistoricalStockReader,organizati
     if(!tank||tank.stationId!==movement.stationId||tank.productId!==movement.productId)throw new AppError(409,'STOCK_SCOPE_INVALID','A stock movement does not match its fuel station, product and tank. Review inventory consistency.');
   }
   const mapping=new Map(nozzles.map(nozzle=>[nozzle.id,nozzle.tankMappings.map(tank=>tank.tankId)]));
-  return new Map(affected.map(tank=>[tank.id,composeStockTimeline(tank,registers,ledger.map(entry=>({...entry,sourceStartedAt:entry.sale?.shift?.openedAt})),at,mapping)] as const).filter(([,timeline])=>timeline.historical));
+  return new Map(affected.map(tank=>[tank.id,composeStockTimeline(tank,registers,ledger.map(entry=>({...entry,sourceStartedAt:entry.sale?.shift?.openedAt,receiptDate:entry.receiptLine?.receipt?.receivedDate,receiptRecordedAt:entry.receiptLine?.receipt?.createdAt})),at,mapping)] as const).filter(([,timeline])=>timeline.historical));
 }

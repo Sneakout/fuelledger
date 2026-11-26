@@ -1018,9 +1018,11 @@ model PurchaseReceipt {
   stationId        String                    @map("station_id")
   supplierName     String                    @map("supplier_name")
   referenceNo      String?                   @map("reference_no")
-  /// Effective physical-arrival time for stock; never inferred from createdAt.
+  /// Exact physical arrival, or India-day sorting boundary when receivedDate is set.
   receivedAt       DateTime                  @default(now()) @map("received_at")
   receivedAtReason String?                   @map("received_at_reason")
+  /// Known delivery day; receivedAt is only a sorting boundary when this is set.
+  receivedDate     String?                   @map("received_date") @db.VarChar(10)
   notes            String?
   createdById      String                    @map("created_by_id")
   createdAt        DateTime                  @default(now()) @map("created_at")

@@ -946,6 +946,7 @@ export const supplierInputSchema = z.object({
   paymentTerms: z.coerce.number().int().min(0).max(365),
   active: z.boolean(),
 });
+const receiptCalendarDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0,10) === value, "Choose a valid delivery date.");
 export const purchaseInvoiceInputSchema = z
   .object({
     stationId: z.string().cuid(),
@@ -953,6 +954,7 @@ export const purchaseInvoiceInputSchema = z
     invoiceNumber: z.string().trim().min(1).max(80),
     invoiceDate: z.string().datetime(),
     receivedAt: z.string().datetime().optional(),
+    receivedDate: receiptCalendarDate.optional(),
     receiptTimingReason: z.string().trim().min(5).max(300).optional(),
     dueDate: z.string().datetime(),
     invoiceTotal: z.coerce.number().positive().optional(),
@@ -1017,7 +1019,8 @@ export const purchaseInvoiceInputSchema = z
             message: "Every received line needs an inventory product.",
             path: ["lines", index, "productId"],
           });
-    if (!invoice.receiveNow && (invoice.receivedAt || invoice.receiptTimingReason))
+    if (invoice.receivedDate && invoice.receivedAt) context.addIssue({ code: "custom", message: "Choose a delivery day or an exact delivery time, not both.", path: ["receivedDate"] });
+    if (!invoice.receiveNow && (invoice.receivedDate || invoice.receivedAt || invoice.receiptTimingReason))
       context.addIssue({
         code: "custom",
         message: "Receipt timing applies only when stock is received.",
@@ -1031,6 +1034,7 @@ export const purchaseInvoiceInputSchema = z
       });
   });
 export const purchaseInvoiceReceiptInputSchema = z.object({
+  receivedDate: receiptCalendarDate.optional(),
   receivedAt: z.string().datetime().optional(),
   receiptTimingReason: z.string().trim().min(5).max(300).optional(),
   allocations: z.array(z.object({
@@ -1038,7 +1042,7 @@ export const purchaseInvoiceReceiptInputSchema = z.object({
     productId: z.string().cuid(),
     tankId: z.string().cuid().nullable().optional(),
   })).min(1),
-});
+}).refine(value => !(value.receivedDate && value.receivedAt), { message: "Choose a delivery day or an exact time, not both.", path: ["receivedDate"] });
 export const purchaseInvoiceUpdateSchema = z
   .object({
     version: z.number().int().nonnegative(),

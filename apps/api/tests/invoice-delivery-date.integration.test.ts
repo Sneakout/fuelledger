@@ -1,0 +1,51 @@
+import { afterAll, describe, expect, it } from 'vitest';
+import { prisma } from '../src/lib/prisma.js';
+import { createInvoice, updateInvoice } from '../src/modules/purchases/service.js';
+import { tankReceiptHistory } from '../src/modules/shifts/receipt-history.js';
+import { shiftDetails } from '../src/modules/shifts/service.js';
+import { readTankStockTimelines } from '../src/lib/historical-stock.js';
+
+const url = process.env.SHIFT_DSR_TEST_DATABASE_URL;
+const suite = url && url === process.env.DATABASE_URL ? describe : describe.skip;
+suite('late invoice delivery dates in PostgreSQL', () => {
+ afterAll(() => prisma.$disconnect());
+ it('posts on the delivery day once, preserves date precision and supports an audited exact-time correction', async () => {
+  const org = await prisma.organization.create({ data: { name: 'Invoice delivery verification' } });
+  const owner = await prisma.user.create({ data: { organizationId: org.id, name: 'Owner', email: `${org.id}@example.test`, passwordHash: 'unused', role: 'OWNER' } });
+  const station = await prisma.station.create({ data: { organizationId: org.id, name: 'Station', code: 'S1', addressLine1: 'Test', city: 'Test', state: 'Test', postalCode: '000000' } });
+  const config = await prisma.stationConfiguration.create({ data: { stationId: station.id, version: 1 } });
+  const product = await prisma.product.create({ data: { organizationId: org.id, code: 'HSD', name: 'Diesel', category: 'FUEL', unit: 'LITRE', tankLinked: true, inventoryTracked: true } });
+  const tank = await prisma.tank.create({ data: { configurationId: config.id, productId: product.id, code: 'T1', tankType: 'UNDERGROUND', dipMethod: 'MANUAL', nominalCapacity: 20000, workingCapacity: 19000, openingStock: 5000 } });
+  const supplier = await prisma.supplier.create({ data: { organizationId: org.id, name: 'Supplier', code: 'SUP', paymentTerms: 3 } });
+  const stockSource = [{ id: tank.id, stationId: station.id, productId: product.id, openingStock: tank.openingStock }];
+  await prisma.historicalSalesImport.create({ data: { organizationId: org.id, stationId: station.id, productId: product.id, monthStart: new Date('2026-11-01'), sourceFileName: 'HSD.pdf', sourceMimeType: 'application/pdf', sourceSize: 0, sourceContent: Buffer.from(''), sourceFingerprint: org.id, importedById: owner.id,
+   rows: [{ date:'2026-11-25',receiptQuantity:4000,testingQuantity:0,tankReadings:[{tankId:tank.id,openingStock:5000}],nozzleReadings:[{nozzleId:'n',meterReading:1000}] }, {date:'2026-11-26',receiptQuantity:0,testingQuantity:0,tankReadings:[{tankId:tank.id,openingStock:8500}],nozzleReadings:[{nozzleId:'n',meterReading:1500}]}] } });
+  const at = new Date('2026-11-26T06:00:00Z');
+  const before = (await readTankStockTimelines(prisma,org.id,stockSource,at)).get(tank.id)!;
+  const input = { stationId:station.id,supplierId:supplier.id,invoiceNumber:'INV-25',invoiceDate:'2026-11-25T00:00:00Z',dueDate:'2026-11-28T00:00:00Z',receivedDate:'2026-11-25',receiveNow:true,paidNow:false,taxAmount:0,lines:[{productId:product.id,tankId:tank.id,description:'Diesel delivery',quantity:4000,unitCost:90,taxRate:0}] };
+  const invoice = await createInvoice(org.id,owner.id,input);
+  expect(invoice.receipt).toMatchObject({ receivedDate:'2026-11-25',receivedAt:new Date('2026-11-24T18:30:00Z') });
+  const after = (await readTankStockTimelines(prisma,org.id,stockSource,at)).get(tank.id)!;
+  expect(Number(before.quantity)).toBe(8500); expect(Number(after.quantity)).toBe(8500);
+  expect(Number(after.receipts)).toBe(4000);
+  const history = await tankReceiptHistory(org.id,station.id);
+  expect(history.receipts).toHaveLength(1);
+  expect(history.receipts[0]).toMatchObject({source:'PURCHASE',period:'DATE_ONLY',businessDate:'2026-11-25',shiftId:null,shiftNumber:null});
+  const shift = await prisma.shift.create({data:{stationId:station.id,configurationId:config.id,managerId:owner.id,shiftNumber:1,status:'LOCKED',openingCash:0,openedAt:new Date('2026-11-25T02:30:00Z'),closedAt:new Date('2026-11-25T12:30:00Z'),tankReadings:{create:{tankId:tank.id,openingDip:5000,closingDip:8500}}}});
+  expect((await shiftDetails(org.id,shift.id)).tankReadings[0]?.stockBridge).toMatchObject({receiptTimingPending:true});
+  await prisma.shift.update({where:{id:shift.id},data:{openedAt:new Date('2026-11-24T02:30:00Z'),closedAt:new Date('2026-11-26T02:30:00Z')}});
+  const fullDay = (await shiftDetails(org.id,shift.id)).tankReadings[0]?.stockBridge;
+  expect(fullDay?.receiptTimingPending).toBe(false); expect(Number(fullDay?.received)).toBe(4000);
+  await prisma.shift.update({where:{id:shift.id},data:{openedAt:new Date('2026-11-25T02:30:00Z'),closedAt:new Date('2026-11-25T12:30:00Z')}});
+  await expect(createInvoice(org.id,owner.id,input)).rejects.toMatchObject({code:'INVOICE_EXISTS'});
+  expect(await prisma.inventoryLedger.count({where:{organizationId:org.id,type:'RECEIPT'}})).toBe(1);
+  await updateInvoice(org.id,owner.id,invoice.id,{version:invoice.version,invoiceNumber:invoice.invoiceNumber,invoiceDate:input.invoiceDate,dueDate:input.dueDate,receivedAt:'2026-11-25T08:30:00Z',correctionReason:'Confirmed unloading at 2 pm from delivery log',refreshPrices:false,markPaid:false});
+  const corrected = (await tankReceiptHistory(org.id,station.id)).receipts[0]!;
+  expect(corrected).toMatchObject({period:'DURING',shiftId:shift.id,businessDate:undefined});
+  expect((await shiftDetails(org.id,shift.id)).tankReadings[0]?.stockBridge).toMatchObject({receiptTimingPending:false,received:expect.anything()});
+  expect(await prisma.purchaseReceipt.findUnique({where:{id:invoice.receipt!.id}})).toMatchObject({receivedDate:null,receivedAt:new Date('2026-11-25T08:30:00Z')});
+  const correction = await prisma.purchaseInvoiceCorrection.findFirst({where:{invoiceId:invoice.id}});
+  expect(correction?.beforeLines).toMatchObject({receivedDate:'2026-11-25'});
+  expect(correction?.afterLines).toMatchObject({receivedDate:null});
+ }, 30000);
+});

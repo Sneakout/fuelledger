@@ -1009,7 +1009,7 @@ export function OperationsPage() {
   );
 }
 function receiptPeriod(receipt: ShiftReceipt) {
-  if (receipt.period === "DATE_ONLY") return "Receipt day recorded in DSR · exact time unavailable";
+  if (receipt.period === "DATE_ONLY") return receipt.source === "DSR" ? "Receipt day recorded in DSR · exact time unavailable" : "Delivery day recorded · exact unloading time unavailable";
   if (receipt.period === "OVERLAP") return "Overlapping shifts · review timing";
   if (receipt.period === "DURING") return `Received during shift #${receipt.shiftNumber}`;
   if (receipt.shiftNumber !== null) {
@@ -1067,7 +1067,7 @@ function ReceiptHistory({ stationId, tolerance, detailsRef }: { stationId: strin
       {receipts?.length ? <ul>{receipts.map(receipt => <li key={receipt.id}>
         <div>
           <strong>{receipt.tank && receipt.product ? `${receipt.tank} · ${receipt.product}` : `${receipt.product ?? "Product"} · Tank allocation needs review`} · {receipt.overlapMismatch ? "Quantity needs review" : receipt.unit === "LITRE" ? litres(Number(receipt.quantity)) : Number(receipt.quantity).toLocaleString("en-IN")}</strong>
-          <small>{[receipt.reference, receipt.supplier, receipt.source === "DSR" && receipt.businessDate ? `${new Date(`${receipt.businessDate}T00:00:00+05:30`).toLocaleDateString("en-IN", { day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Kolkata" })} · day only` : captured(receipt.occurredAt)].filter(Boolean).join(" · ")}</small>
+          <small>{[receipt.reference, receipt.supplier, receipt.period === "DATE_ONLY" && receipt.businessDate ? `${new Date(`${receipt.businessDate}T00:00:00+05:30`).toLocaleDateString("en-IN", { day:"numeric", month:"short", year:"numeric", timeZone:"Asia/Kolkata" })} · day only` : captured(receipt.occurredAt)].filter(Boolean).join(" · ")}</small>
           <small>{receiptPeriod(receipt)}{receipt.correctedLate ? " · Receipt time corrected after readings were saved" : receipt.recordedLate ? " · Recorded after readings were saved" : ""}</small>
           {receipt.source === "DSR" && Number(receipt.postedQuantity) > 0 && <small>DSR total {litres(Number(receipt.dsrQuantity))} · Already recorded through purchases {litres(Number(receipt.postedQuantity))}. {receipt.overlapMismatch ? "Purchase quantities exceed the DSR total; review both sources." : "Only the remaining DSR quantity is shown here to avoid counting deliveries twice."}</small>}
           {receipt.allocationRequired && <small>The DSR records a product total without one verified receiving tank. Review the saved register; no tank has been assumed.</small>}
@@ -1140,7 +1140,8 @@ function ClosingStockBridge({ shift, actuals, closingMeters, testing, tolerance,
           <span data-label="Opening">{litres(Number(reading.openingDip))}</span>
           <span data-label="Received">
             <b>{litres(Number(reading.stockBridge.received))}</b>
-            {Number(reading.stockBridge.historicalReceived ?? 0) > 0 && <small>Includes {litres(Number(reading.stockBridge.historicalReceived))} from confirmed DSR receipts · day recorded, exact time unavailable.</small>}
+            {reading.stockBridge.receiptTimingPending && <small className="form-error">A delivery day overlaps this shift. Add its unloading time in Purchases to complete the stock comparison.</small>}
+            {Number(reading.stockBridge.historicalReceived ?? 0) > 0 && <small>Includes {litres(Number(reading.stockBridge.historicalReceived))} from day-only delivery records · exact time unavailable.</small>}
             {reading.stockBridge.deliveries.length > 0 && <details><summary>View {reading.stockBridge.deliveries.length} {reading.stockBridge.deliveries.length === 1 ? "delivery" : "deliveries"}</summary>{reading.stockBridge.deliveries.map((delivery) => <small key={delivery.id}>{[delivery.reference, delivery.supplier, litres(Number(delivery.quantity)), captured(delivery.occurredAt), delivery.correctedLate ? "Time corrected after closing" : delivery.recordedLate ? "Recorded after closing" : null].filter(Boolean).join(" · ")}</small>)}</details>}
           </span>
           <span data-label="Sales">

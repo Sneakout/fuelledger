@@ -58,6 +58,7 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: st
         tankId: { in: shift.tankReadings.map((reading) => reading.tankId) },
         OR: [
           { type: 'RECEIPT', occurredAt },
+          { type: 'RECEIPT', receiptLine: { receipt: { receivedDate: { gte: indiaDate(earliest), lte: indiaDate(shift.closedAt ?? asOf) } } } },
           {
             type: 'ADJUSTMENT', occurredAt,
             // A previous shift's testing loss may share the new opening timestamp.
@@ -102,7 +103,12 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: st
   return new Map(shift.tankReadings.map((reading) => {
     const baseline = source?.tanks.find(tank => tank.id === reading.tankId);
     const start = baseline && !selectedOpening ? indiaDayRange(baseline.date).start : shift.openedAt;
-    const rows = movements.filter((movement) => movement.tankId === reading.tankId &&
+    const dayOnly = movements.filter(movement => movement.tankId === reading.tankId && movement.receiptLine?.receipt?.receivedDate);
+    const cutoff = shift.closedAt ?? asOf;
+    const ambiguous = dayOnly.filter(movement => { const day = indiaDayRange(movement.receiptLine!.receipt.receivedDate!); const receivedBy = movement.receiptLine!.receipt.createdAt < day.endExclusive ? movement.receiptLine!.receipt.createdAt : day.endExclusive; return day.start < cutoff && receivedBy > start && (day.start < start || receivedBy > cutoff); });
+    if (closing && ambiguous.length) throw new AppError(409, 'SHIFT_RECEIPT_TIME_REQUIRED', 'A delivery on this shift’s opening or closing date has no unloading time. Set its actual stock received time in Purchases so it can be placed before or during the shift accurately.');
+    const dated = dayOnly.filter(movement => { const day = indiaDayRange(movement.receiptLine!.receipt.receivedDate!); const receivedBy = movement.receiptLine!.receipt.createdAt < day.endExclusive ? movement.receiptLine!.receipt.createdAt : day.endExclusive; return day.start >= start && receivedBy <= cutoff; });
+    const rows = movements.filter((movement) => !movement.receiptLine?.receipt?.receivedDate && movement.tankId === reading.tankId &&
       (movement.occurredAt >= start || movement.sale?.shiftId === shift.id));
     const supplemental = dsrReceipts.filter(receipt => baseline && receipt.occurredAt >= start && receipt.occurredAt <= (shift.closedAt ?? asOf) && receipt.productId === reading.tank?.productId);
     if (closing && strictCutoff && supplemental.some(receipt => receipt.businessDate === indiaDate(asOf) && receipt.quantity.gt(0)))
@@ -118,8 +124,9 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: st
     const testingLoss = rows.filter(movement => movement.type === 'ADJUSTMENT' &&
       movement.occurredAt.getTime() === shift.closedAt?.getTime());
     return [reading.tankId, {
-      received: receipts.reduce((sum, movement) => sum.add(movement.quantityDelta), new Prisma.Decimal(0)).add(supplemental.filter(receipt => receipt.tankId === reading.tankId).reduce((sum, receipt) => sum.add(receipt.quantity), new Prisma.Decimal(0))),
-      historicalReceived: supplemental.filter(receipt => receipt.tankId === reading.tankId).reduce((sum, receipt) => sum.add(receipt.quantity), new Prisma.Decimal(0)),
+      receiptTimingPending: ambiguous.length > 0,
+      received: dated.reduce((sum, movement) => sum.add(movement.quantityDelta), new Prisma.Decimal(0)).add(receipts.reduce((sum, movement) => sum.add(movement.quantityDelta), new Prisma.Decimal(0))).add(supplemental.filter(receipt => receipt.tankId === reading.tankId).reduce((sum, receipt) => sum.add(receipt.quantity), new Prisma.Decimal(0))),
+      historicalReceived: dated.reduce((sum, movement) => sum.add(movement.quantityDelta), new Prisma.Decimal(0)).add(supplemental.filter(receipt => receipt.tankId === reading.tankId).reduce((sum, receipt) => sum.add(receipt.quantity), new Prisma.Decimal(0))),
       counterSales: sales.filter(movement => !movement.sale?.shiftId || !requiresFuelShift(movement.sale.product))
         .reduce((sum, movement) => sum.minus(movement.quantityDelta), new Prisma.Decimal(0)),
       postedSales: shift.closedAt ? sales.reduce((sum, movement) => sum.minus(movement.quantityDelta), new Prisma.Decimal(0)) : undefined,

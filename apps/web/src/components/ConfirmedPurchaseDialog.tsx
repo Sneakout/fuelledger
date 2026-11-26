@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileCheck2, PackageX, RefreshCw, ShieldCheck, X } from "lucide-react";
 import type { InvoiceImportPolicy, ProductForm, ProductPriceApprovalNotice, PurchaseInvoice, PurchasesBootstrap } from "../lib/api";
 import { api, ApiRequestError } from "../lib/api";
-import { assessProductHsn, buildConfirmedPurchaseInput, compatibleTanks, findDuplicateInvoice, findMatchingProduct, findMatchingSupplier, onlyCompatibleTankId, validateConfirmedPurchase, validateReceiptSelections } from "../lib/confirmed-purchase-submission";
+import { assessProductHsn, buildConfirmedPurchaseInput, confirmedReceiptTiming, compatibleTanks, findDuplicateInvoice, findMatchingProduct, findMatchingSupplier, onlyCompatibleTankId, validateConfirmedPurchase, validateReceiptSelections } from "../lib/confirmed-purchase-submission";
 import { flushInvoiceImportPerformance, recordInvoiceImportPerformance } from "../lib/invoice-import-performance";
 import type { EditableInvoiceDraft } from "./EditableInvoiceReviewDialog";
 import { assessInvoiceStation } from "../lib/invoice-local-safety";
+import { indiaDate } from "../lib/india-time";
 import { defaultPurchaseDueDate } from "../lib/purchase-due-date";
 
 export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo, onBack, onClose, onSubmitted }: {
@@ -25,6 +26,9 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
   const [productIds, setProductIds] = useState<Array<string | null>>([]);
   const [tankIds, setTankIds] = useState<Array<string | null>>([]);
   const [receiveNow, setReceiveNow] = useState(true);
+  const [deliveryDate, setDeliveryDate] = useState(draft.invoiceDate);
+  const [deliveryTime, setDeliveryTime] = useState("");
+  const [knowDeliveryTime, setKnowDeliveryTime] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -78,8 +82,9 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
   const validationErrors = useMemo(() => [
     ...validateConfirmedPurchase(draft, stationAvailable ? stationId : "", supplierId),
     ...validateReceiptSelections(receiveNow, stationId, productIds, tankIds, data?.products ?? [], data?.stations ?? []),
+    ...(receiveNow ? deliveryErrors(deliveryDate, knowDeliveryTime ? deliveryTime : undefined, knowDeliveryTime) : []),
     ...(stationAssessment.status === "MATCH" ? [] : [stationAssessment.message]),
-  ], [data, draft, productIds, receiveNow, stationAvailable, stationId, stationAssessment, supplierId, tankIds]);
+  ], [data, draft, productIds, receiveNow, deliveryDate, deliveryTime, knowDeliveryTime, stationAvailable, stationId, stationAssessment, supplierId, tankIds]);
   const duplicate = findDuplicateInvoice(supplierId, draft.invoiceNumber, data?.invoices ?? []);
   const canReceiveExisting = Boolean(duplicate && !duplicate.receipt && receiveNow);
 
@@ -123,11 +128,11 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
       let savedInvoice: PurchaseInvoice;
       let approvals: ProductPriceApprovalNotice[] = [];
       if (canReceiveExisting && duplicate) {
-        const result = await api.receiveImportedPurchaseInvoice(duplicate.id, { allocations: duplicate.lines.map((line, index) => ({ invoiceLineId: line.id, productId: productIds[index]!, tankId: tankIds[index] || null })) });
+        const result = await api.receiveImportedPurchaseInvoice(duplicate.id, { ...confirmedReceiptTiming(deliveryDate, knowDeliveryTime ? deliveryTime : undefined), allocations: duplicate.lines.map((line, index) => ({ invoiceLineId: line.id, productId: productIds[index]!, tankId: tankIds[index] || null })) });
         savedInvoice = result.invoice;
         approvals = result.priceApprovals ?? [];
       } else {
-        const result = await api.createImportedPurchaseInvoice(buildConfirmedPurchaseInput(draft, stationId, supplierId, productIds, { receiveNow, tankIds }));
+        const result = await api.createImportedPurchaseInvoice(buildConfirmedPurchaseInput(draft, stationId, supplierId, productIds, { receiveNow, tankIds, deliveryDate, deliveryTime: knowDeliveryTime ? deliveryTime : undefined }));
         savedInvoice = result.invoice;
         approvals = result.priceApprovals ?? [];
       }
@@ -164,7 +169,9 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
       {!loading && !created && <div className="invoice-submit-body">
         <section className="invoice-submit-boundary"><ShieldCheck/><div><strong>One unpaid invoice and one stock receipt</strong><p>The source document stays on this device. Confirmed quantities can update inventory and the selected tanks; supplier payment and bank balances will not change.</p></div></section>
 
-        <label className="invoice-submit-stock"><input type="checkbox" checked={receiveNow} onChange={event => { setReceiveNow(event.target.checked); setConfirmed(false); }}/><span><strong>Receive this stock now</strong><small>Creates the receipt and inventory movements at the time you confirm.</small></span></label>
+        <label className="invoice-submit-stock"><input type="checkbox" checked={receiveNow} onChange={event => { setReceiveNow(event.target.checked); setConfirmed(false); }}/><span><strong>Stock has been received</strong><small>Adds the confirmed quantities to the selected tanks and inventory.</small></span></label>
+
+        {receiveNow && <section className="invoice-delivery-date"><h3>Stock received on {date(deliveryDate)}</h3><p>We use the invoice date unless you change it. The entry time is saved separately.</p><label className="invoice-submit-field"><span>Delivery date</span><input aria-label="Delivery date" type="date" value={deliveryDate} max={indiaDate()} onChange={event => { setDeliveryDate(event.target.value); setConfirmed(false); }} /></label><label className="invoice-submit-stock"><input type="checkbox" checked={knowDeliveryTime} onChange={event => { setKnowDeliveryTime(event.target.checked); setConfirmed(false); }}/><span><strong>I know the unloading time</strong><small>{knowDeliveryTime ? "Use the actual arrival time in IST." : "Day recorded only. No exact time or shift will be assumed."}</small></span></label>{knowDeliveryTime && <label className="invoice-submit-field"><span>Unloading time · IST</span><input aria-label="Unloading time · IST" type="time" value={deliveryTime} onChange={event => { setDeliveryTime(event.target.value); setConfirmed(false); }}/></label>}</section>}
 
         <label className="invoice-submit-field"><span>Supplier</span><select aria-label="Existing supplier" value={supplierId} onChange={event => { setSupplierId(event.target.value); setConfirmed(false); }} disabled={!data || isDemo || Boolean(creatingCatalog)}><option value="">No matching supplier found</option>{data?.suppliers.map(supplier => <option key={supplier.id} value={supplier.id}>{supplier.name}{supplier.taxId ? ` · ${supplier.taxId}` : ""}</option>)}</select>{supplierId ? <small className="invoice-match-note matched">Matched to an existing supplier. Confirm the selection.</small> : <span className="invoice-new-record"><small className="invoice-match-note new">New supplier recognised · {draft.supplierName}{draft.supplierGSTIN ? ` · GSTIN ${draft.supplierGSTIN}` : ""}</small><button type="button" disabled={isDemo || Boolean(creatingCatalog)} onClick={() => void createReviewedSupplier()}>{creatingCatalog === "supplier" ? "Adding…" : "Add reviewed supplier"}</button></span>}</label>
 
@@ -173,7 +180,7 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
         <dl className="invoice-submit-facts"><div><dt>Invoice</dt><dd>{draft.invoiceNumber}</dd></div><div><dt>Invoice date</dt><dd>{date(draft.invoiceDate)}</dd></div><div><dt>Due date · T+3</dt><dd>{dueDate ? date(dueDate) : "Check invoice date"}</dd></div><div><dt>Unpaid amount</dt><dd>{money(Number(draft.totalAmount))}</dd></div></dl>
 
         {duplicate && <section className={canReceiveExisting ? "invoice-submit-boundary" : "invoice-submit-warning"}><AlertTriangle/><div><strong>{canReceiveExisting ? "Invoice exists; stock receipt is missing" : "This invoice already exists"}</strong><p>{canReceiveExisting ? "FuelNerve will keep the existing invoice and create only its missing inventory receipt." : `${duplicate.supplier.name} invoice ${duplicate.invoiceNumber} is already recorded. It has not been submitted again.`}</p></div></section>}
-        {!duplicate && validationErrors.length > 0 && <section className="invoice-submit-warning"><AlertTriangle/><div><strong>Review this before continuing</strong>{validationErrors.slice(0, 3).map(item => <p key={item}>{item}</p>)}</div></section>}
+        {(!duplicate || canReceiveExisting) && validationErrors.length > 0 && <section className="invoice-submit-warning"><AlertTriangle/><div><strong>Review this before continuing</strong>{validationErrors.slice(0, 3).map(item => <p key={item}>{item}</p>)}</div></section>}
         {error && <p className="invoice-submit-error" role="alert">{error}</p>}
 
         {!isDemo && policy?.enabled && (!duplicate || canReceiveExisting) && validationErrors.length === 0 && <label className="invoice-submit-confirm"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)}/><span><strong>I checked the supplier, products, tanks, dates and amount.</strong><small>{canReceiveExisting ? "Keep the existing invoice and create only its missing stock receipt." : `Create it as unpaid${receiveNow ? " and add the confirmed quantities to stock" : " without changing stock"}. Payment remains unchanged.`}</small></span></label>}
@@ -185,6 +192,10 @@ export function ConfirmedPurchaseDialog({ draft, stationId, stationName, isDemo,
   </div>;
 }
 
+function deliveryErrors(day: string, time: string | undefined, requireTime: boolean) {
+  if (requireTime && !time) return ["Enter the unloading time, or leave ‘I know the unloading time’ unchecked."];
+  try { confirmedReceiptTiming(day, time); return []; } catch (error) { return [error instanceof Error ? error.message : "Review the delivery date."]; }
+}
 function money(value: number) { return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value); }
 function number(value: number) { return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 3 }).format(value); }
 function uniqueCode(value: string, existing: string[]) {

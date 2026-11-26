@@ -9,7 +9,7 @@ describe("purchase receipt timing", () => {
   const now = new Date("2026-09-06T08:30:00.000Z");
 
   it("defaults physical receipt time to the actual entry time", () => {
-    expect(resolveReceiptTiming(undefined, undefined, now)).toEqual({ receivedAt: now, receivedAtReason: null });
+    expect(resolveReceiptTiming(undefined, undefined, now)).toEqual({ receivedAt: now, receivedDate: null, receivedAtReason: null });
   });
 
   it("does not derive physical receipt time from a past invoice date", () => {
@@ -21,7 +21,7 @@ describe("purchase receipt timing", () => {
 
   it("requires a reason for a deliberately earlier receipt time", () => {
     expect(() => resolveReceiptTiming("2025-12-28T08:30:00.000Z", undefined, now)).toThrowError(expect.objectContaining({ code: "RECEIPT_TIME_REASON_REQUIRED" }));
-    expect(resolveReceiptTiming("2025-12-28T08:30:00.000Z", "Delivery entered from the dip register", now)).toEqual({ receivedAt: new Date("2025-12-28T08:30:00.000Z"), receivedAtReason: "Delivery entered from the dip register" });
+    expect(resolveReceiptTiming("2025-12-28T08:30:00.000Z", "Delivery entered from the dip register", now)).toEqual({ receivedAt: new Date("2025-12-28T08:30:00.000Z"), receivedDate: null, receivedAtReason: "Delivery entered from the dip register" });
   });
 
   it("rejects a future physical receipt time", () => {
@@ -43,4 +43,18 @@ describe("legacy receipt timing audit", () => {
     expect(report.candidates.map(row => row.id)).toEqual(["old"]);
     expect(db.purchaseReceipt.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ organizationId: "org", stationId: { in: ["s"] } }) }));
   });
+});
+
+
+describe('date-only invoice delivery', () => {
+ const now = new Date('2026-11-26T10:00:00Z');
+ it('preserves the confirmed day separately from the internal India-day sorting boundary', () => {
+  expect(resolveReceiptTiming(undefined, undefined, now, '2026-11-25')).toMatchObject({ receivedDate:'2026-11-25',receivedAt:new Date('2026-11-24T18:30:00Z') });
+ });
+ it.each(['2026-11-27','2026-02-30'])('rejects future or invalid delivery date %s', day => {
+  expect(() => resolveReceiptTiming(undefined,undefined,now,day)).toThrow();
+ });
+ it('rejects conflicting precision instead of silently picking a date', () => {
+  expect(() => resolveReceiptTiming('2026-11-25T10:00:00Z',undefined,now,'2026-11-25')).toThrow();
+ });
 });

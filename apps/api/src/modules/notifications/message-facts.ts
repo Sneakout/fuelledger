@@ -198,7 +198,7 @@ export async function readReceiptMessageFacts(scope: Scope, receiptId: string, a
   return {
     ...metadata({ ...scope, stationId: receipt.stationId }, receipt.receivedAt, receipt.receivedAt, asOf),
     completeness: invoice && lines.length && lines.every(line => !line.invalidTankMapping) ? 'COMPLETE' : 'INCOMPLETE',
-    receiptId, station: receipt.station, supplierName: receipt.supplierName, receivedAt: receipt.receivedAt, lines,
+    receiptId, station: receipt.station, supplierName: receipt.supplierName, receivedAt: receipt.receivedAt, receivedDate: receipt.receivedDate, lines,
     invoice: invoice ? {
       id: invoice.id, version: invoice.version, number: invoice.invoiceNumber, invoiceDate: invoice.invoiceDate, dueDate: invoice.dueDate,
       products: [...invoiced.values()].sort((a, b) => a.code.localeCompare(b.code)),

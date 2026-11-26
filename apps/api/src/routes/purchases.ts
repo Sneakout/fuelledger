@@ -86,6 +86,7 @@ purchasesRouter.post("/invoice-import", async (req, res) => {
   if (!policy.enabled) throw new AppError(403, "INVOICE_IMPORT_UNAVAILABLE", "Invoice import is not available for this account yet.");
   const input = parse(purchaseInvoiceInputSchema.safeParse(req.body), "INVOICE_INVALID", "Please review the invoice details.");
   if (input.paidNow || input.attachment) throw new AppError(400, "INVOICE_IMPORT_SCOPE_INVALID", "This confirmation can create an unpaid invoice and its stock receipt. Payment and document storage remain separate.");
+  if (input.receiveNow && !input.receivedAt && !input.receivedDate) input.receivedDate = input.invoiceDate.slice(0, 10);
   assertStationAccess(req.user!, input.stationId);
   res.status(201).json(await createInvoiceAndPriceApproval(req.user!, input));
 });
