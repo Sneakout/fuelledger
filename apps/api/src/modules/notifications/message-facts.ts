@@ -1,5 +1,5 @@
 import { Prisma, type PaymentMethod } from '@prisma/client';
-import { indiaDayRange } from '../../lib/india-time.js';
+import { indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { prisma } from '../../lib/prisma.js';
 import { readTankStockTimelines } from '../../lib/historical-stock.js';
 import { bookStockAt } from '../../lib/stock.js';
@@ -60,7 +60,7 @@ export async function readDailyOperatingFacts(scope: Scope, date: string, asOf =
   const { start, endExclusive } = indiaDayRange(date);
   const end = new Date(Math.min(asOf.getTime(), endExclusive.getTime() - 1));
   const stationFilter = { ...stationScope(scope), active: true };
-  const [sales, tanks, shifts] = await Promise.all([
+  const [sales, tanks, shifts, openShifts] = await Promise.all([
     prisma.sale.findMany({
       where: { organizationId: scope.organizationId, station: stationFilter, occurredAt: { gte: start, lte: end } },
       select: { id: true, product, quantity: true, totalAmount: true, shiftId: true, paymentMethod: true },
@@ -70,18 +70,26 @@ export async function readDailyOperatingFacts(scope: Scope, date: string, asOf =
       where: { station: stationFilter, closedAt: { gte: start, lte: end } },
       select: { id: true, reconciliation: { select: { id: true, reconciledAt: true, collections: { select: { paymentMethod: true, actualAmount: true } } } } },
     }),
+    // Attention items describe older shifts still open now, even in a recovered
+    // report. Never confuse the report cutoff with current operational status.
+    prisma.shift.findMany({
+      where: { station: stationFilter, status: 'OPEN', closedAt: null, openedAt: { lt: indiaDayRange(indiaDate(asOf)).start } },
+      select: { id: true, shiftNumber: true, openedAt: true, station },
+      orderBy: { openedAt: 'asc' },
+    }),
   ]);
   const timelines=await readTankStockTimelines(prisma,scope.organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),end);
   const stockIssues=[...timelines.values()].flatMap(timeline=>timeline.issues);
   const reconciled = shifts.flatMap(shift => shift.reconciliation && shift.reconciliation.reconciledAt <= asOf && shift.reconciliation.collections.length ? [shift.reconciliation] : []);
   const actual = reconciled.flatMap(row => row.collections).filter(row => collectedMethod(row.paymentMethod));
   const closedShiftIds = new Set(shifts.map(shift => shift.id));
-  const incomplete = shifts.length !== reconciled.length || sales.some(sale => sale.shiftId !== null && !closedShiftIds.has(sale.shiftId));
+  const incomplete = shifts.length !== reconciled.length || sales.some(sale => sale.shiftId !== null && !closedShiftIds.has(sale.shiftId)) || openShifts.some(shift => shift.openedAt <= end);
   const counterCollections = sales.filter(sale => sale.shiftId === null && collectedMethod(sale.paymentMethod));
   return {
     ...metadata(scope, start, end, asOf),
     stockIssues,
     completeness: incomplete || stockIssues.length || !tanks.length ? 'INCOMPLETE' : 'COMPLETE',
+    openShifts,
     sales: productSales(sales),
     collections: {
       actual: reconciled.length || counterCollections.length ? counterCollections.reduce((sum, sale) => sum.plus(sale.totalAmount), actual.reduce((sum, row) => sum.plus(row.actualAmount), zero())) : null,

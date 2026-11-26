@@ -29,7 +29,7 @@ describe('verified notification facts', () => {
       { id: 's1', shiftId: 'night', product: lineProduct, quantity: d(12.25), totalAmount: d(1200) },
       { id: 's2', shiftId: 'open', product: { ...lineProduct, id: 'oil', code: 'OIL', unit: 'PIECE' }, quantity: d(2), totalAmount: d(600) },
     ]);
-    db.shift.findMany.mockResolvedValue([{ id: 'night', reconciliation: {
+    db.shift.findMany.mockImplementation(async ({where}) => where.status === 'OPEN' ? [] : [{ id: 'night', reconciliation: {
       id: 'r1', reconciledAt: asOf, collections: [{ paymentMethod: 'UPI', actualAmount: d(100) }, { paymentMethod: 'CREDIT', actualAmount: d(50) }],
     } }]);
     const result = await readDailyOperatingFacts(scope, '2026-11-17', asOf);
@@ -87,4 +87,16 @@ it('recovered daily reports bound sales and tank stock to the original India day
  expect(facts.period.end).toEqual(end);
  expect(db.sale.findMany.mock.calls.at(-1)![0].where.occurredAt.lte).toEqual(end);
  expect(bookStockAt).toHaveBeenCalledWith(expect.anything(),expect.objectContaining({tankId:'tank',organizationId:'org',stationId:'station'}),end);
+});
+
+
+it('checks older shifts still open now without moving historical sales and stock cutoffs', async () => {
+ const now = new Date('2026-11-26T12:00:00Z');
+ const shift = { id:'open-shift',shiftNumber:1,openedAt:new Date('2026-11-24T02:30:00Z'),station };
+ db.sale.findMany.mockResolvedValue([]); db.tank.findMany.mockResolvedValue([]);
+ db.shift.findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([shift]);
+ const facts = await readDailyOperatingFacts(scope,'2026-11-25',now);
+ expect(facts.openShifts).toEqual([shift]); expect(facts.collections.incomplete).toBe(true);
+ expect(db.shift.findMany).toHaveBeenCalledWith(expect.objectContaining({where:{station:{organizationId:'org',id:'station',active:true},status:'OPEN',closedAt:null,openedAt:{lt:new Date('2026-11-25T18:30:00Z')}}}));
+ expect(db.sale.findMany.mock.calls.at(-1)![0].where.occurredAt.lte).toEqual(new Date('2026-11-25T18:29:59.999Z'));
 });

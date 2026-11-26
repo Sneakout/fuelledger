@@ -416,7 +416,7 @@ suite('WhatsApp coordination on isolated PostgreSQL', () => {
     await drainWhatsAppQueue();
     const preview = await load(job.id);
     expect(preview).toMatchObject({ status: 'PENDING', rolloutHold: 'shadow_mode', attempts: 0, previewTemplate: 'fuelnerve_daily_operations_v1' });
-    expect(preview.previewBody).toContain('No live sales recorded');
+    expect(preview.previewBody).toContain('No sales recorded for this date');
     expect(meta).not.toHaveBeenCalled();
     await expect(switchTo('PILOT')).rejects.toMatchObject({ code: 'INTERNAL_DELIVERY_UNVERIFIED' });
     await expect(approveRolloutPreview(organizationId, job.id, 'wrong-hash', actor.id)).rejects.toMatchObject({ code: 'PREVIEW_CHANGED' });

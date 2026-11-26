@@ -220,8 +220,9 @@ it('bounds daily recovery by India business date and never recovers an old credi
 });
 it('labels recovered summaries by their own date in both HTML and plain text', () => {
  const email=renderOwnerEmail({type:'DAILY_SUMMARY',message:'Sales: HSD: 1,000 L',ownerName:'Owner',stationName:'Station',date:'2026-11-23',appUrl:'https://fuel.mindvector.tech',delayed:true});
- expect(email.subject).toBe('Delayed summary · 2026-11-23 · Station');
- expect(email.html).toContain('Delayed daily summary');expect(email.text).toContain('covers the business date shown above');expect(email.html).toContain('end of that day');
+ expect(email.subject).toBe('Your daily operating summary · 2026-11-23 · Station');
+ expect(email.html).not.toContain('Delayed daily summary'); expect(email.text).not.toContain('arrived later than planned'); expect(email.subject).not.toContain('Delayed');
+ expect(email.html).toContain('23 November 2026');
 });
 
 it('does not backfill daily emails for days before the current consent or support resume', async () => {

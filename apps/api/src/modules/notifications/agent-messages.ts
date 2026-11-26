@@ -11,14 +11,29 @@ export const volume = (value: Prisma.Decimal | number, unit: string) => `${Numbe
 export const stockLevel = (stock: number, capacity: number, threshold: number) =>
   stock <= 0 ? 'EMPTY' : stock / capacity * 100 <= threshold ? 'LOW' : 'HEALTHY';
 
+export const ownerTankName = (code: string) => {
+  const numbered = code.trim().match(/^(?:T|Tank)[\s-]*(\d+)$/i);
+  return numbered ? `Tank ${Number(numbered[1])}` : code;
+};
+const ownerFuelName = (code: string) => code === 'MS' ? 'MS/Petrol' : code === 'HSD' ? 'HSD/Diesel' : code;
+const dailyVolume = (quantity: Prisma.Decimal, unit: string) => `${Number(quantity).toLocaleString('en-IN', { maximumFractionDigits: 2 })} ${unit === 'LITRE' ? 'L' : unit.toLowerCase()}`;
+const openedDescription = (at: Date) => {
+  const time = at.toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase();
+  const date = at.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' });
+  return `Opened at ${time} IST on ${date} and is still not closed.`;
+};
+
 export function coreDailyMessage(facts: Awaited<ReturnType<typeof readDailyOperatingFacts>>, date: string, appUrl: string) {
-  const sales = facts.sales.map(row => `${row.product.code}: ${volume(row.quantity, row.product.unit)}`).join(', ');
+  const sales = facts.sales.map(row => `${ownerFuelName(row.product.code)}: ${dailyVolume(row.quantity, row.product.unit)}`).join(', ');
   const collected = facts.collections.actual;
-  const stock = facts.tanks.map(tank => `${tank.station.name} · ${tank.product.code} ${tank.code}: ${tank.stockIssues?.length ? 'Stock history needs review — open inventory' : volume(tank.bookStock, tank.product.unit)}`);
+  const stock = facts.tanks.map(tank => `${tank.station.name} · ${ownerFuelName(tank.product.code)} · ${ownerTankName(tank.code)}: ${tank.stockIssues?.length ? 'Stock history needs review — open inventory' : dailyVolume(tank.bookStock, tank.product.unit)}`);
+  const open = facts.openShifts ?? [];
+  const salesAwaitClosing = open.some(shift => shift.openedAt <= facts.period.end);
   return [
     `FuelNerve · Daily operating summary · ${date}`,
-    `Sales: ${sales || 'No live sales recorded'}`,
+    `Sales: ${sales || (salesAwaitClosing ? 'Shift sales are awaiting closing' : 'No sales recorded for this date')}`,
     `Collections (reconciled shifts + counter sales): ${collected ? money(collected) : 'No verified collections recorded'}${facts.collections.incomplete ? ' · Some shifts are pending' : ''}`,
+    ...(open.length ? ['Shifts still open:', ...open.map(shift => `${shift.station.name} · Shift #${shift.shiftNumber}: ${openedDescription(shift.openedAt)}`)] : []),
     `Tank book stock:\n${stock.join('\n') || 'No active tanks'}`,
     `Review: ${appUrl}/reports`,
   ].join('\n\n');
