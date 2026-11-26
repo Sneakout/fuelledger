@@ -1831,7 +1831,16 @@ export type ReportsBootstrap = {
   };
   quality: {periodComplete:boolean;incompleteReason:string|null;missingCostOfSales:boolean;missingCostReason:string|null;salesToPostedRevenueDifference:number;netProfitReconciliationDifference:number;unavailableReportSections:string[]};
 };
+export type YesterdayPerformance = {
+  date: string; status: 'RECORDED' | 'PENDING' | 'NO_DATA' | 'REVIEW';
+  start: string | null; end: string | null;
+  closedShifts: number; pendingClosings: number; pendingReconciliations: number; missingMorning: boolean;
+  sales: number | null; meteredVolume: number | null; collected: number | null; verifiedCollected: number | null; netProfit: number | null;
+  expenses: number; historicalProducts: number; collectionsReason: string; profitReason: string; issues: string[];
+  periods: Array<{ stationId: string; name: string; start: string; end: string | null }>;
+};
 export type DashboardBootstrap = {
+  yesterday?: YesterdayPerformance;
   asOf: string;
   today: ReportSummary;
   collections: Array<{

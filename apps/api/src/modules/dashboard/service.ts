@@ -1,3 +1,4 @@
+import { readYesterdayPerformance } from './yesterday-performance.js';
 import { readOperationalStocks } from '../../lib/operational-stock.js';
 import { readTankStockTimelines } from '../../lib/historical-stock.js';
 import type { Prisma } from '@prisma/client';
@@ -56,7 +57,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
   const now=new Date(),todayDate=indiaDate(now),todayRange=indiaDayRange(todayDate),weekStartDate=addIndiaDays(todayDate,-6),previousStartDate=addIndiaDays(todayDate,-13),previousStart=indiaDayRange(previousStartDate).start,tomorrow=todayRange.endExclusive;
   const report=await buildReport(organizationId,{startDate:todayDate,endDate:todayDate,permittedStationIds,...(stationId?{stationId}:{})});
   const scopeIds=stationId?[stationId]:permittedStationIds;
-  const [recentSales,historicalImports,shifts,reconciliations,tanks,recentPurchases,pendingPriceApprovals]=await Promise.all([
+  const [recentSales,historicalImports,shifts,reconciliations,tanks,recentPurchases,pendingPriceApprovals,yesterday]=await Promise.all([
     prisma.sale.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),occurredAt:{gte:previousStart,lt:tomorrow}},select:{occurredAt:true,totalAmount:true,productId:true}}),
     prisma.historicalSalesImport.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),monthStart:{lt:tomorrow}},select:{productId:true,rows:true,product:{select:{sellingPrice:true,sellingPriceHistory:{orderBy:{effectiveFrom:'desc'},select:{price:true,effectiveFrom:true}}}}}}),
     prisma.shift.findMany({where:{station:{organizationId,...(scopeIds?{id:{in:scopeIds}}:{})},status:{in:['OPEN','RECONCILIATION_REQUIRED']}},select:{id:true,status:true,shiftNumber:true,openedAt:true,closedAt:true,station:{select:{id:true,name:true,code:true}}},orderBy:{openedAt:'desc'}}),
@@ -73,6 +74,7 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
     }),
     prisma.purchaseInvoice.findMany({where:{organizationId,...(scopeIds?{stationId:{in:scopeIds}}:{}),createdAt:{gte:todayRange.start,lt:tomorrow}},select:{id:true,invoiceNumber:true,totalAmount:true,supplier:{select:{name:true}}},orderBy:{createdAt:'desc'},take:20}),
     prisma.approvalRequest.findMany({where:{organizationId,status:'PENDING',actionType:'PRODUCT_PRICE_CHANGE',...(scopeIds?{stationId:{in:scopeIds}}:{})},select:{id:true,reason:true,evidence:true},orderBy:{requestedAt:'desc'},take:20}),
+    readYesterdayPerformance(organizationId,scopeIds,now),
   ]);
   const bookStockByTank=await tankBookStocksAt(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),now);
   const timelines=await readTankStockTimelines(prisma,organizationId,tanks.map(tank=>({id:tank.id,stationId:tank.configuration.station.id,productId:tank.productId,openingStock:tank.openingStock})),now);
@@ -126,5 +128,5 @@ export async function bootstrap(organizationId:string,permittedStationIds?:strin
       status:availableStock>workingCapacity?'OVER_CAPACITY':availableStock<=0?'EMPTY':fillPercent<=20?'LOW':'HEALTHY' as 'OVER_CAPACITY'|'EMPTY'|'LOW'|'HEALTHY',
     };
   });
-  return{asOf:now.toISOString(),today:report.summary,collections:report.sales.byPayment,topProducts:report.sales.byProduct.slice(0,5),trend:{days:trend,thisWeek,previousWeek,weekChange},operations:{openShifts:open.length,pendingReconciliations:pending.length,cashVariance},actions,stationHealth,tankStocks};
+  return{asOf:now.toISOString(),yesterday,today:report.summary,collections:report.sales.byPayment,topProducts:report.sales.byProduct.slice(0,5),trend:{days:trend,thisWeek,previousWeek,weekChange},operations:{openShifts:open.length,pendingReconciliations:pending.length,cashVariance},actions,stationHealth,tankStocks};
 }
