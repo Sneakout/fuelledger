@@ -1,6 +1,7 @@
+import { resolveClosingTime, validateClosingCutoff } from './closing-time.js';
 import { openingReadings, savedOpeningSource } from './opening-readings.js';
 import { historicalTankReceipts } from './historical-receipts.js';
-import { indiaDayRange } from '../../lib/india-time.js';
+import { indiaDate, indiaDayRange } from '../../lib/india-time.js';
 import { closingCollectionFacts } from '../../lib/shift-collections.js';
 import { requiresFuelShift } from '@fuelledger/shared';
 import { safeTransaction } from '../../lib/safe-save.js';
@@ -42,7 +43,7 @@ const exact = (ids: string[], values: Array<{ id: string }>) =>
   ids.length === values.length &&
   ids.every((id) => values.some((value) => value.id === id));
 type BridgeDb = Pick<Prisma.TransactionClient, 'inventoryLedger' | 'nozzle' | 'historicalSalesImport' | 'tank'>;
-async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: string; shiftNumber: number; stationId: string; configurationId: string; openingSource?: unknown; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }, asOf = new Date(), closing = false) {
+async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: string; shiftNumber: number; stationId: string; configurationId: string; openingSource?: unknown; openedAt: Date; closedAt: Date | null; tankReadings: Array<{ tankId: string; tank?: { productId: string } }>; nozzleReadings: Array<{ nozzleId: string }> }, asOf = new Date(), closing = false, strictCutoff = false) {
   const source = savedOpeningSource(shift.openingSource);
   const starts = source?.tanks.map(tank => indiaDayRange(tank.date).start) ?? [];
   const earliest = starts.reduce((min, at) => at < min ? at : min, shift.openedAt);
@@ -102,6 +103,8 @@ async function stockBridge(db: BridgeDb, organizationId: string, shift: { id: st
     const rows = movements.filter((movement) => movement.tankId === reading.tankId &&
       (movement.occurredAt >= start || movement.sale?.shiftId === shift.id));
     const supplemental = dsrReceipts.filter(receipt => baseline && receipt.occurredAt >= start && receipt.occurredAt <= (shift.closedAt ?? asOf) && receipt.productId === reading.tank?.productId);
+    if (closing && strictCutoff && supplemental.some(receipt => receipt.businessDate === indiaDate(asOf) && receipt.quantity.gt(0)))
+      throw new AppError(409, 'SHIFT_RECEIPT_TIME_REQUIRED', 'A DSR receipt on the closing date has no actual receipt time. Record its delivery with the actual received time before closing at a selected time.');
     if (closing && baseline && supplemental.some(receipt => receipt.allocationRequired || receipt.overlapMismatch))
       throw new AppError(409, 'DSR_RECEIPT_REVIEW_REQUIRED', 'Review the DSR receipt allocation or overlapping purchases before closing this shift.');
     if (reading.tank && rows.some(movement => movement.productId !== reading.tank!.productId))
@@ -491,6 +494,7 @@ export async function closeShift(
   organizationId: string,
   id: string,
   input: CloseShiftInput,
+  enteredById: string | null = null,
 ) {
   return safeTransaction(prisma, async (tx) => {
   const shift = await tx.shift.findFirst({
@@ -542,9 +546,11 @@ export async function closeShift(
         `${opening.nozzle.dispenser.code} / ${opening.nozzle.code} testing quantity cannot exceed its ${meterMovement.toLocaleString()} L meter movement.`,
       );
   }
-  const closingAsOf = new Date();
+  const recordedAt = new Date();
+  const closingAsOf = resolveClosingTime(shift.openedAt, input.closedAt, recordedAt);
+  if (input.closedAt) await validateClosingCutoff(tx, organizationId, shift, closingAsOf);
   const [bridgeByTank, varianceSettings] = await Promise.all([
-    stockBridge(tx, organizationId, shift, closingAsOf, true),
+    stockBridge(tx, organizationId, shift, closingAsOf, true, Boolean(input.closedAt)),
     tx.ownerNotificationSettings.findUnique({ where: { organizationId }, select: { stockVarianceTolerance: true } }),
   ]);
   const tolerance = Number(varianceSettings?.stockVarianceTolerance ?? 50);
@@ -854,6 +860,7 @@ export async function closeShift(
         status: "RECONCILIATION_REQUIRED",
         closingCash: new Prisma.Decimal(input.closingCash),
         closedAt,
+        closingTimeAudit: { recordedAt: recordedAt.toISOString(), enteredById, method: input.closedAt ? "SELECTED" : "NOW", closedAt: closedAt.toISOString() },
         notes: input.notes || shift.notes,
       },
       include,
@@ -930,4 +937,17 @@ export async function cancelShift(organizationId: string, userId: string, id: st
     if (claimed.count !== 1) throw new AppError(409, 'SHIFT_NOT_OPEN', 'The shift changed while cancelling. Refresh and review it.');
     return { id: shift.id, shiftNumber: shift.shiftNumber, status: 'CANCELLED' as const };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+
+export async function shiftClosingPreview(organizationId: string, id: string, selected?: string) {
+  return prisma.$transaction(async tx => {
+    const shift = await tx.shift.findFirst({ where: { id, station: { organizationId } }, include });
+    if (!shift) throw new AppError(404, 'SHIFT_NOT_FOUND', 'This shift is unavailable.');
+    if (shift.status !== 'OPEN') throw new AppError(409, 'SHIFT_NOT_OPEN', 'Only an open shift can be previewed for closing.');
+    const at = resolveClosingTime(shift.openedAt, selected);
+    if (selected) await validateClosingCutoff(tx, organizationId, shift, at);
+    const bridge = await stockBridge(tx, organizationId, shift, at, true, Boolean(selected));
+    return { shift: summary({ ...shift, tankReadings: shift.tankReadings.map(reading => ({ ...reading, receivedDuringShift: bridge.get(reading.tankId)?.received ?? new Prisma.Decimal(0), stockBridge: bridge.get(reading.tankId) })) }), closingAt: at };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 }

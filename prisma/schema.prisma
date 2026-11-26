@@ -744,6 +744,7 @@ model Shift {
   openingCashHandover  Json?                     @map("opening_cash_handover")
   openingSource       Json?                     @map("opening_source")
   cancellation        Json?
+  closingTimeAudit    Json?                     @map("closing_time_audit")
   openedAt            DateTime                  @default(now()) @map("opened_at")
   closedAt            DateTime?                 @map("closed_at")
   notes               String?

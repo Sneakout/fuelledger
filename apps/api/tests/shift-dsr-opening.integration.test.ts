@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import { prisma } from '../src/lib/prisma.js';
-import { bootstrap, cancelShift, closeShift, openShift, shiftDetails } from '../src/modules/shifts/service.js';
+import { bootstrap, cancelShift, closeShift, openShift, shiftDetails, shiftClosingPreview } from '../src/modules/shifts/service.js';
 import { shiftAtInstant } from '../src/lib/shift-interval.js';
 import { readLatestTankObservations } from '../src/lib/tank-observations.js';
 import { indiaDayRange } from '../src/lib/india-time.js';
@@ -49,6 +49,7 @@ suite('cancel and replace a shift from confirmed DSR mornings in PostgreSQL', ()
     expect(replacement.nozzleReadings.map((row: any) => Number(row.openingMeter)).sort()).toEqual([20100, 30000]);
     const ms = equipment[0]!;
     await prisma.inventoryLedger.create({ data: { organizationId: org.id, stationId: station.id, tankId: ms.tank.id, productId: ms.product.id, type: 'RECEIPT', quantityDelta: 400, occurredAt: new Date('2026-11-25T04:00:00Z') } });
+    await expect(shiftClosingPreview(org.id, replacement.id, '2026-11-25T06:00:00Z')).rejects.toMatchObject({ code: 'SHIFT_RECEIPT_TIME_REQUIRED' });
     const detail = await shiftDetails(org.id, replacement.id);
     expect(Number(detail.openingStockReview.find(row => row.code === ms.tank.code)!.expectedOpening)).toBe(5000);
     expect(Number(detail.tankReadings.find((row: any) => row.tankId === ms.tank.id)!.stockBridge.received)).toBe(1000);

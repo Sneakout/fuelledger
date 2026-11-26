@@ -124,3 +124,8 @@
   overflow-wrap: anywhere;
 }
 .opening-nozzle-row select:required:invalid { color: var(--muted); }
+
+.shift-closing-time { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px;padding:16px;margin:16px 0;border:1px solid var(--line);border-radius:12px;background:#f6faf8;font-family:inherit; }
+.shift-closing-time p,.shift-closing-time .form-error { grid-column:1/-1;margin:0;font-size:12px;line-height:1.6; }
+.shift-closing-time .field { margin:0;min-width:0; }
+@media(max-width:600px){.shift-closing-time{grid-template-columns:1fr}}

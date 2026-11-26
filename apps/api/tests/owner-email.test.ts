@@ -231,3 +231,13 @@ it('does not backfill daily emails for days before the current consent or suppor
  await queueOwnerEmail({organizationId:'org-a',type:'DAILY_SUMMARY',eventKey:'missed',recordType:'CORE_DAILY_SUMMARY',message:'Yesterday',guard:{date:addIndiaDays(indiaDate(),-1)}});
  expect(mock.createMany).not.toHaveBeenCalled();
 });
+
+it('shows the actual backdated shift times separately from the later closing entry time', () => {
+ const mail=renderOwnerEmail({type:'SHIFT_CLOSED_SUMMARY',message:'Sales: MS: 95 L',ownerName:'Owner',stationName:'Station',date:'2026-11-25',appUrl:'https://fuel.mindvector.tech',shift:{number:8,
+  openedAt:new Date('2026-11-25T06:00:00Z'),closedAt:new Date('2026-11-25T12:00:00Z'),recordedAt:new Date('2026-11-26T06:00:00Z'),managerName:'Owner',staff:[],channels:[],difference:'0',correction:false}});
+ expect(mail.text).toContain('Opened: 25 Nov 2026');
+ expect(mail.text).toContain('Closed: 25 Nov 2026');
+ expect(mail.text).toContain('Closing entered: 26 Nov 2026');
+ expect(mail.html).toContain('Closing entered');
+ expect(mail.text).toContain('IST');
+});

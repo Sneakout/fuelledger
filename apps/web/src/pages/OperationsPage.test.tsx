@@ -3,20 +3,22 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, expect, it, vi } from 'vitest';
 import { OperationsPage } from './OperationsPage';
 
-const { shiftBootstrap, tankReceiptHistory, openShift, cancelShift } = vi.hoisted(() => ({
+const { shiftBootstrap, tankReceiptHistory, openShift, cancelShift, closeShift, shiftClosingPreview } = vi.hoisted(() => ({
   shiftBootstrap: vi.fn(),
   tankReceiptHistory: vi.fn(),
   openShift: vi.fn(),
   cancelShift: vi.fn(),
+  closeShift: vi.fn(),
+  shiftClosingPreview: vi.fn(),
 }));
 vi.mock('../lib/api', () => ({
   ApiRequestError: class extends Error {},
-  api: { shiftBootstrap, tankReceiptHistory, openShift, cancelShift },
+  api: { shiftBootstrap, tankReceiptHistory, openShift, cancelShift, closeShift, shiftClosingPreview },
 }));
 vi.mock('../components/StationProvider', () => ({
   useStation: () => ({ selectedStationId: 'station-1', selectStation: vi.fn() }),
 }));
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 it('carries cash forward, explains withdrawals and preserves the actual count on refresh', async () => {
   const initial = workspace(0);
@@ -198,4 +200,34 @@ it('requires an owner confirmation and reason before cancelling, then loads repl
   expect(cancelShift).toHaveBeenCalledWith('mistake', 'Opened with old readings');
   expect(await screen.findByText('Cancelled shifts')).toBeInTheDocument();
   expect(screen.getByText('Opened with old readings')).toBeInTheDocument();
+});
+
+it('defaults to close now and checks a selected past IST closing time without losing entered counts', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-26T06:00:00Z'));
+  const data: any = workspace(0);
+  const active = { id: 'live', shiftNumber: 2, status: 'OPEN', openedAt: '2026-11-25T06:00:00Z',
+    station: { id: 'station-1', name: 'Test fuel station' }, manager: { name: 'Owner' }, openingCash: 0,
+    nozzleReadings: [], nozzleAssignments: [], tankReadings: [] };
+  data.shifts = [active];
+  shiftBootstrap.mockReset().mockResolvedValue(data);
+  tankReceiptHistory.mockResolvedValue({ receipts: [], nextCursor: null });
+  shiftClosingPreview.mockReset().mockResolvedValue({ shift: active, closingAt: '2026-11-25T12:00:00Z' });
+  closeShift.mockReset().mockResolvedValue({ shift: { id: 'live' } });
+  render(<MemoryRouter><OperationsPage /></MemoryRouter>);
+  const mode = await screen.findByRole('combobox', { name: 'Shift closing time' });
+  expect(mode).toHaveValue('now');
+  fireEvent.change(screen.getByRole('spinbutton', { name: 'Physical cash counted at closing (₹)' }), { target: { value: '250' } });
+  fireEvent.change(mode, { target: { value: 'custom' } });
+  const time = screen.getByLabelText('Closing date and time (IST)');
+  fireEvent.change(time, { target: { value: '2026-11-25T10:00' } });
+  expect(screen.getByText('Closing time cannot be before this shift opened.')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Close & review shift' })).toBeDisabled();
+  fireEvent.change(time, { target: { value: '2026-11-27T10:00' } });
+  expect(screen.getByText('Closing time cannot be in the future.')).toBeInTheDocument();
+  fireEvent.change(time, { target: { value: '2026-11-25T17:30' } });
+  await waitFor(() => expect(shiftClosingPreview).toHaveBeenCalledWith('live', '2026-11-25T12:00:00.000Z'));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Close & review shift' })).toBeEnabled());
+  expect(screen.getByRole('spinbutton', { name: 'Physical cash counted at closing (₹)' })).toHaveValue(250);
+  fireEvent.click(screen.getByRole('button', { name: 'Close & review shift' }));
+  await waitFor(() => expect(closeShift).toHaveBeenCalledWith('live', expect.objectContaining({ closedAt: '2026-11-25T12:00:00.000Z', closingCash: 250 })));
 });

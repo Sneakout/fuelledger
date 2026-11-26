@@ -13,7 +13,7 @@ import {
   type ShiftStation,
 } from "../lib/api";
 import { useStation } from "../components/StationProvider";
-import { formatIndiaDateTime } from "../lib/india-time";
+import { indiaDateTimeLocal, formatIndiaDateTime } from "../lib/india-time";
 const money = (value: string | number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -80,9 +80,11 @@ function Field({
 function ShiftTimes({
   shift,
   closing = false,
+  closingAt,
 }: {
   shift: Shift;
   closing?: boolean;
+  closingAt?: string | undefined;
 }) {
   return (
     <section className="shift-times">
@@ -96,22 +98,28 @@ function ShiftTimes({
       <span>
         <Clock3 />
         <i>
-          <small>Shift closed</small>
+          <small>{closing && !shift.closedAt ? "Closing time" : "Shift closed"}</small>
           <b>
             {shift.closedAt
               ? captured(shift.closedAt)
+              : closingAt ? captured(closingAt)
               : closing
-                ? "Captured when you close this shift"
+                ? "Close now or choose a time below"
                 : "—"}
           </b>
         </i>
       </span>
-      <p>Times are captured by FuelNerve’s server and cannot be edited.</p>
+      <p>Opening time is recorded automatically. The saved closing time is used for sales, stock and shift summaries.{shift.closingTimeAudit?.method === 'SELECTED' ? ` Closing entered ${captured(shift.closingTimeAudit.recordedAt)}.` : ''}</p>
     </section>
   );
 }
 export function OperationsPage() {
   const navigate = useNavigate();
+  const [closingTimeMode, setClosingTimeMode] = useState<'now' | 'custom'>('now');
+  const [closingLocal, setClosingLocal] = useState('');
+  const [closingPreviewLoading, setClosingPreviewLoading] = useState(false);
+  const [closingPreviewError, setClosingPreviewError] = useState('');
+  const closingPreviewRequested = useRef(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelConfirmed, setCancelConfirmed] = useState(false);
   const [cancelNotice, setCancelNotice] = useState("");
@@ -226,6 +234,30 @@ export function OperationsPage() {
     () => data?.shifts.find(s => s.status === "OPEN" && s.station.id === stationId),
     [data, stationId],
   );
+  const closingDate = closingLocal ? new Date(`${closingLocal}:00+05:30`) : null;
+  const selectedClosingAt = closingDate && Number.isFinite(closingDate.getTime()) ? closingDate.toISOString() : undefined;
+  const closingTimeError = closingTimeMode === 'custom' ? !selectedClosingAt ? 'Choose the closing date and time.'
+    : active && closingDate! < new Date(active.openedAt) ? 'Closing time cannot be before this shift opened.'
+    : closingDate!.getTime() > Date.now() ? 'Closing time cannot be in the future.' : '' : '';
+  useEffect(() => {
+    if (!active || (closingTimeMode === 'now' && !closingPreviewRequested.current)) return;
+    if (closingTimeMode === 'custom') closingPreviewRequested.current = true;
+    if (closingTimeError) { setClosingPreviewLoading(false); setClosingPreviewError(''); return; }
+    let current = true;
+    setClosingPreviewLoading(true); setClosingPreviewError('');
+    const timer = window.setTimeout(() => {
+      void api.shiftClosingPreview(active.id, closingTimeMode === 'custom' ? selectedClosingAt : undefined).then(result => {
+        if (current) setData(previous => previous ? { ...previous, shifts: previous.shifts.map(shift => shift.id === active.id ? result.shift : shift) } : previous);
+      }).catch(error => {
+        if (current) setClosingPreviewError(error instanceof Error ? error.message : 'Unable to check stock for this closing time. Try Refresh stock.');
+      }).finally(() => { if (current) setClosingPreviewLoading(false); });
+    }, 300);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [active?.id, closingTimeMode, selectedClosingAt, closingTimeError]);
+  useEffect(() => {
+    setClosingTimeMode('now'); setClosingLocal(''); setClosingPreviewError('');
+    setClosingPreviewLoading(false); closingPreviewRequested.current = false;
+  }, [active?.id]);
   const selected = data?.stations.find((s) => s.id === stationId);
   const config = selected?.configurations[0];
   const priorCash = selected?.lastClosing?.closingCash == null ? null : Number(selected.lastClosing.closingCash);
@@ -288,6 +320,13 @@ export function OperationsPage() {
     if (!validationMessage) setError("");
     setStockRefreshStatus("");
     try {
+      if (active && closingTimeMode === 'custom') {
+        if (closingTimeError) throw new Error(closingTimeError);
+        const result = await api.shiftClosingPreview(active.id, selectedClosingAt);
+        setData(previous => previous ? { ...previous, shifts: previous.shifts.map(shift => shift.id === active.id ? result.shift : shift) } : previous);
+        setClosingPreviewError('');
+        return;
+      }
       const updated = await api.shiftBootstrap(true);
       const station = updated.stations.find(item => item.id === stationId);
       if (!station) throw new Error("This fuel station is no longer available.");
@@ -390,10 +429,14 @@ export function OperationsPage() {
   }
   async function close() {
     if (!active) return;
+    if (closingTimeError || closingPreviewError || closingPreviewLoading) {
+      setError(closingTimeError || closingPreviewError || 'Wait for the closing stock check to finish.'); return;
+    }
     setSaving(true);
     setError("");
     try {
       const { shift } = await api.closeShift(active.id, {
+        closedAt: closingTimeMode === "custom" ? selectedClosingAt : undefined,
         closingCash: closeCash,
         tankReadings: closeTanks,
         nozzleReadings: closeNozzles.map((reading) => {
@@ -468,7 +511,7 @@ export function OperationsPage() {
           </span>
         </div>
         {error && <div className="form-error" role="alert">{error}</div>}
-        <ShiftTimes shift={active} closing />
+        <ShiftTimes shift={active} closing closingAt={closingTimeMode === "custom" ? selectedClosingAt : undefined} />
         {active.openingSource?.tanks.length ? <div className="opening-source-note"><strong>Opening readings · confirmed DSR morning · {active.openingSource.tanks[0]!.date}</strong><p>Closing meters will capture sales since these morning readings. Receipts recorded after the morning stock are included when checking closing stock.</p></div> : null}
         {data.canCancelShift && <details className="shift-cancel-panel">
           <summary>Opened this shift by mistake?</summary>
@@ -480,6 +523,17 @@ export function OperationsPage() {
         <section className="shift-grid">
           <article className="reading-panel">
             <h2>Close the shift</h2>
+            <section className="shift-closing-time">
+              <label className="field"><span>Shift closing time</span><select aria-label="Shift closing time" value={closingTimeMode} disabled={saving} onChange={event => setClosingTimeMode(event.target.value as 'now' | 'custom')}>
+                <option value="now">Close now</option><option value="custom">Choose date and time</option>
+              </select></label>
+              {closingTimeMode === 'custom' && <label className="field"><span>Closing date and time (IST)</span><input type="datetime-local" step="60" value={closingLocal} disabled={saving}
+                min={indiaDateTimeLocal(Math.ceil(new Date(active.openedAt).getTime() / 60000) * 60000)} max={indiaDateTimeLocal()} onChange={event => setClosingLocal(event.target.value)} /></label>}
+              <p>{closingTimeMode === 'now' ? 'FuelNerve will use the time you submit this closing.' : 'Choose when this shift actually ended. Stock and sales will be checked up to this time, even if you enter them later.'} All times are in IST.</p>
+              {closingTimeError && <div className="form-error" role="alert">{closingTimeError}</div>}
+              {closingPreviewError && <div className="form-error" role="alert">{closingPreviewError}</div>}
+              {closingPreviewLoading && <p role="status">Checking stock for the selected closing time…</p>}
+            </section>
             <p>
               FuelNerve compares these readings with the opening figures
               automatically.
@@ -640,7 +694,7 @@ export function OperationsPage() {
             </label>
             <button
               className="primary"
-              disabled={saving || refreshingStock}
+              disabled={saving || refreshingStock || closingPreviewLoading || !!closingTimeError || !!closingPreviewError}
               onClick={() => void close()}
             >
               <LockKeyhole size={17} /> Close & review shift

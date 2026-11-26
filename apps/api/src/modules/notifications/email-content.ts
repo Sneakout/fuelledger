@@ -20,7 +20,7 @@ export async function prepareOwnerEmail(job: OwnerEmailDelivery, ownerName: stri
       eventKey: { startsWith: `shift-summary:${facts.shiftId}:`, not: job.eventKey }, createdAt: { lt: job.createdAt },
     }, orderBy: { acceptedAt: 'desc' }, select: { message: true } });
     shift = {
-      number: facts.shiftNumber, openedAt: facts.openedAt, closedAt: facts.closedAt, managerName: facts.managerName,
+      number: facts.shiftNumber, openedAt: facts.openedAt, closedAt: facts.closedAt, recordedAt: facts.closingRecordedAt, managerName: facts.managerName,
       staff: facts.assignedStaff,
       channels: facts.collections.channels.map(channel => ({ method: channel.paymentMethod,
         expected: channel.expectedAmount.toString(), adjustment: channel.adjustmentAmount.toString(), actual: channel.actualAmount.toString(), difference: channel.varianceAmount.toString() })),

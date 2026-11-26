@@ -356,7 +356,7 @@ export async function reconcile(
         organizationId,
         stationId: shift.station.id,
         createdById: userId,
-        journalDate: new Date(),
+        journalDate: shift.closedAt ?? new Date(),
         reference: `RECON-${shift.id.slice(-8)}`,
         description: `Shift #${shift.shiftNumber} payment allocation`,
         sourceType: "SHIFT_RECONCILIATION",

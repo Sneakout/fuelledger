@@ -332,6 +332,7 @@ export const api = {
       body: JSON.stringify(input),
     }),
   cancelShift: (id: string, reason: string) => request<{ shift: { id: string; shiftNumber: number; status: string } }>(`/shifts/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) }),
+  shiftClosingPreview: (id: string, closedAt?: string) => request<{ shift: Shift; closingAt: string }>(`/shifts/${encodeURIComponent(id)}/closing-preview${closedAt ? `?closedAt=${encodeURIComponent(closedAt)}` : ''}`, { cache: 'no-store' }),
   closeShift: (id: string, input: ShiftCloseForm) =>
     request<{ shift: Shift }>(`/shifts/${id}/close`, {
       method: "POST",
@@ -845,6 +846,7 @@ export type ShiftOpenForm = {
   notes?: string;
 };
 export type ShiftCloseForm = {
+  closedAt?: string | undefined;
   closingCash: number;
   tankReadings: Reading[];
   nozzleReadings: ClosingNozzleReading[];
@@ -934,6 +936,7 @@ export type ShiftReceipt = ShiftDelivery & {
   timingMismatch: boolean;
 };
 export type Shift = {
+  closingTimeAudit?: { recordedAt: string; enteredById: string | null; method: "NOW" | "SELECTED"; closedAt: string } | null;
   openingSource?: ShiftOpeningReadings | null;
   openingCashHandover?: { previousShiftId: string | null; previousClosingCash: string | null; added: string; removed: string; bankDeposited?: string | null; otherWithdrawals?: string | null; expectedOpening: string | null; actualOpening: string; difference: string | null; reason: string | null; enteredById: string | null; recordedAt: string } | null;
   id: string;
